@@ -17,6 +17,31 @@ def init_db():
             updated_at TEXT    NOT NULL
         )
     """)
+    conn.execute("""
+        CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
+            content, tags,
+            content='memories', content_rowid='id',
+            tokenize='trigram'
+        )
+    """)
+    conn.execute("""
+        CREATE TRIGGER IF NOT EXISTS memories_ai AFTER INSERT ON memories BEGIN
+            INSERT INTO memories_fts(rowid, content, tags) VALUES (new.id, new.content, new.tags);
+        END
+    """)
+    conn.execute("""
+        CREATE TRIGGER IF NOT EXISTS memories_ad AFTER DELETE ON memories BEGIN
+            INSERT INTO memories_fts(memories_fts, rowid, content, tags) VALUES ('delete', old.id, old.content, old.tags);
+        END
+    """)
+    conn.execute("""
+        CREATE TRIGGER IF NOT EXISTS memories_au AFTER UPDATE ON memories BEGIN
+            INSERT INTO memories_fts(memories_fts, rowid, content, tags) VALUES ('delete', old.id, old.content, old.tags);
+            INSERT INTO memories_fts(rowid, content, tags) VALUES (new.id, new.content, new.tags);
+        END
+    """)
+    # 同步已有数据到 FTS 索引（幂等）
+    conn.execute("INSERT OR IGNORE INTO memories_fts(memories_fts) VALUES ('rebuild')")
     conn.commit()
     conn.close()
 
@@ -46,12 +71,21 @@ def list_all(limit: int = 50) -> list[dict]:
 
 def search(keyword: str, limit: int = 10) -> list[dict]:
     conn = sqlite3.connect(DB_PATH)
-    like = f"%{keyword}%"
-    rows = conn.execute(
-        "SELECT id, content, tags, importance, created_at FROM memories "
-        "WHERE content LIKE ? OR tags LIKE ? ORDER BY importance DESC LIMIT ?",
-        (like, like, limit),
-    ).fetchall()
+    try:
+        rows = conn.execute(
+            "SELECT m.id, m.content, m.tags, m.importance, m.created_at "
+            "FROM memories_fts f JOIN memories m ON f.rowid = m.id "
+            "WHERE memories_fts MATCH ? "
+            "ORDER BY m.importance DESC, rank LIMIT ?",
+            (keyword, limit),
+        ).fetchall()
+    except Exception:
+        like = f"%{keyword}%"
+        rows = conn.execute(
+            "SELECT id, content, tags, importance, created_at FROM memories "
+            "WHERE content LIKE ? OR tags LIKE ? ORDER BY importance DESC LIMIT ?",
+            (like, like, limit),
+        ).fetchall()
     conn.close()
     return [{"id": r[0], "content": r[1], "tags": r[2], "importance": r[3], "created_at": r[4]} for r in rows]
 
