@@ -3,12 +3,13 @@ import json
 from pathlib import Path
 from rich.console import Console
 from rich.panel import Panel
-from rich.prompt import Prompt
 from rich.table import Table
 
 from core.llm import stream_chat, call_with_tools
 from core.context import build_messages, load_config
 from core.session import Session
+from core.input import prompt as get_input
+from core.compressor import should_compress, compress
 from memory.store import init_db, save, list_all, search, delete
 from memory.extract import extract
 from memory.retrieve import for_context, format_for_prompt
@@ -21,7 +22,8 @@ console = Console()
 def _welcome(skill_count: int):
     console.print(Panel(
         f"[bold cyan]Archer[/bold cyan]  ·  枫弋专属代理\n"
-        f"[dim]已加载 {skill_count} 个技能  ·  /help 查看命令  ·  Ctrl+C 退出[/dim]",
+        f"[dim]已加载 {skill_count} 个技能  ·  /help 查看命令\n"
+        f"Enter 换行  ·  Alt+Enter 发送  ·  Ctrl+C 退出[/dim]",
         border_style="cyan",
         padding=(0, 2),
     ))
@@ -251,8 +253,19 @@ def run():
     _welcome(len(skills))
 
     while True:
+        # ── 自动压缩（超过阈值时触发）──────────────────────
+        if should_compress(session.history):
+            console.print("[dim]对话历史过长，正在压缩…[/dim]")
+            try:
+                session.history = compress(session.history)
+                console.print("[dim]压缩完成，上下文已精简。[/dim]")
+            except Exception as e:
+                console.print(f"[dim]压缩失败，跳过：{e}[/dim]")
+
+        # ── 多行输入 ────────────────────────────────────────
+        console.print()
         try:
-            user_input = Prompt.ask("\n[bold green]你[/bold green]").strip()
+            user_input = get_input()
         except (KeyboardInterrupt, EOFError):
             _auto_extract(session.history)
             session.save()
@@ -285,7 +298,7 @@ def run():
                     console.print(f"[yellow]未知命令：{parts[0]}，输入 /help 查看。[/yellow]")
             continue
 
-        # 检索记忆注入
+        # ── 检索记忆注入 ────────────────────────────────────
         db_mems = for_context(user_input, limit=cfg["memory"]["max_context_memories"])
         mem_block = format_for_prompt(db_mems)
         messages = build_messages(session.history, user_input, cfg, db_memories=mem_block)
