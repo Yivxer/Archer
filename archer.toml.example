@@ -1,7 +1,8 @@
 [api]
-base_url = "https://api.deepseek.com/v1"
-api_key  = "sk-xxxxxxxxxxxxxxxx"
-model    = "deepseek-chat"
+base_url     = "https://api.deepseek.com/v1"
+api_key      = "sk-xxxxxxxxxxxxxxxx"
+model        = "deepseek-chat"
+vision_model = "deepseek-chat"   # 支持图片的模型
 
 [persona]
 name        = "Archer"

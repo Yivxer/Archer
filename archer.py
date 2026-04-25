@@ -10,6 +10,7 @@ from core.context import build_messages, load_config
 from core.session import Session
 from core.input import prompt as get_input
 from core.compressor import should_compress, compress
+from core.file_ref import parse_refs, build_user_content, ref_summary
 from memory.store import init_db, save, list_all, search, delete
 from memory.extract import extract
 from memory.retrieve import for_context, format_for_prompt
@@ -298,10 +299,23 @@ def run():
                     console.print(f"[yellow]未知命令：{parts[0]}，输入 /help 查看。[/yellow]")
             continue
 
+        # ── @ 文件引用解析 ──────────────────────────────────
+        user_text, refs = parse_refs(user_input)
+        if refs:
+            summary = ref_summary(refs)
+            console.print(f"[dim]附件：{summary}[/dim]")
+        user_content = build_user_content(user_text, refs)
+
         # ── 检索记忆注入 ────────────────────────────────────
-        db_mems = for_context(user_input, limit=cfg["memory"]["max_context_memories"])
+        db_mems   = for_context(user_text, limit=cfg["memory"]["max_context_memories"])
         mem_block = format_for_prompt(db_mems)
-        messages = build_messages(session.history, user_input, cfg, db_memories=mem_block)
+        messages  = build_messages(session.history, user_content, cfg, db_memories=mem_block)
+
+        # ── 图片时切换 vision 模型 ──────────────────────────
+        has_images = any(r["type"] == "image" for r in refs)
+        if has_images:
+            vision_model = cfg["api"].get("vision_model", cfg["api"]["model"])
+            console.print(f"[dim]图片模式 → {vision_model}[/dim]")
 
         console.print("\n[bold cyan]Archer[/bold cyan]")
         try:
@@ -317,7 +331,13 @@ def run():
             console.print(f"[red]错误：{e}[/red]")
             continue
 
-        session.add(user_input, full_response)
+        # 历史只存纯文本（图片数据不存入，避免历史膨胀）
+        history_user = user_text
+        if refs:
+            names = [r["name"] for r in refs if r["type"] != "error"]
+            if names:
+                history_user += f"\n[附件：{', '.join(names)}]"
+        session.add(history_user, full_response)
 
 if __name__ == "__main__":
     run()
