@@ -5,8 +5,8 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from core.llm import stream_chat, call_with_tools
-from core.context import build_messages, load_config
+from core.llm import stream_chat, call_with_tools, load_config
+from core.context import build_messages
 from core.session import Session
 from core.input import prompt as get_input
 from core.compressor import should_compress, compress
@@ -23,7 +23,7 @@ console = Console()
 def _welcome(skill_count: int):
     console.print(Panel(
         f"[bold cyan]Archer[/bold cyan]  ·  枫弋专属代理\n"
-        f"[dim]已加载 {skill_count} 个技能  ·  /help 查看命令\n"
+        f"[dim]已加载 {skill_count} 个技能  ·  /help 查看命令  ·  Tab 补全命令\n"
         f"Enter 换行  ·  Alt+Enter 发送  ·  Ctrl+C 退出[/dim]",
         border_style="cyan",
         padding=(0, 2),
@@ -33,8 +33,10 @@ def _welcome(skill_count: int):
 def _help():
     rows = [
         ("/help",                       "查看命令"),
+        ("/status",                     "查看当前状态（记忆数 / 技能数 / 历史轮数）"),
         ("/save",                       "保存当前会话"),
         ("/clear",                      "清空对话历史"),
+        ("/compact",                    "手动压缩对话历史"),
         ("/memory list",                "列出所有记忆"),
         ("/memory search <词>",         "搜索记忆"),
         ("/memory add <内容>",          "手动添加记忆"),
@@ -47,6 +49,19 @@ def _help():
     ]
     for cmd, desc in rows:
         console.print(f"  [cyan]{cmd:<32}[/cyan]{desc}")
+
+# ── /status ───────────────────────────────────────────────
+def _status(session, skills: dict, cfg: dict):
+    from memory.store import list_all as mem_list_all
+    mem_count     = len(mem_list_all(999))
+    history_turns = len(session.history) // 2
+    model         = cfg["api"]["model"]
+    threshold     = 20
+    console.print(f"\n  [bold cyan]Archer 状态[/bold cyan]")
+    console.print(f"  模型        {model}")
+    console.print(f"  技能        {len(skills)} 个：{', '.join(sorted(skills.keys()))}")
+    console.print(f"  记忆库      {mem_count} 条")
+    console.print(f"  对话历史    {history_turns} 轮（{len(session.history)} 条消息，超 {threshold} 条自动压缩）")
 
 # ── /memory 子命令 ─────────────────────────────────────────
 def _memory_list():
@@ -175,7 +190,7 @@ def _handle_skill(parts: list[str], skills: dict) -> dict:
     return skills
 
 # ── 技能调用循环 ───────────────────────────────────────────
-def _run_with_tools(messages: list[dict], skills: dict) -> str:
+def _run_with_tools(messages: list[dict], skills: dict, model: str = "") -> str:
     """
     function calling 流程：
     1. 非流式调用，携带 tools
@@ -183,13 +198,12 @@ def _run_with_tools(messages: list[dict], skills: dict) -> str:
     3. 最终回复用流式输出
     """
     tools = get_tools(skills)
-    msg = call_with_tools(messages, tools)
+    msg = call_with_tools(messages, tools, model=model)
 
     # 无技能调用 → 直接流式输出
     if not msg.tool_calls:
-        messages_plain = messages  # 不带 tools，重新流式
         full = ""
-        for chunk in stream_chat(messages_plain):
+        for chunk in stream_chat(messages, model=model):
             console.print(chunk, end="", markup=False)
             full += chunk
         console.print()
@@ -216,13 +230,13 @@ def _run_with_tools(messages: list[dict], skills: dict) -> str:
         messages.append({
             "role": "tool",
             "tool_call_id": tc.id,
-            "content": result,
+            "content": str(result),
         })
 
     # 技能结果注入后，流式输出最终回复
     console.print()
     full = ""
-    for chunk in stream_chat(messages):
+    for chunk in stream_chat(messages, model=model):
         console.print(chunk, end="", markup=False)
         full += chunk
     console.print()
@@ -289,6 +303,18 @@ def run():
                 case "/clear":
                     session.clear()
                     console.print("[dim]历史已清空。[/dim]")
+                case "/compact":
+                    if len(session.history) < 2:
+                        console.print("[dim]对话历史不足，无需压缩。[/dim]")
+                    else:
+                        console.print("[dim]正在压缩…[/dim]")
+                        try:
+                            session.history = compress(session.history)
+                            console.print(f"[dim]压缩完成，当前 {len(session.history)} 条消息。[/dim]")
+                        except Exception as e:
+                            console.print(f"[red]压缩失败：{e}[/red]")
+                case "/status":
+                    _status(session, skills, cfg)
                 case "/memory":
                     _handle_memory(parts)
                 case "/skill":
@@ -296,7 +322,7 @@ def run():
                 case "/help":
                     _help()
                 case _:
-                    console.print(f"[yellow]未知命令：{parts[0]}，输入 /help 查看。[/yellow]")
+                    console.print(f"[yellow]未知命令：{parts[0]}，输入 /help 或按 Tab 查看。[/yellow]")
             continue
 
         # ── @ 文件引用解析 ──────────────────────────────────
@@ -313,17 +339,18 @@ def run():
 
         # ── 图片时切换 vision 模型 ──────────────────────────
         has_images = any(r["type"] == "image" for r in refs)
+        active_model = ""
         if has_images:
-            vision_model = cfg["api"].get("vision_model", cfg["api"]["model"])
-            console.print(f"[dim]图片模式 → {vision_model}[/dim]")
+            active_model = cfg["api"].get("vision_model", cfg["api"]["model"])
+            console.print(f"[dim]图片模式 → {active_model}[/dim]")
 
         console.print("\n[bold cyan]Archer[/bold cyan]")
         try:
             if skills:
-                full_response = _run_with_tools(messages, skills)
+                full_response = _run_with_tools(messages, skills, model=active_model)
             else:
                 full_response = ""
-                for chunk in stream_chat(messages):
+                for chunk in stream_chat(messages, model=active_model):
                     console.print(chunk, end="", markup=False)
                     full_response += chunk
                 console.print()
