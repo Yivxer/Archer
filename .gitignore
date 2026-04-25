@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.env
+.venv/
+
+# 含 API key，不进 git
+archer.toml
+
+# 运行时数据
+memory/sessions/
+memory/archer.db

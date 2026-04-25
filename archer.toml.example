@@ -1,0 +1,19 @@
+[api]
+base_url = "https://api.deepseek.com/v1"
+api_key  = "sk-xxxxxxxxxxxxxxxx"
+model    = "deepseek-chat"
+
+[persona]
+name        = "Archer"
+soul_path   = "/path/to/your/SOUL.md"
+memory_path = "/path/to/your/MEMORY.md"
+
+[memory]
+db_path              = "/path/to/Archer/memory/archer.db"
+max_context_memories = 5
+
+[ui]
+stream = true
+
+[obsidian]
+vault_path = "/path/to/your/obsidian/vault"
