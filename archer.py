@@ -99,19 +99,23 @@ def _help():
 
 def _status(session, skills: dict, cfg: dict):
     from memory.store import list_all as mem_list_all
+    from core.artifacts import dir_size, fmt_size
     mem_count     = len(mem_list_all(999))
+    pending_count = count_pending()
     history_turns = len(session.history) // 2
     model         = cfg["api"]["model"]
     modes         = cfg.get("persona", {}).get("modes", {})
     current_mode  = cfg["persona"].get("current_mode", cfg["persona"].get("default_mode", "coach"))
     mode_name     = modes.get(current_mode, {}).get("name", current_mode)
+    art_size      = fmt_size(dir_size())
     console.print(f"\n  [bold cyan]Archer 状态[/bold cyan]")
     console.print(f"  模型        {model}")
     console.print(f"  模式        {mode_name}（{current_mode}）")
     console.print(f"  Token       {_usage_status(cfg)}")
     console.print(f"  技能        {len(skills)} 个：{', '.join(sorted(skills.keys()))}")
-    console.print(f"  记忆库      {mem_count} 条")
+    console.print(f"  记忆库      {mem_count} 条" + (f"  [yellow]（{pending_count} 条待确认）[/yellow]" if pending_count else ""))
     console.print(f"  对话历史    {history_turns} 轮（{len(session.history)} 条消息）")
+    console.print(f"  Artifacts   {art_size}（位于 .artifacts/）")
 
 def _handle_model(parts: list[str], cfg: dict):
     models  = cfg["api"].get("models", [cfg["api"]["model"]])
