@@ -7,9 +7,9 @@
 ## 安全 / 稳定
 
 - [ ] `call_with_tools` 非流式调用期间无进度反馈（spinner 缺失）
-- [ ] 技能 `run()` 无 timeout，长时 shell/网络请求会卡死 REPL → Step 1
-- [ ] 技能异常被 `str(result)` 吞掉，LLM 无法判断错误类型 → Step 1
-- [ ] 技能调用结果无长度上限，大文件/长网页直接进入 messages → Step 1/4
+- [x] 技能 `run()` 无 timeout，长时 shell/网络请求会卡死 REPL → **Step 1 完成**
+- [x] 技能异常被 `str(result)` 吞掉，LLM 无法判断错误类型 → **Step 1 完成**
+- [x] 技能调用结果无长度上限，大文件/长网页直接进入 messages → **Step 1 完成**
 - [ ] `installer.py` 从 URL 安装技能无隔离、无代码审查 → Step 2
 - [ ] `shell` 技能无 denylist，`rm -rf ~` 等危险命令可直接执行 → Step 2
 - [ ] `file_ops write` 写入路径无限制 → Step 2

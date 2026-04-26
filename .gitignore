@@ -11,3 +11,4 @@ archer.toml
 # 运行时数据
 memory/sessions/
 memory/archer.db
+.artifacts/
