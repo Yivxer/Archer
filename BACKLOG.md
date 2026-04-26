@@ -16,7 +16,7 @@
 
 ## 记忆系统
 
-- [ ] `_PENDING_MEMORIES` 是内存全局变量，进程崩溃后丢失 → Step 3
+- [x] `_PENDING_MEMORIES` 是内存全局变量，进程崩溃后丢失 → **Step 3 完成**
 - [ ] 记忆相似度检测用字面 SequenceMatcher（无语义），误报率高 → Backlog/P2
 - [ ] `memory/store.py search()`：FTS5 trigram 搜索 ≤2 字符时返回空列表但不抛异常，LIKE 降级失效；应在 rows 为空时主动 fallback → Step 3 或单独修
 - [ ] `retrieve.py` for_context 用 LIMIT 硬截断，无相关性排序 → P1

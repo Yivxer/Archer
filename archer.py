@@ -17,14 +17,17 @@ from core.compressor import should_compress, compress
 from core.file_ref import parse_refs, build_user_content, ref_summary
 from core.tool_runtime import invoke as runtime_invoke
 from core.policy import check as policy_check, Decision
-from memory.store import init_db, save, list_all, search, delete, update as update_memory, archive as archive_memory
+from memory.store import (
+    init_db, save, list_all, search, delete,
+    update as update_memory, archive as archive_memory,
+    add_pending, list_pending, count_pending, accept_pending, reject_pending,
+)
 from memory.extract import extract
 from memory.retrieve import for_context, format_for_prompt
 from skills.loader import load_skills, get_tools
 from skills.installer import install as skill_install, remove as skill_remove
 
 console = Console()
-_PENDING_MEMORIES: list[dict] = []
 
 _CMDS = frozenset({
     "/help", "/status", "/mode", "/model", "/reflect", "/sessions",
@@ -227,70 +230,60 @@ def _memory_add(content: str):
 def _stage_memories(mems: list[dict], source: str = "auto", silent: bool = False):
     if not mems:
         return
+    count = 0
     for m in mems:
-        item = dict(m)
-        item["source"] = source
-        _PENDING_MEMORIES.append(item)
+        add_pending(
+            content=m.get("content", ""),
+            type=m.get("type", "insight"),
+            importance=m.get("importance", 3),
+            tags=m.get("tags", ""),
+            source=source,
+        )
+        count += 1
     if not silent:
-        console.print(f"[dim]提议写入 {len(mems)} 条记忆，使用 /memory pending 查看。[/dim]")
+        console.print(f"[dim]提议写入 {count} 条记忆，使用 /memory pending 查看。[/dim]")
 
 def _memory_pending():
-    if not _PENDING_MEMORIES:
+    pends = list_pending()
+    if not pends:
         console.print("[dim]没有待确认记忆。[/dim]")
         return
     t = Table(show_header=True, header_style="bold cyan", box=None)
-    t.add_column("编号", style="dim", width=4)
+    t.add_column("ID", style="dim", width=4)
     t.add_column("重要", width=6)
     t.add_column("类型", style="cyan", width=12)
     t.add_column("内容")
-    for i, m in enumerate(_PENDING_MEMORIES, 1):
+    for p in pends:
         t.add_row(
-            str(i),
-            "★" * min(int(m.get("importance", 3)), 5),
-            m.get("type", "insight"),
-            m.get("content", ""),
+            str(p["id"]),
+            "★" * min(int(p.get("importance", 3)), 5),
+            p.get("type", "insight"),
+            p.get("content", ""),
         )
     console.print(t)
-    console.print("[dim]确认：/memory accept <编号|all>  丢弃：/memory reject <编号|all>[/dim]")
-
-def _pop_pending(arg: str) -> list[dict]:
-    if not _PENDING_MEMORIES:
-        return []
-    arg = arg.strip() or "all"
-    if arg == "all":
-        items = list(_PENDING_MEMORIES)
-        _PENDING_MEMORIES.clear()
-        return items
-    if not arg.isdigit():
-        return []
-    idx = int(arg) - 1
-    if idx < 0 or idx >= len(_PENDING_MEMORIES):
-        return []
-    return [_PENDING_MEMORIES.pop(idx)]
+    console.print("[dim]确认：/memory accept <ID|all>  丢弃：/memory reject <ID|all>[/dim]")
 
 def _memory_accept(arg: str):
-    items = _pop_pending(arg)
-    if not items:
+    arg = arg.strip() or "all"
+    if arg != "all" and not arg.isdigit():
+        console.print("[yellow]用法：/memory accept <ID|all>[/yellow]")
+        return
+    ids = accept_pending(arg)
+    if not ids:
         console.print("[yellow]没有匹配的待确认记忆。[/yellow]")
         return
-    ids = []
-    for m in items:
-        mid = save(
-            content=m.get("content", ""),
-            tags=m.get("tags", ""),
-            type=m.get("type", "insight"),
-            importance=m.get("importance", 3),
-            source=m.get("source", "pending"),
-        )
-        ids.append(str(mid))
-    console.print(f"[green]已写入 {len(ids)} 条记忆：{', '.join(ids)}[/green]")
+    console.print(f"[green]已写入 {len(ids)} 条记忆：{', '.join(str(i) for i in ids)}[/green]")
 
 def _memory_reject(arg: str):
-    items = _pop_pending(arg)
-    if not items:
+    arg = arg.strip() or "all"
+    if arg != "all" and not arg.isdigit():
+        console.print("[yellow]用法：/memory reject <ID|all>[/yellow]")
+        return
+    n = reject_pending(arg)
+    if n == 0:
         console.print("[yellow]没有匹配的待确认记忆。[/yellow]")
         return
-    console.print(f"[dim]已丢弃 {len(items)} 条待确认记忆。[/dim]")
+    console.print(f"[dim]已丢弃 {n} 条待确认记忆。[/dim]")
 
 def _memory_update(arg: str):
     mid, _, content = arg.partition(" ")
