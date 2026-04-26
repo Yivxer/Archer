@@ -2,6 +2,7 @@
 from difflib import SequenceMatcher
 import json
 import sys
+import threading
 from pathlib import Path
 from rich.console import Console
 from rich.live import Live
@@ -31,8 +32,11 @@ console = Console()
 
 _CMDS = frozenset({
     "/help", "/status", "/mode", "/model", "/reflect", "/sessions",
-    "/save", "/clear", "/compact", "/exit", "/memory", "/skill",
+    "/save", "/clear", "/compact", "/exit", "/memory", "/skill", "/themes",
 })
+
+# ── 后台提炼状态 ────────────────────────────────────────────────────────────────
+_extract_thread: threading.Thread | None = None
 
 _RING_TOP = "[#5ee8e0]◜[/#5ee8e0][#1e7be8]◝[/#1e7be8]"
 _RING_BOT = "[#e8212a]◟[/#e8212a][#f5612a]◞[/#f5612a]"
@@ -242,6 +246,9 @@ def _reflect(session):
     # ── 进入 session history，允许追问 ────────────────────────────
     session.add("[/reflect]", _reflect_to_text(data))
     console.print("[dim]复盘已加入对话历史，可直接追问。[/dim]")
+
+    # ── 后台提炼对话记忆（补充 reflect 结构化输出的遗漏）─────────────
+    _bg_extract(session.history[-8:])
 
 def _memory_list():
     mems = list_all(50)
@@ -480,7 +487,7 @@ def _handle_themes(parts: list[str]):
     console.print("[dim]/themes detect 归纳新主题 · /themes <ID> 查看详情[/dim]")
 
 
-def _handle_memory(parts: list[str]):
+def _handle_memory(parts: list[str], session=None):
     sub = parts[1] if len(parts) > 1 else ""
     arg = " ".join(parts[2:])
     match sub:
@@ -494,8 +501,15 @@ def _handle_memory(parts: list[str]):
         case "archive": _memory_archive(arg)
         case "delete": _memory_delete(arg)
         case "review": _memory_review()
+        case "extract":
+            history = session.history if session else []
+            if len(history) < 2:
+                console.print("[dim]对话历史不足，无法提炼。[/dim]")
+            else:
+                _wait_for_extract()
+                _auto_extract(history, silent=False)
         case _:
-            console.print("[dim]子命令：list · search <词> · add <内容> · pending · accept · reject · update · archive · delete · review[/dim]")
+            console.print("[dim]子命令：list · search <词> · add <内容> · pending · accept · reject · update · archive · delete · review · extract[/dim]")
 
 def _skill_list(skills: dict):
     if not skills:
@@ -660,6 +674,24 @@ def _auto_extract(history: list[dict], silent: bool = False):
     except Exception:
         pass
 
+
+def _bg_extract(history: list[dict]):
+    """在后台线程中静默提炼，不阻塞 REPL。若上一次提炼仍在进行则跳过。"""
+    global _extract_thread
+    if _extract_thread and _extract_thread.is_alive():
+        return
+    snapshot = list(history)
+    _extract_thread = threading.Thread(
+        target=_auto_extract, args=(snapshot, True), daemon=True
+    )
+    _extract_thread.start()
+
+
+def _wait_for_extract(timeout: float = 12.0):
+    """退出前等待后台提炼线程结束，最多等待 timeout 秒。"""
+    if _extract_thread and _extract_thread.is_alive():
+        _extract_thread.join(timeout=timeout)
+
 def run():
     init_db()
     cfg = load_config()
@@ -694,6 +726,10 @@ def run():
                 usage=_usage_status(cfg),
             )
         except (KeyboardInterrupt, EOFError):
+            console.print()
+            _wait_for_extract()
+            if len(session.history) >= 2:
+                _auto_extract(session.history, silent=True)
             session.save()
             console.print("[dim]已退出。[/dim]")
             break
@@ -705,6 +741,10 @@ def run():
         if user_input.startswith("/") and parts[0] in _CMDS:
             match parts[0]:
                 case "/exit":
+                    if len(session.history) >= 2:
+                        console.print("[dim]正在提炼本次会话记忆…[/dim]")
+                        _wait_for_extract()
+                        _auto_extract(session.history, silent=False)
                     saved = session.save()
                     console.print(f"[dim]会话已保存 → {saved}[/dim]")
                     break
@@ -726,7 +766,7 @@ def run():
                 case "/status":
                     _status(session, skills, cfg)
                 case "/memory":
-                    _handle_memory(parts)
+                    _handle_memory(parts, session)
                 case "/skill":
                     skills = _handle_skill(parts, skills)
                 case "/model":
@@ -792,8 +832,8 @@ def run():
         session.add(history_user, full_response)
         turn_count += 1
 
-        if turn_count % 3 == 0 and len(session.history) >= 6:
-            _auto_extract(session.history[-6:], silent=False)
+        if turn_count % 6 == 0 and len(session.history) >= 6:
+            _bg_extract(session.history[-8:])
 
 if __name__ == "__main__":
     run()

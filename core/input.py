@@ -69,6 +69,7 @@ _COMMANDS = [
     ("/memory archive ",      "归档记忆：/memory archive <ID>"),
     ("/memory delete ",       "删除记忆：/memory delete <ID>"),
     ("/memory review",        "体检记忆库"),
+    ("/memory extract",       "立即提炼当前会话记忆"),
     ("/skill list",           "列出已安装技能"),
     ("/skill info ",          "技能详情：/skill info <名字>"),
     ("/skill install ",       "安装技能：/skill install <路径或URL>"),
