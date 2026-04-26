@@ -92,6 +92,29 @@ def init_db():
         conn.execute("ALTER TABLE pending_memories ADD COLUMN confidence REAL DEFAULT 0.7")
     except Exception:
         pass
+    # themes：跨会话行为模式归纳
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS themes (
+            id               INTEGER PRIMARY KEY AUTOINCREMENT,
+            name             TEXT    NOT NULL,
+            description      TEXT    DEFAULT '',
+            category         TEXT    DEFAULT 'behavior',
+            occurrence_count INTEGER DEFAULT 1,
+            last_seen_at     TEXT    NOT NULL,
+            created_at       TEXT    NOT NULL
+        )
+    """)
+    # memory_links：记忆与主题的多对多关联
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS memory_links (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            memory_id   INTEGER NOT NULL,
+            theme_id    INTEGER NOT NULL,
+            strength    REAL    DEFAULT 0.5,
+            created_at  TEXT    NOT NULL,
+            UNIQUE(memory_id, theme_id)
+        )
+    """)
     conn.commit()
     conn.close()
 
@@ -355,3 +378,91 @@ def reject_pending(pid: int | str) -> int:
     conn.commit()
     conn.close()
     return n
+
+
+# ── Themes（跨会话模式归纳）─────────────────────────────────────────────────────
+
+def save_theme(name: str, description: str = "", category: str = "behavior") -> int:
+    """保存或更新一个主题，重名时增加 occurrence_count。返回 theme ID。"""
+    name = name.strip()
+    conn = sqlite3.connect(DB_PATH)
+    existing = conn.execute(
+        "SELECT id FROM themes WHERE name = ? LIMIT 1", (name,)
+    ).fetchone()
+    if existing:
+        conn.execute(
+            "UPDATE themes SET occurrence_count = occurrence_count + 1, "
+            "last_seen_at = ?, description = CASE WHEN ? != '' THEN ? ELSE description END "
+            "WHERE id = ?",
+            (_now(), description, description, existing[0]),
+        )
+        conn.commit()
+        tid = existing[0]
+    else:
+        cur = conn.execute(
+            "INSERT INTO themes (name, description, category, occurrence_count, last_seen_at, created_at) "
+            "VALUES (?, ?, ?, 1, ?, ?)",
+            (name, description.strip(), category, _now(), _now()),
+        )
+        conn.commit()
+        tid = cur.lastrowid
+    conn.close()
+    return tid
+
+
+def list_themes(limit: int = 20) -> list[dict]:
+    conn = sqlite3.connect(DB_PATH)
+    rows = conn.execute(
+        "SELECT id, name, description, category, occurrence_count, last_seen_at "
+        "FROM themes ORDER BY occurrence_count DESC, last_seen_at DESC LIMIT ?",
+        (limit,),
+    ).fetchall()
+    conn.close()
+    return [
+        {"id": r[0], "name": r[1], "description": r[2],
+         "category": r[3], "occurrence_count": r[4], "last_seen_at": r[5]}
+        for r in rows
+    ]
+
+
+def link_memory_to_theme(memory_id: int, theme_id: int, strength: float = 0.5):
+    """关联记忆与主题，已存在则更新 strength。"""
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute(
+        "INSERT INTO memory_links (memory_id, theme_id, strength, created_at) VALUES (?, ?, ?, ?) "
+        "ON CONFLICT(memory_id, theme_id) DO UPDATE SET strength = excluded.strength",
+        (memory_id, theme_id, float(strength), _now()),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_theme_memories(theme_id: int, limit: int = 10) -> list[dict]:
+    conn = sqlite3.connect(DB_PATH)
+    rows = conn.execute(
+        "SELECT m.id, m.content, m.tags, m.type, m.importance, m.confidence, m.valid_until, ml.strength "
+        "FROM memory_links ml JOIN memories m ON ml.memory_id = m.id "
+        "WHERE ml.theme_id = ? AND m.status = 'active' "
+        "ORDER BY ml.strength DESC, m.importance DESC LIMIT ?",
+        (theme_id, limit),
+    ).fetchall()
+    conn.close()
+    return [
+        {"id": r[0], "content": r[1], "tags": r[2], "type": r[3],
+         "importance": r[4], "confidence": r[5], "valid_until": r[6], "strength": r[7]}
+        for r in rows
+    ]
+
+
+def get_memories_for_detection(limit: int = 50) -> list[dict]:
+    """返回用于主题检测的核心记忆（importance >= 3，排除 reflection/context）。"""
+    conn = sqlite3.connect(DB_PATH)
+    rows = conn.execute(
+        "SELECT id, content, tags, type, importance, confidence, valid_until FROM memories "
+        "WHERE status = 'active' AND importance >= 3 "
+        "AND type NOT IN ('reflection', 'context') "
+        "ORDER BY importance DESC, updated_at DESC LIMIT ?",
+        (limit,),
+    ).fetchall()
+    conn.close()
+    return [_row_to_dict(r) for r in rows]

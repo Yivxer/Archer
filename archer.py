@@ -409,6 +409,77 @@ def _memory_review():
     console.print(t)
     console.print("[dim]只做提示，不会自动删除。确认后可用 /memory delete <ID> 清理。[/dim]")
 
+def _handle_themes(parts: list[str]):
+    from memory.patterns import detect_and_save, themes_summary, theme_detail
+
+    sub = parts[1] if len(parts) > 1 else ""
+
+    if sub == "detect":
+        console.print("[dim]正在分析记忆库，识别行为模式…[/dim]")
+        try:
+            saved = detect_and_save()
+        except Exception as e:
+            console.print(f"[red]检测失败：{e}[/red]")
+            return
+        if not saved:
+            console.print("[dim]记忆量不足或未发现新主题。[/dim]")
+            return
+        console.print(f"[green]识别到 {len(saved)} 个主题：[/green]")
+        for t in saved:
+            console.print(f"  [cyan]{t['name']}[/cyan]  {t['description']}")
+        return
+
+    if sub.isdigit():
+        tid = int(sub)
+        meta, mems = theme_detail(tid)
+        if meta is None:
+            console.print(f"[yellow]未找到主题 {tid}[/yellow]")
+            return
+        console.print(f"\n[bold cyan]{meta['name']}[/bold cyan]  [{meta['category']}]")
+        if meta.get("description"):
+            console.print(f"[dim]{meta['description']}[/dim]")
+        console.print(f"[dim]出现次数：{meta['occurrence_count']}  最后见于：{meta['last_seen_at']}[/dim]\n")
+        if mems:
+            t = Table(show_header=True, header_style="bold cyan", box=None)
+            t.add_column("★", width=6)
+            t.add_column("类型", style="cyan", width=12)
+            t.add_column("关联度", width=8)
+            t.add_column("内容")
+            for m in mems:
+                t.add_row(
+                    "★" * min(int(m.get("importance", 3)), 5),
+                    m.get("type", ""),
+                    f"{m.get('strength', 0.5):.1f}",
+                    m.get("content", ""),
+                )
+            console.print(t)
+        else:
+            console.print("[dim]该主题暂无关联记忆。[/dim]")
+        return
+
+    # default: list
+    themes = themes_summary(15)
+    if not themes:
+        console.print("[dim]尚未归纳任何主题。使用 /themes detect 开始分析。[/dim]")
+        return
+    t = Table(show_header=True, header_style="bold cyan", box=None)
+    t.add_column("ID", style="dim", width=4)
+    t.add_column("主题", style="cyan", width=16)
+    t.add_column("类型", width=12)
+    t.add_column("次数", width=6)
+    t.add_column("描述")
+    for th in themes:
+        t.add_row(
+            str(th["id"]),
+            th["name"],
+            th["category"],
+            str(th["occurrence_count"]),
+            th.get("description", ""),
+        )
+    console.print(t)
+    console.print("[dim]/themes detect 归纳新主题 · /themes <ID> 查看详情[/dim]")
+
+
 def _handle_memory(parts: list[str]):
     sub = parts[1] if len(parts) > 1 else ""
     arg = " ".join(parts[2:])
@@ -668,6 +739,8 @@ def run():
                     from memory.session_insights import format_report
                     days = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 7
                     console.print(format_report(days))
+                case "/themes":
+                    _handle_themes(parts)
                 case "/help":
                     _help()
                 case _:
