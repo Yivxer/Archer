@@ -24,6 +24,11 @@ from memory.store import (
     add_pending, list_pending, count_pending, accept_pending, reject_pending,
     create_project, list_projects, get_project, get_project_by_name,
     archive_project, log_project_event, get_project_events,
+    count_soul_proposals,
+)
+from memory.soul import (
+    propose_from_memories, propose_from_obsidian_hints, get_pending as get_soul_pending,
+    accept as soul_accept, reject as soul_reject,
 )
 from memory.extract import extract
 from memory.retrieve import for_context, format_for_prompt
@@ -34,7 +39,7 @@ console = Console()
 
 _CMDS = frozenset({
     "/help", "/status", "/mode", "/model", "/reflect", "/sessions",
-    "/save", "/clear", "/compact", "/exit", "/memory", "/skill", "/themes", "/project",
+    "/save", "/clear", "/compact", "/exit", "/memory", "/skill", "/themes", "/project", "/soul",
 })
 
 # ── 后台提炼状态 ────────────────────────────────────────────────────────────────
@@ -122,7 +127,10 @@ def _status(session, skills: dict, cfg: dict):
     console.print(f"  模式        {mode_name}（{current_mode}）")
     console.print(f"  Token       {_usage_status(cfg)}")
     console.print(f"  技能        {len(skills)} 个：{', '.join(sorted(skills.keys()))}")
+    soul_count = count_soul_proposals()
     console.print(f"  记忆库      {mem_count} 条" + (f"  [yellow]（{pending_count} 条待确认）[/yellow]" if pending_count else ""))
+    if soul_count:
+        console.print(f"  SOUL 提议   [yellow]{soul_count} 条待审阅[/yellow]（/soul 查看）")
     console.print(f"  对话历史    {history_turns} 轮（{len(session.history)} 条消息）")
     console.print(f"  Artifacts   {art_size}（位于 .artifacts/）")
     if _active_project_id:
@@ -235,10 +243,13 @@ def _reflect(session):
     _section("未解问题", data.get("open_questions", []))
     _section("下一步",   data.get("next_actions", []))
 
-    # ── 记忆候选 → pending ─────────────────────────────────────────
+    # ── 记忆候选 → pending；SOUL 相关 → soul proposal ────────────────
     candidates = data.get("memory_candidates", [])
     if candidates:
         _stage_memories(candidates, source="reflect")
+        soul_ids = propose_from_memories(candidates, source="reflect")
+        if soul_ids:
+            console.print(f"[dim]发现 {len(soul_ids)} 条 SOUL 演化提议，使用 /soul 查看。[/dim]")
 
     # ── 保存 reflection 摘要到记忆库（不自动注入上下文）────────────
     summary = data.get("summary", "").strip()
@@ -431,6 +442,75 @@ def _memory_review():
         t.add_row(kind, ids, note)
     console.print(t)
     console.print("[dim]只做提示，不会自动删除。确认后可用 /memory delete <ID> 清理。[/dim]")
+
+def _handle_soul(parts: list[str], cfg: dict):
+    soul_path = cfg.get("paths", {}).get("soul_path", "")
+    sub = parts[1] if len(parts) > 1 else ""
+    arg = parts[2] if len(parts) > 2 else ""
+
+    match sub:
+        case "" | "list":
+            proposals = get_soul_pending()
+            if not proposals:
+                console.print("[dim]没有待审阅的 SOUL 演化提议。[/dim]")
+                return
+            console.print(f"\n[bold cyan]SOUL 演化提议[/bold cyan]  [dim]（{len(proposals)} 条待审阅）[/dim]\n")
+            for p in proposals:
+                console.print(f"  [dim]{p['id']}[/dim]  [yellow]{p['created_at'][:16]}[/yellow]  [{p['source']}]")
+                console.print(f"    {p['content']}\n")
+            console.print("[dim]/soul accept <ID|all> 写入SOUL.md · /soul reject <ID|all> 丢弃[/dim]")
+
+        case "accept":
+            if not arg:
+                console.print("[yellow]用法：/soul accept <ID|all>[/yellow]")
+                return
+            if not soul_path:
+                console.print("[red]未配置 soul_path，请在 archer.toml 的 [paths] 中设置。[/red]")
+                return
+            pid = arg if arg == "all" else arg
+            if pid != "all" and not pid.isdigit():
+                console.print("[yellow]ID 应为数字或 all[/yellow]")
+                return
+            ids, written = soul_accept(pid, soul_path)
+            if not ids:
+                console.print("[yellow]没有匹配的待审阅提议。[/yellow]")
+                return
+            console.print(f"[green]已追加 {len(ids)} 条内容到 SOUL.md：[/green]")
+            for w in written:
+                console.print(f"  · {w[:72]}")
+
+        case "reject":
+            if not arg:
+                console.print("[yellow]用法：/soul reject <ID|all>[/yellow]")
+                return
+            pid = arg if arg == "all" else arg
+            if pid != "all" and not pid.isdigit():
+                console.print("[yellow]ID 应为数字或 all[/yellow]")
+                return
+            ids = soul_reject(pid)
+            console.print(f"[dim]已丢弃 {len(ids)} 条 SOUL 演化提议。[/dim]")
+
+        case "view":
+            if not soul_path:
+                console.print("[red]未配置 soul_path[/red]")
+                return
+            p = Path(soul_path).expanduser()
+            if not p.exists():
+                console.print(f"[yellow]SOUL.md 不存在：{soul_path}[/yellow]")
+                return
+            text = p.read_text(encoding="utf-8")
+            # 只显示末尾演化记录部分，避免刷屏
+            if "## 演化记录" in text:
+                idx = text.rfind("## 演化记录")
+                snippet = text[max(0, idx - 50):]
+                console.print(f"[dim]… （仅显示最近演化记录）[/dim]\n")
+                console.print(snippet[:1200], markup=False)
+            else:
+                console.print(f"[dim]SOUL.md 中暂无演化记录。文件路径：{soul_path}[/dim]")
+
+        case _:
+            console.print("[dim]子命令：list · accept <ID|all> · reject <ID|all> · view[/dim]")
+
 
 def _handle_project(parts: list[str]):
     global _active_project_id
@@ -789,15 +869,24 @@ def _auto_extract(history: list[dict], silent: bool = False):
         mems, obsidian_hints = extract(history)
         if mems:
             _stage_memories(mems, source="auto", silent=silent)
+            # SOUL 相关记忆 → soul proposal（不自动写入）
+            soul_ids = propose_from_memories(mems, source="extract")
+            if soul_ids and not silent:
+                console.print(f"[dim]发现 {len(soul_ids)} 条 SOUL 演化提议，使用 /soul 查看。[/dim]")
         elif not silent:
             console.print("[dim]本次对话无新记忆。[/dim]")
 
-        if obsidian_hints and not silent:
-            for hint in obsidian_hints:
-                console.print(
-                    f"\n[cyan]建议写入 {hint['file']}：[/cyan]\n"
-                    f"  [dim]{hint['content'][:80]}[/dim]"
-                )
+        if obsidian_hints:
+            soul_ids_h = propose_from_obsidian_hints(obsidian_hints, source="extract")
+            non_soul = [h for h in obsidian_hints if h.get("file") != "SOUL.md"]
+            if non_soul and not silent:
+                for hint in non_soul:
+                    console.print(
+                        f"\n[cyan]建议写入 {hint['file']}：[/cyan]\n"
+                        f"  [dim]{hint['content'][:80]}[/dim]"
+                    )
+            if soul_ids_h and not silent:
+                console.print(f"[dim]发现 {len(soul_ids_h)} 条 SOUL 演化提议，使用 /soul 查看。[/dim]")
     except Exception:
         pass
 
@@ -910,6 +999,8 @@ def run():
                     _handle_themes(parts)
                 case "/project":
                     _handle_project(parts)
+                case "/soul":
+                    _handle_soul(parts, cfg)
                 case "/help":
                     _help()
                 case _:

@@ -136,6 +136,17 @@ def init_db():
             created_at TEXT    NOT NULL
         )
     """)
+    # soul_proposals：SOUL.md 演化提议，用户审阅后才写入
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS soul_proposals (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            content     TEXT    NOT NULL,
+            source      TEXT    DEFAULT 'reflect',
+            status      TEXT    DEFAULT 'pending',
+            created_at  TEXT    NOT NULL,
+            reviewed_at TEXT
+        )
+    """)
     conn.commit()
     conn.close()
 
@@ -598,3 +609,65 @@ def get_project_events(project_id: int, limit: int = 20) -> list[dict]:
         {"id": r[0], "event_type": r[1], "content": r[2], "created_at": r[3]}
         for r in rows
     ]
+
+
+# ── Soul Proposals（SOUL.md 演化提议）────────────────────────────────────────
+
+def add_soul_proposal(content: str, source: str = "reflect") -> int:
+    """添加一条待审阅的 SOUL 演化提议，返回 ID。"""
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.execute(
+        "INSERT INTO soul_proposals (content, source, status, created_at) VALUES (?,?,?,?)",
+        (content.strip(), source, "pending", _now()),
+    )
+    conn.commit()
+    pid = cur.lastrowid
+    conn.close()
+    return pid
+
+
+def list_soul_proposals(status: str = "pending") -> list[dict]:
+    conn = sqlite3.connect(DB_PATH)
+    rows = conn.execute(
+        "SELECT id, content, source, status, created_at FROM soul_proposals "
+        "WHERE status = ? ORDER BY id",
+        (status,),
+    ).fetchall()
+    conn.close()
+    return [
+        {"id": r[0], "content": r[1], "source": r[2], "status": r[3], "created_at": r[4]}
+        for r in rows
+    ]
+
+
+def count_soul_proposals() -> int:
+    conn = sqlite3.connect(DB_PATH)
+    n = conn.execute(
+        "SELECT COUNT(*) FROM soul_proposals WHERE status = 'pending'"
+    ).fetchone()[0]
+    conn.close()
+    return n
+
+
+def resolve_soul_proposal(pid: int | str, accepted: bool) -> list[int]:
+    """将提议标记为 accepted 或 rejected，返回处理的 ID 列表。"""
+    conn = sqlite3.connect(DB_PATH)
+    status = "accepted" if accepted else "rejected"
+    if str(pid) == "all":
+        rows = conn.execute(
+            "SELECT id FROM soul_proposals WHERE status = 'pending'"
+        ).fetchall()
+        ids = [r[0] for r in rows]
+        conn.execute(
+            "UPDATE soul_proposals SET status = ?, reviewed_at = ? WHERE status = 'pending'",
+            (status, _now()),
+        )
+    else:
+        conn.execute(
+            "UPDATE soul_proposals SET status = ?, reviewed_at = ? WHERE id = ? AND status = 'pending'",
+            (status, _now(), int(pid)),
+        )
+        ids = [int(pid)]
+    conn.commit()
+    conn.close()
+    return ids
