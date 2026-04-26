@@ -115,6 +115,27 @@ def init_db():
             UNIQUE(memory_id, theme_id)
         )
     """)
+    # projects：多项目追踪
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS projects (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            name        TEXT    NOT NULL UNIQUE,
+            description TEXT    DEFAULT '',
+            status      TEXT    DEFAULT 'active',
+            created_at  TEXT    NOT NULL,
+            updated_at  TEXT    NOT NULL
+        )
+    """)
+    # project_events：项目事件日志
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS project_events (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id INTEGER NOT NULL,
+            event_type TEXT    NOT NULL,
+            content    TEXT    NOT NULL,
+            created_at TEXT    NOT NULL
+        )
+    """)
     conn.commit()
     conn.close()
 
@@ -466,3 +487,114 @@ def get_memories_for_detection(limit: int = 50) -> list[dict]:
     ).fetchall()
     conn.close()
     return [_row_to_dict(r) for r in rows]
+
+
+# ── Projects（多项目追踪）──────────────────────────────────────────────────────
+
+def create_project(name: str, description: str = "") -> int:
+    """创建项目，返回 ID。名称重复时返回已有 ID。"""
+    name = name.strip()
+    conn = sqlite3.connect(DB_PATH)
+    existing = conn.execute(
+        "SELECT id FROM projects WHERE name = ? LIMIT 1", (name,)
+    ).fetchone()
+    if existing:
+        conn.close()
+        return existing[0]
+    cur = conn.execute(
+        "INSERT INTO projects (name, description, status, created_at, updated_at) VALUES (?,?,?,?,?)",
+        (name, description.strip(), "active", _now(), _now()),
+    )
+    conn.commit()
+    pid = cur.lastrowid
+    conn.close()
+    return pid
+
+
+def list_projects(include_archived: bool = False) -> list[dict]:
+    conn = sqlite3.connect(DB_PATH)
+    if include_archived:
+        rows = conn.execute(
+            "SELECT id, name, description, status, created_at, updated_at FROM projects "
+            "ORDER BY status ASC, updated_at DESC"
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT id, name, description, status, created_at, updated_at FROM projects "
+            "WHERE status = 'active' ORDER BY updated_at DESC"
+        ).fetchall()
+    conn.close()
+    return [
+        {"id": r[0], "name": r[1], "description": r[2],
+         "status": r[3], "created_at": r[4], "updated_at": r[5]}
+        for r in rows
+    ]
+
+
+def get_project(pid: int) -> dict | None:
+    conn = sqlite3.connect(DB_PATH)
+    row = conn.execute(
+        "SELECT id, name, description, status, created_at, updated_at FROM projects WHERE id = ?",
+        (pid,),
+    ).fetchone()
+    conn.close()
+    if not row:
+        return None
+    return {"id": row[0], "name": row[1], "description": row[2],
+            "status": row[3], "created_at": row[4], "updated_at": row[5]}
+
+
+def get_project_by_name(name: str) -> dict | None:
+    conn = sqlite3.connect(DB_PATH)
+    row = conn.execute(
+        "SELECT id, name, description, status, created_at, updated_at FROM projects WHERE name = ?",
+        (name.strip(),),
+    ).fetchone()
+    conn.close()
+    if not row:
+        return None
+    return {"id": row[0], "name": row[1], "description": row[2],
+            "status": row[3], "created_at": row[4], "updated_at": row[5]}
+
+
+def archive_project(pid: int) -> bool:
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.execute(
+        "UPDATE projects SET status = 'archived', updated_at = ? WHERE id = ? AND status = 'active'",
+        (_now(), pid),
+    )
+    conn.commit()
+    ok = cur.rowcount > 0
+    conn.close()
+    return ok
+
+
+def log_project_event(project_id: int, event_type: str, content: str) -> int:
+    """向项目写入一条事件记录，返回事件 ID。"""
+    conn = sqlite3.connect(DB_PATH)
+    # 同步更新 projects.updated_at
+    conn.execute(
+        "UPDATE projects SET updated_at = ? WHERE id = ?", (_now(), project_id)
+    )
+    cur = conn.execute(
+        "INSERT INTO project_events (project_id, event_type, content, created_at) VALUES (?,?,?,?)",
+        (project_id, event_type.strip(), content.strip(), _now()),
+    )
+    conn.commit()
+    eid = cur.lastrowid
+    conn.close()
+    return eid
+
+
+def get_project_events(project_id: int, limit: int = 20) -> list[dict]:
+    conn = sqlite3.connect(DB_PATH)
+    rows = conn.execute(
+        "SELECT id, event_type, content, created_at FROM project_events "
+        "WHERE project_id = ? ORDER BY id DESC LIMIT ?",
+        (project_id, limit),
+    ).fetchall()
+    conn.close()
+    return [
+        {"id": r[0], "event_type": r[1], "content": r[2], "created_at": r[3]}
+        for r in rows
+    ]

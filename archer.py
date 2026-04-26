@@ -22,6 +22,8 @@ from memory.store import (
     init_db, save, list_all, search, delete,
     update as update_memory, archive as archive_memory,
     add_pending, list_pending, count_pending, accept_pending, reject_pending,
+    create_project, list_projects, get_project, get_project_by_name,
+    archive_project, log_project_event, get_project_events,
 )
 from memory.extract import extract
 from memory.retrieve import for_context, format_for_prompt
@@ -32,11 +34,14 @@ console = Console()
 
 _CMDS = frozenset({
     "/help", "/status", "/mode", "/model", "/reflect", "/sessions",
-    "/save", "/clear", "/compact", "/exit", "/memory", "/skill", "/themes",
+    "/save", "/clear", "/compact", "/exit", "/memory", "/skill", "/themes", "/project",
 })
 
 # ── 后台提炼状态 ────────────────────────────────────────────────────────────────
 _extract_thread: threading.Thread | None = None
+
+# ── 当前会话活跃项目 ─────────────────────────────────────────────────────────────
+_active_project_id: int | None = None
 
 _RING_TOP = "[#5ee8e0]◜[/#5ee8e0][#1e7be8]◝[/#1e7be8]"
 _RING_BOT = "[#e8212a]◟[/#e8212a][#f5612a]◞[/#f5612a]"
@@ -120,6 +125,10 @@ def _status(session, skills: dict, cfg: dict):
     console.print(f"  记忆库      {mem_count} 条" + (f"  [yellow]（{pending_count} 条待确认）[/yellow]" if pending_count else ""))
     console.print(f"  对话历史    {history_turns} 轮（{len(session.history)} 条消息）")
     console.print(f"  Artifacts   {art_size}（位于 .artifacts/）")
+    if _active_project_id:
+        proj = get_project(_active_project_id)
+        pname = proj["name"] if proj else "?"
+        console.print(f"  活跃项目    [cyan]{pname}[/cyan]（ID {_active_project_id}）")
 
 def _handle_model(parts: list[str], cfg: dict):
     models  = cfg["api"].get("models", [cfg["api"]["model"]])
@@ -246,6 +255,13 @@ def _reflect(session):
     # ── 进入 session history，允许追问 ────────────────────────────
     session.add("[/reflect]", _reflect_to_text(data))
     console.print("[dim]复盘已加入对话历史，可直接追问。[/dim]")
+
+    # ── 若有活跃项目，把 summary 写入项目日志 ─────────────────────────
+    if _active_project_id and summary:
+        log_project_event(_active_project_id, "reflect", summary)
+        proj = get_project(_active_project_id)
+        if proj:
+            console.print(f"[dim]复盘摘要已记录到项目「{proj['name']}」。[/dim]")
 
     # ── 后台提炼对话记忆（补充 reflect 结构化输出的遗漏）─────────────
     _bg_extract(session.history[-8:])
@@ -415,6 +431,117 @@ def _memory_review():
         t.add_row(kind, ids, note)
     console.print(t)
     console.print("[dim]只做提示，不会自动删除。确认后可用 /memory delete <ID> 清理。[/dim]")
+
+def _handle_project(parts: list[str]):
+    global _active_project_id
+    sub  = parts[1] if len(parts) > 1 else ""
+    rest = " ".join(parts[2:]).strip()
+
+    match sub:
+        case "list" | "ls" | "":
+            projs = list_projects()
+            if not projs:
+                console.print("[dim]还没有项目。使用 /project new <名称> 创建。[/dim]")
+                return
+            t = Table(show_header=True, header_style="bold cyan", box=None)
+            t.add_column("ID", style="dim", width=4)
+            t.add_column("项目名", style="cyan", width=20)
+            t.add_column("状态", width=8)
+            t.add_column("最近更新", style="dim", width=20)
+            t.add_column("描述")
+            for p in projs:
+                t.add_row(
+                    str(p["id"]), p["name"], p["status"],
+                    p["updated_at"][:16], p.get("description", ""),
+                )
+            console.print(t)
+            console.print("[dim]/project new · log · status · archive[/dim]")
+
+        case "new" | "create":
+            if not rest:
+                console.print("[yellow]用法：/project new <名称> [描述][/yellow]")
+                return
+            parts2 = rest.split(None, 1)
+            name = parts2[0]
+            desc = parts2[1] if len(parts2) > 1 else ""
+            pid = create_project(name, desc)
+            console.print(f"[green]项目已创建：[bold]{name}[/bold]（ID {pid}）[/green]")
+
+        case "log":
+            # /project log <ID|名称> <内容>
+            tokens = rest.split(None, 1)
+            if len(tokens) < 2:
+                console.print("[yellow]用法：/project log <ID|名称> <事件内容>[/yellow]")
+                return
+            ident, content = tokens[0], tokens[1]
+            proj = get_project(int(ident)) if ident.isdigit() else get_project_by_name(ident)
+            if not proj:
+                console.print(f"[yellow]未找到项目：{ident}[/yellow]")
+                return
+            eid = log_project_event(proj["id"], "note", content)
+            console.print(f"[dim]已记录到「{proj['name']}」（事件 {eid}）[/dim]")
+
+        case "status" | "show":
+            ident = rest
+            if not ident:
+                console.print("[yellow]用法：/project status <ID|名称>[/yellow]")
+                return
+            proj = get_project(int(ident)) if ident.isdigit() else get_project_by_name(ident)
+            if not proj:
+                console.print(f"[yellow]未找到项目：{ident}[/yellow]")
+                return
+            console.print(f"\n[bold cyan]{proj['name']}[/bold cyan]  [{proj['status']}]")
+            if proj.get("description"):
+                console.print(f"[dim]{proj['description']}[/dim]")
+            console.print(f"[dim]创建：{proj['created_at'][:16]}  更新：{proj['updated_at'][:16]}[/dim]\n")
+            events = get_project_events(proj["id"], limit=15)
+            if events:
+                t = Table(show_header=True, header_style="bold cyan", box=None)
+                t.add_column("时间", style="dim", width=20)
+                t.add_column("类型", style="cyan", width=10)
+                t.add_column("内容")
+                for e in events:
+                    t.add_row(e["created_at"][:16], e["event_type"], e["content"])
+                console.print(t)
+            else:
+                console.print("[dim]暂无事件记录。[/dim]")
+
+        case "archive":
+            ident = rest
+            if not ident:
+                console.print("[yellow]用法：/project archive <ID|名称>[/yellow]")
+                return
+            proj = get_project(int(ident)) if ident.isdigit() else get_project_by_name(ident)
+            if not proj:
+                console.print(f"[yellow]未找到项目：{ident}[/yellow]")
+                return
+            if archive_project(proj["id"]):
+                if _active_project_id == proj["id"]:
+                    _active_project_id = None
+                console.print(f"[dim]项目「{proj['name']}」已归档。[/dim]")
+            else:
+                console.print(f"[yellow]归档失败（可能已归档）。[/yellow]")
+
+        case "use" | "switch":
+            ident = rest
+            if not ident:
+                if _active_project_id:
+                    proj = get_project(_active_project_id)
+                    name = proj["name"] if proj else "?"
+                    console.print(f"[cyan]当前活跃项目：[bold]{name}[/bold]（ID {_active_project_id}）[/cyan]")
+                else:
+                    console.print("[dim]当前会话未设置活跃项目。用法：/project use <ID|名称>[/dim]")
+                return
+            proj = get_project(int(ident)) if ident.isdigit() else get_project_by_name(ident)
+            if not proj:
+                console.print(f"[yellow]未找到项目：{ident}[/yellow]")
+                return
+            _active_project_id = proj["id"]
+            console.print(f"[cyan]已切换到项目：[bold]{proj['name']}[/bold]（ID {proj['id']}）[/cyan]")
+
+        case _:
+            console.print("[dim]子命令：list · new · use · log · status · archive[/dim]")
+
 
 def _handle_themes(parts: list[str]):
     from memory.patterns import detect_and_save, themes_summary, theme_detail
@@ -781,6 +908,8 @@ def run():
                     console.print(format_report(days))
                 case "/themes":
                     _handle_themes(parts)
+                case "/project":
+                    _handle_project(parts)
                 case "/help":
                     _help()
                 case _:
