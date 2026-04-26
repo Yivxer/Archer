@@ -20,23 +20,31 @@ def init_db():
     conn = sqlite3.connect(DB_PATH)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS memories (
-            id         INTEGER PRIMARY KEY AUTOINCREMENT,
-            content    TEXT    NOT NULL,
-            tags       TEXT    DEFAULT '',
-            type       TEXT    DEFAULT 'insight',
-            importance INTEGER DEFAULT 3,
-            status     TEXT    DEFAULT 'active',
-            source     TEXT    DEFAULT '',
-            created_at TEXT    NOT NULL,
-            updated_at TEXT    NOT NULL,
-            archived_at TEXT
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            content      TEXT    NOT NULL,
+            tags         TEXT    DEFAULT '',
+            type         TEXT    DEFAULT 'insight',
+            importance   INTEGER DEFAULT 3,
+            status       TEXT    DEFAULT 'active',
+            source       TEXT    DEFAULT '',
+            created_at   TEXT    NOT NULL,
+            updated_at   TEXT    NOT NULL,
+            archived_at  TEXT,
+            scope        TEXT    DEFAULT 'user',
+            confidence   REAL    DEFAULT 0.8,
+            last_used_at TEXT,
+            valid_until  TEXT
         )
     """)
-    # 为已有数据库添加 type 列（幂等）
+    # 为已有数据库补列（幂等）
     for ddl in [
         "ALTER TABLE memories ADD COLUMN type TEXT DEFAULT 'insight'",
         "ALTER TABLE memories ADD COLUMN status TEXT DEFAULT 'active'",
         "ALTER TABLE memories ADD COLUMN archived_at TEXT",
+        "ALTER TABLE memories ADD COLUMN scope TEXT DEFAULT 'user'",
+        "ALTER TABLE memories ADD COLUMN confidence REAL DEFAULT 0.8",
+        "ALTER TABLE memories ADD COLUMN last_used_at TEXT",
+        "ALTER TABLE memories ADD COLUMN valid_until TEXT",
     ]:
         try:
             conn.execute(ddl)
@@ -76,16 +84,23 @@ def init_db():
             importance INTEGER DEFAULT 3,
             tags       TEXT    DEFAULT '',
             source     TEXT    DEFAULT 'auto',
+            confidence REAL    DEFAULT 0.7,
             created_at TEXT    NOT NULL
         )
     """)
+    try:
+        conn.execute("ALTER TABLE pending_memories ADD COLUMN confidence REAL DEFAULT 0.7")
+    except Exception:
+        pass
     conn.commit()
     conn.close()
 
 def _now() -> str:
     return datetime.now().isoformat(timespec="seconds")
 
-def save(content: str, tags: str = "", type: str = "insight", importance: int = 3, source: str = "") -> int:
+def save(content: str, tags: str = "", type: str = "insight", importance: int = 3,
+         source: str = "", scope: str = "user", confidence: float = 0.8,
+         valid_until: str | None = None) -> int:
     content = content.strip()
     tags = tags.strip()
     if type not in MEMORY_TYPES:
@@ -111,8 +126,9 @@ def save(content: str, tags: str = "", type: str = "insight", importance: int = 
         return existing[0]
 
     cur = conn.execute(
-        "INSERT INTO memories (content, tags, type, importance, source, created_at, updated_at) VALUES (?,?,?,?,?,?,?)",
-        (content, tags, type, importance, source, _now(), _now()),
+        "INSERT INTO memories (content, tags, type, importance, source, scope, confidence, valid_until, created_at, updated_at) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?)",
+        (content, tags, type, importance, source, scope, confidence, valid_until, _now(), _now()),
     )
     conn.commit()
     mid = cur.lastrowid
@@ -121,14 +137,17 @@ def save(content: str, tags: str = "", type: str = "insight", importance: int = 
 
 def _row_to_dict(r, has_date: bool = False) -> dict:
     d = {"id": r[0], "content": r[1], "tags": r[2], "type": r[3], "importance": r[4]}
+    idx = 5
     if has_date:
-        d["created_at"] = r[5]
+        d["created_at"] = r[idx]; idx += 1
+    d["confidence"] = r[idx] if idx < len(r) else 0.8
+    d["valid_until"] = r[idx + 1] if idx + 1 < len(r) else None
     return d
 
 def list_all(limit: int = 50) -> list[dict]:
     conn = sqlite3.connect(DB_PATH)
     rows = conn.execute(
-        "SELECT id, content, tags, type, importance, created_at FROM memories "
+        "SELECT id, content, tags, type, importance, created_at, confidence, valid_until FROM memories "
         "WHERE status = 'active' ORDER BY importance DESC, updated_at DESC LIMIT ?",
         (limit,),
     ).fetchall()
@@ -139,7 +158,7 @@ def search(keyword: str, limit: int = 10) -> list[dict]:
     conn = sqlite3.connect(DB_PATH)
     try:
         rows = conn.execute(
-            "SELECT m.id, m.content, m.tags, m.type, m.importance, m.created_at "
+            "SELECT m.id, m.content, m.tags, m.type, m.importance, m.created_at, m.confidence, m.valid_until "
             "FROM memories_fts f JOIN memories m ON f.rowid = m.id "
             "WHERE memories_fts MATCH ? AND m.status = 'active' "
             "ORDER BY m.importance DESC, rank LIMIT ?",
@@ -148,7 +167,7 @@ def search(keyword: str, limit: int = 10) -> list[dict]:
     except Exception:
         like = f"%{keyword}%"
         rows = conn.execute(
-            "SELECT id, content, tags, type, importance, created_at FROM memories "
+            "SELECT id, content, tags, type, importance, created_at, confidence, valid_until FROM memories "
             "WHERE status = 'active' AND (content LIKE ? OR tags LIKE ?) "
             "ORDER BY importance DESC LIMIT ?",
             (like, like, limit),
@@ -203,7 +222,7 @@ def archive(mid: int) -> bool:
 def recent(limit: int = 5) -> list[dict]:
     conn = sqlite3.connect(DB_PATH)
     rows = conn.execute(
-        "SELECT id, content, tags, type, importance FROM memories "
+        "SELECT id, content, tags, type, importance, confidence, valid_until FROM memories "
         "WHERE status = 'active' ORDER BY importance DESC, updated_at DESC LIMIT ?",
         (limit,),
     ).fetchall()
@@ -213,7 +232,7 @@ def recent(limit: int = 5) -> list[dict]:
 def high_importance(min_importance: int = 4, limit: int = 3) -> list[dict]:
     conn = sqlite3.connect(DB_PATH)
     rows = conn.execute(
-        "SELECT id, content, tags, type, importance FROM memories "
+        "SELECT id, content, tags, type, importance, confidence, valid_until FROM memories "
         "WHERE status = 'active' AND importance >= ? "
         "AND type IN ('identity', 'preference', 'project', 'decision') "
         "ORDER BY importance DESC, updated_at DESC LIMIT ?",
@@ -223,10 +242,18 @@ def high_importance(min_importance: int = 4, limit: int = 3) -> list[dict]:
     return [_row_to_dict(r) for r in rows]
 
 
+def update_last_used(mid: int):
+    """更新记忆的最后使用时间，用于 retrieve 调用后追踪活跃度。"""
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("UPDATE memories SET last_used_at = ? WHERE id = ?", (_now(), mid))
+    conn.commit()
+    conn.close()
+
+
 # ── Pending Memories（持久化候选记忆）─────────────────────────────────────────
 
 def add_pending(content: str, type: str = "insight", importance: int = 3,
-                tags: str = "", source: str = "auto") -> int:
+                tags: str = "", source: str = "auto", confidence: float = 0.7) -> int:
     """将候选记忆写入 pending_memories 表，返回 ID。"""
     content = content.strip()
     if type not in MEMORY_TYPES:
@@ -238,9 +265,9 @@ def add_pending(content: str, type: str = "insight", importance: int = 3,
 
     conn = sqlite3.connect(DB_PATH)
     cur = conn.execute(
-        "INSERT INTO pending_memories (content, type, importance, tags, source, created_at) "
-        "VALUES (?, ?, ?, ?, ?, ?)",
-        (content, type, importance, tags.strip(), source, _now()),
+        "INSERT INTO pending_memories (content, type, importance, tags, source, confidence, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (content, type, importance, tags.strip(), source, float(confidence), _now()),
     )
     conn.commit()
     pid = cur.lastrowid
@@ -252,7 +279,7 @@ def list_pending(limit: int = 50) -> list[dict]:
     """返回所有待确认记忆。"""
     conn = sqlite3.connect(DB_PATH)
     rows = conn.execute(
-        "SELECT id, content, type, importance, tags, source, created_at "
+        "SELECT id, content, type, importance, tags, source, confidence, created_at "
         "FROM pending_memories ORDER BY id LIMIT ?",
         (limit,),
     ).fetchall()
@@ -260,7 +287,8 @@ def list_pending(limit: int = 50) -> list[dict]:
     return [
         {
             "id": r[0], "content": r[1], "type": r[2],
-            "importance": r[3], "tags": r[4], "source": r[5], "created_at": r[6],
+            "importance": r[3], "tags": r[4], "source": r[5],
+            "confidence": r[6], "created_at": r[7],
         }
         for r in rows
     ]
@@ -282,11 +310,11 @@ def accept_pending(pid: int | str) -> list[int]:
     conn = sqlite3.connect(DB_PATH)
     if str(pid) == "all":
         rows = conn.execute(
-            "SELECT id, content, type, importance, tags, source FROM pending_memories"
+            "SELECT id, content, type, importance, tags, source, confidence FROM pending_memories"
         ).fetchall()
     else:
         rows = conn.execute(
-            "SELECT id, content, type, importance, tags, source FROM pending_memories WHERE id = ?",
+            "SELECT id, content, type, importance, tags, source, confidence FROM pending_memories WHERE id = ?",
             (int(pid),),
         ).fetchall()
     conn.close()
@@ -297,8 +325,8 @@ def accept_pending(pid: int | str) -> list[int]:
     memory_ids = []
     accepted_pids = []
     for row in rows:
-        p_id, content, type_, importance, tags, source = row
-        mid = save(content, tags=tags, type=type_, importance=importance, source=source)
+        p_id, content, type_, importance, tags, source, confidence = row
+        mid = save(content, tags=tags, type=type_, importance=importance, source=source, confidence=confidence)
         memory_ids.append(mid)
         accepted_pids.append(p_id)
 

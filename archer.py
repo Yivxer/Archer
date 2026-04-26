@@ -290,6 +290,7 @@ def _stage_memories(mems: list[dict], source: str = "auto", silent: bool = False
             importance=m.get("importance", 3),
             tags=m.get("tags", ""),
             source=source,
+            confidence=m.get("confidence", 0.7),
         )
         count += 1
     if not silent:
