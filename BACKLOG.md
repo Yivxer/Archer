@@ -23,7 +23,7 @@
 
 ## 对话体验
 
-- [ ] `/reflect` 不进入 session history，无法追问复盘内容 → Step 5
+- [x] `/reflect` 不进入 session history，无法追问复盘内容 → **Step 5 完成**
 - [ ] `/mode` 切换不持久化到 toml，重启后恢复默认 → P2
 - [ ] `archer.toml` 修改需重启才生效（config 在 llm.py 单例缓存）→ P2
 - [ ] 每次把 18 个技能全部暴露给模型，无路由过滤 → P1/E

@@ -13,6 +13,7 @@ MEMORY_TYPES = [
     "insight",    # 洞察（学到了什么）
     "risk",       # 风险（潜在问题）
     "context",    # 临时上下文
+    "reflection", # 复盘摘要（/reflect 产出，不自动注入上下文）
 ]
 
 def init_db():

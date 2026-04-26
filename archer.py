@@ -145,23 +145,48 @@ def _handle_mode(parts: list[str], cfg: dict):
     mode_name = modes[mode].get("name", mode)
     console.print(f"[dim]已切换至 {mode_name} 模式[/dim]")
 
+_REFLECT_PROMPT = """\
+你是复盘专家。分析以下对话，严格以 JSON 输出，不要其他内容：
+{
+  "summary": "本次对话一句话总结（20字以内）",
+  "user_intent": "用户的核心意图或主要问题",
+  "decisions": ["做出的决定，每条具体可落地"],
+  "open_questions": ["尚未解决的问题或悬而未决的方向"],
+  "memory_candidates": [
+    {"content": "值得长期记忆的信息", "type": "decision|insight|project|preference|todo", "importance": 3}
+  ],
+  "next_actions": ["72小时内可执行的具体下一步"]
+}
+每类最多 3 条，没有内容写空数组 []。只输出 JSON。"""
+
+
+def _reflect_to_text(data: dict) -> str:
+    """将复盘结构化数据转为自然语言，注入 session history 供追问。"""
+    parts = []
+    if data.get("summary"):
+        parts.append(f"复盘总结：{data['summary']}")
+    if data.get("user_intent"):
+        parts.append(f"核心意图：{data['user_intent']}")
+    for key, label in [
+        ("decisions",      "决策"),
+        ("open_questions", "未解问题"),
+        ("next_actions",   "下一步行动"),
+    ]:
+        items = data.get(key, [])
+        if items:
+            parts.append(f"{label}：" + "；".join(items))
+    n = len(data.get("memory_candidates", []))
+    if n:
+        parts.append(f"已提炼 {n} 条记忆候选（待确认后写入记忆库）")
+    return "\n".join(parts) or "复盘完成，无关键信息。"
+
+
 def _reflect(session):
     if len(session.history) < 2:
         console.print("[dim]对话太短，无需复盘。[/dim]")
         return
 
-    recent_hist = session.history[-10:]
-    prompt = """\
-你是复盘专家。分析以下对话，以 JSON 输出，格式：
-{
-  "insights": ["核心收获，学到或确认了什么"],
-  "decisions": ["做出了哪些决定"],
-  "todos": ["待办事项，具体可执行"],
-  "memories": [{"content": "值得长期记住的信息", "type": "decision|insight|todo|project|preference", "importance": 3}]
-}
-每类最多 3 条，没有写空数组。只输出 JSON，不要其他内容。"""
-
-    messages = [{"role": "system", "content": prompt}, *recent_hist]
+    messages = [{"role": "system", "content": _REFLECT_PROMPT}, *session.history[-10:]]
 
     raw = ""
     spinner = Spinner("arc", text="  复盘中…", style="#4dd9d4")
@@ -175,25 +200,48 @@ def _reflect(session):
     except Exception:
         data = {}
 
-    console.print("\n[bold cyan]复盘[/bold cyan]")
-
-    def _print_section(title, items):
-        if items:
-            console.print(f"\n{title}")
-            for item in items:
-                console.print(f"  {item}")
-
-    _print_section("核心收获", data.get("insights", []))
-    _print_section("决策", data.get("decisions", []))
-    _print_section("待办", data.get("todos", []))
-
-    mems = data.get("memories", [])
-    if mems:
-        _stage_memories(mems, source="reflect")
-
     if not data:
         console.print("[dim]复盘解析失败，原始输出：[/dim]")
         console.print(raw, markup=False)
+        return
+
+    # ── 展示 ──────────────────────────────────────────────────────
+    console.print("\n[bold cyan]复盘[/bold cyan]")
+    if data.get("summary"):
+        console.print(f"\n  [bold]{data['summary']}[/bold]")
+    if data.get("user_intent"):
+        console.print(f"  [dim]意图：{data['user_intent']}[/dim]")
+
+    def _section(title: str, items: list):
+        if items:
+            console.print(f"\n{title}")
+            for item in items:
+                console.print(f"  · {item}")
+
+    _section("决策",     data.get("decisions", []))
+    _section("未解问题", data.get("open_questions", []))
+    _section("下一步",   data.get("next_actions", []))
+
+    # ── 记忆候选 → pending ─────────────────────────────────────────
+    candidates = data.get("memory_candidates", [])
+    if candidates:
+        _stage_memories(candidates, source="reflect")
+
+    # ── 保存 reflection 摘要到记忆库（不自动注入上下文）────────────
+    summary = data.get("summary", "").strip()
+    if summary:
+        save(summary, type="reflection", importance=3, source="reflect")
+
+    # ── 保存完整 JSON 到 artifact ──────────────────────────────────
+    from core.artifacts import save_reflection as _save_reflect_artifact
+    artifact_path = _save_reflect_artifact(
+        json.dumps(data, ensure_ascii=False, indent=2)
+    )
+    console.print(f"\n[dim]完整复盘 → {artifact_path}[/dim]")
+
+    # ── 进入 session history，允许追问 ────────────────────────────
+    session.add("[/reflect]", _reflect_to_text(data))
+    console.print("[dim]复盘已加入对话历史，可直接追问。[/dim]")
 
 def _memory_list():
     mems = list_all(50)
