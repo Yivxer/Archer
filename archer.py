@@ -16,6 +16,7 @@ from core.input import prompt as get_input
 from core.compressor import should_compress, compress
 from core.file_ref import parse_refs, build_user_content, ref_summary
 from core.tool_runtime import invoke as runtime_invoke
+from core.policy import check as policy_check, Decision
 from memory.store import init_db, save, list_all, search, delete, update as update_memory, archive as archive_memory
 from memory.extract import extract
 from memory.retrieve import for_context, format_for_prompt
@@ -477,6 +478,34 @@ def _run_with_tools(messages: list[dict], skills: dict, model: str = "") -> str:
                 fn_args = {}
 
             console.print(f"[dim]→ {fn_name}…[/dim]")
+
+            # ── Policy check ───────────────────────────────────────
+            pr = policy_check(fn_name, fn_args, skills)
+            if pr.decision == Decision.DENY:
+                console.print(f"[red]  ✗ [策略拒绝] {pr.reason}[/red]")
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tc.id,
+                    "content": f"[策略拒绝] {pr.reason}",
+                })
+                continue
+
+            if pr.decision == Decision.CONFIRM:
+                console.print(f"[yellow]  ⚠ 高风险操作 — {pr.reason}[/yellow]")
+                try:
+                    answer = input("  执行？[y/N] ").strip().lower()
+                except (EOFError, KeyboardInterrupt):
+                    answer = "n"
+                if answer != "y":
+                    console.print("[dim]  已取消。[/dim]")
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tc.id,
+                        "content": "[用户取消] 操作已拒绝",
+                    })
+                    continue
+            # ───────────────────────────────────────────────────────
+
             tr = runtime_invoke(fn_name, fn_args, skills)
             if not tr.ok:
                 console.print(f"[yellow]  ✗ {tr.summary}[/yellow]")

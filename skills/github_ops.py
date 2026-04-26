@@ -3,8 +3,11 @@ import subprocess
 SKILL = {
     "name": "github_ops",
     "description": "通过 gh CLI 操作 GitHub：查看仓库、issue、PR，创建 issue",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "author": "archer-builtin",
+    "risk": "high",
+    "requires_confirmation": True,
+    "default_timeout": 20,
 }
 
 def schema() -> dict:
