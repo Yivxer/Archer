@@ -10,7 +10,7 @@ from rich.panel import Panel
 from rich.spinner import Spinner
 from rich.table import Table
 
-from core.llm import stream_chat, call_with_tools, load_config, get_last_usage, get_session_tokens
+from core.llm import stream_chat, call_with_tools, load_config, get_last_usage, get_session_tokens, pop_config_reloaded
 from core.context import build_messages
 from core.session import Session
 from core.input import prompt as get_input
@@ -39,7 +39,8 @@ console = Console()
 
 _CMDS = frozenset({
     "/help", "/status", "/mode", "/model", "/reflect", "/sessions",
-    "/save", "/clear", "/compact", "/exit", "/memory", "/skill", "/themes", "/project", "/soul",
+    "/save", "/clear", "/compact", "/exit", "/memory", "/skill",
+    "/themes", "/project", "/soul", "/listen",
 })
 
 # ── 后台提炼状态 ────────────────────────────────────────────────────────────────
@@ -47,6 +48,10 @@ _extract_thread: threading.Thread | None = None
 
 # ── 当前会话活跃项目 ─────────────────────────────────────────────────────────────
 _active_project_id: int | None = None
+
+# ── 静默录入模式 ─────────────────────────────────────────────────────────────────
+_listen_mode: bool = False
+_LISTEN_LOG_DIR = Path(__file__).parent / ".listen_logs"
 
 _RING_TOP = "[#5ee8e0]◜[/#5ee8e0][#1e7be8]◝[/#1e7be8]"
 _RING_BOT = "[#e8212a]◟[/#e8212a][#f5612a]◞[/#f5612a]"
@@ -442,6 +447,39 @@ def _memory_review():
         t.add_row(kind, ids, note)
     console.print(t)
     console.print("[dim]只做提示，不会自动删除。确认后可用 /memory delete <ID> 清理。[/dim]")
+
+def _listen_write(text: str):
+    """把静默录入内容写入当日日志文件，同时写入活跃项目（若有）。"""
+    from datetime import datetime as _dt
+    _LISTEN_LOG_DIR.mkdir(exist_ok=True)
+    today = _dt.now().strftime("%Y-%m-%d")
+    log_file = _LISTEN_LOG_DIR / f"{today}.md"
+    timestamp = _dt.now().strftime("%H:%M")
+    with open(log_file, "a", encoding="utf-8") as f:
+        if log_file.stat().st_size == 0:
+            f.write(f"# 静默录入 {today}\n\n")
+        f.write(f"- {timestamp}  {text}\n")
+    if _active_project_id:
+        try:
+            log_project_event(_active_project_id, "listen", text)
+        except Exception:
+            pass
+
+
+def _handle_listen(parts: list[str]):
+    global _listen_mode
+    sub = parts[1] if len(parts) > 1 else ""
+    if sub in ("stop", "off", "exit") or _listen_mode:
+        _listen_mode = False
+        console.print("[dim]已退出静默录入模式。[/dim]")
+    else:
+        _listen_mode = True
+        console.print(
+            "[cyan]进入静默录入模式。[/cyan]\n"
+            "[dim]输入任何内容将记录到日志，不会发送给 AI。\n"
+            "再次输入 /listen 退出。[/dim]"
+        )
+
 
 def _handle_soul(parts: list[str], cfg: dict):
     soul_path = cfg.get("paths", {}).get("soul_path", "")
@@ -917,6 +955,11 @@ def run():
     turn_count = 0
 
     while True:
+        # ── 配置热加载 ─────────────────────────────────────────────────
+        cfg = load_config()
+        if pop_config_reloaded():
+            console.print("[dim]archer.toml 已更新，配置已重新加载。[/dim]")
+
         last_usage = get_last_usage()
         if should_compress(
             session.history,
@@ -934,11 +977,15 @@ def run():
         current_mode = cfg["persona"].get("current_mode", cfg["persona"].get("default_mode", "coach"))
         modes = cfg.get("persona", {}).get("modes", {})
         mode_name = modes.get(current_mode, {}).get("name", current_mode)
+
+        # 静默录入模式在状态栏显示特殊标识
+        display_mode = "🎙 静默录入" if _listen_mode else mode_name
+
         console.print()
         try:
             user_input = get_input(
                 model=current_model,
-                mode=mode_name,
+                mode=display_mode,
                 usage=_usage_status(cfg),
             )
         except (KeyboardInterrupt, EOFError):
@@ -951,6 +998,15 @@ def run():
             break
 
         if not user_input:
+            continue
+
+        # ── 静默录入模式拦截 ────────────────────────────────────────────
+        if _listen_mode:
+            if user_input.strip() in ("/listen", "/listen stop"):
+                _handle_listen(["/listen", "stop"])
+            else:
+                _listen_write(user_input)
+                console.print("[dim]已记录。[/dim]")
             continue
 
         parts = user_input.split()
@@ -1001,6 +1057,8 @@ def run():
                     _handle_project(parts)
                 case "/soul":
                     _handle_soul(parts, cfg)
+                case "/listen":
+                    _handle_listen(parts)
                 case "/help":
                     _help()
                 case _:

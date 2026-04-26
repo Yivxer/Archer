@@ -65,6 +65,8 @@ _COMMANDS = [
     ("/soul accept all",      "接受所有提议并追加写入 SOUL.md"),
     ("/soul reject all",      "丢弃所有提议"),
     ("/soul view",            "查看 SOUL.md 最近演化记录"),
+    ("/listen",               "进入静默录入模式（输入不发送给 AI）"),
+    ("/listen stop",          "退出静默录入模式"),
     ("/save",                 "保存当前会话"),
     ("/clear",                "清空对话历史"),
     ("/compact",              "手动压缩对话历史"),
