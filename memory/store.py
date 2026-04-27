@@ -167,6 +167,16 @@ def init_db():
 def _now() -> str:
     return datetime.now().isoformat(timespec="seconds")
 
+
+def _try_embed(memory_id: int, content: str) -> None:
+    """静默计算并存储记忆向量嵌入（embedder 或 sqlite-vec 未安装时跳过）。"""
+    try:
+        from memory.embedder import encode
+        from memory.vector_store import upsert
+        upsert(memory_id, encode(content))
+    except Exception:
+        pass
+
 def save(content: str, tags: str = "", type: str = "insight", importance: int = 3,
          source: str = "", scope: str = "user", confidence: float = 0.8,
          valid_until: str | None = None) -> int:
@@ -202,6 +212,7 @@ def save(content: str, tags: str = "", type: str = "insight", importance: int = 
     conn.commit()
     mid = cur.lastrowid
     conn.close()
+    _try_embed(mid, content)
     return mid
 
 def _row_to_dict(r, has_date: bool = False) -> dict:
@@ -222,6 +233,21 @@ def list_all(limit: int = 50) -> list[dict]:
     ).fetchall()
     conn.close()
     return [_row_to_dict(r, has_date=True) for r in rows]
+
+def get_by_ids(ids: list[int]) -> dict[int, dict]:
+    """批量按 ID 获取活跃记忆，返回 {id: memory_dict}。"""
+    if not ids:
+        return {}
+    placeholders = ",".join("?" * len(ids))
+    conn = sqlite3.connect(DB_PATH)
+    rows = conn.execute(
+        f"SELECT id, content, tags, type, importance, created_at, confidence, valid_until "
+        f"FROM memories WHERE id IN ({placeholders}) AND status = 'active'",
+        ids,
+    ).fetchall()
+    conn.close()
+    return {r[0]: _row_to_dict(r, has_date=True) for r in rows}
+
 
 def search(keyword: str, limit: int = 10) -> list[dict]:
     conn = sqlite3.connect(DB_PATH)
@@ -249,6 +275,11 @@ def delete(mid: int):
     conn.execute("DELETE FROM memories WHERE id = ?", (mid,))
     conn.commit()
     conn.close()
+    try:
+        from memory.vector_store import delete as vec_delete
+        vec_delete(mid)
+    except Exception:
+        pass
 
 def update(mid: int, content: str, tags: str | None = None,
            type: str | None = None, importance: int | None = None) -> bool:

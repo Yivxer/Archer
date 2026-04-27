@@ -1,5 +1,5 @@
 from datetime import datetime
-from memory.store import search, recent, high_importance, update_last_used
+from memory.store import search, recent, high_importance, update_last_used, get_by_ids
 
 _LIGHT_INPUTS = {
     "你好", "hi", "hello", "在吗", "早", "早安", "晚安",
@@ -38,7 +38,7 @@ def for_context(user_input: str = "", limit: int = 5) -> tuple[list, list]:
     core = [m for m in high_importance(min_importance=4, limit=2) if _is_valid_memory(m)]
 
     if user_input and len(user_input.strip()) >= 2:
-        related_raw = search(user_input.strip(), limit=limit)
+        related_raw = _hybrid_search(user_input.strip(), limit=limit)
     else:
         related_raw = recent(limit)
 
@@ -51,6 +51,49 @@ def for_context(user_input: str = "", limit: int = 5) -> tuple[list, list]:
         update_last_used(m["id"])
 
     return core, related
+
+
+def _hybrid_search(query: str, limit: int) -> list[dict]:
+    """
+    混合检索：向量 KNN + FTS5，结果合并去重。
+
+    策略：
+    1. 尝试向量检索（sqlite-vec + embedder），取 2*limit 条
+    2. FTS5 检索，取 limit 条
+    3. 向量命中在前（按距离排序），FTS-only 命中追加在后
+    4. embedder/sqlite-vec 不可用时静默降级到纯 FTS5
+    """
+    fts_mems = search(query, limit=limit)
+
+    try:
+        from memory.embedder import encode
+        from memory.vector_store import search_similar
+
+        q_vec = encode(query)
+        vec_hits = search_similar(q_vec, limit=limit * 2)  # [(id, distance)]
+        if not vec_hits:
+            return fts_mems
+
+        # 水合向量命中
+        vec_ids = [h[0] for h in vec_hits]
+        id_to_mem = get_by_ids(vec_ids)
+        # 按 distance 顺序排列（最相似在前）
+        vec_mems = [id_to_mem[i] for i in vec_ids if i in id_to_mem]
+
+        # 合并去重：向量结果优先，FTS-only 追加
+        seen: set[int] = set()
+        combined: list[dict] = []
+        for m in vec_mems:
+            seen.add(m["id"])
+            combined.append(m)
+        for m in fts_mems:
+            if m["id"] not in seen:
+                combined.append(m)
+
+        return combined[:limit]
+
+    except Exception:
+        return fts_mems
 
 
 def format_for_prompt(core: list, related: list) -> str:

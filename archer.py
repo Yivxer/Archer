@@ -112,6 +112,7 @@ def _help():
         ("/memory archive <ID>",        "归档已有记忆"),
         ("/memory delete <ID>",         "删除记忆"),
         ("/memory review",              "体检记忆库，找重复/冲突/过期线索"),
+        ("/memory reindex",             "重建向量索引（需 sqlite-vec + sentence-transformers）"),
         ("/skill list",                 "列出已安装技能"),
         ("/skill install <路径或URL>",  "安装技能"),
         ("/skill remove <名字>",        "卸载技能"),
@@ -916,8 +917,16 @@ def _handle_memory(parts: list[str], session=None):
             else:
                 _wait_for_extract()
                 _auto_extract(history, silent=False)
+        case "reindex":
+            console.print("[dim]正在重建向量索引（首次需要下载模型 ~120 MB）…[/dim]")
+            try:
+                from memory.vector_store import reindex_all
+                ok, total = reindex_all()
+                console.print(f"[green]向量索引重建完成：{ok}/{total} 条记忆已编码。[/green]")
+            except Exception as e:
+                console.print(f"[yellow]向量索引失败（sqlite-vec 或 sentence-transformers 未安装？）：{e}[/yellow]")
         case _:
-            console.print("[dim]子命令：list · search <词> · add <内容> · pending · accept · reject · update · archive · delete · review · extract[/dim]")
+            console.print("[dim]子命令：list · search <词> · add <内容> · pending · accept · reject · update · archive · delete · review · extract · reindex[/dim]")
 
 def _skill_list(skills: dict):
     if not skills:
@@ -1111,6 +1120,12 @@ def _wait_for_extract(timeout: float = 12.0):
 
 def run():
     init_db()
+    # 初始化向量索引表（sqlite-vec 未安装时静默跳过）
+    try:
+        from memory.vector_store import init_vec_table
+        init_vec_table()
+    except Exception:
+        pass
     cfg = load_config()
     session = Session()
     skills = load_skills()
