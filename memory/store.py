@@ -147,6 +147,20 @@ def init_db():
             reviewed_at TEXT
         )
     """)
+    # scheduled_tasks：定时任务，启动时自动检查并执行到期项
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS scheduled_tasks (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            skill_name   TEXT    NOT NULL,
+            label        TEXT    DEFAULT '',
+            interval_h   INTEGER NOT NULL,
+            args_json    TEXT    DEFAULT '{}',
+            enabled      INTEGER DEFAULT 1,
+            last_run_at  TEXT,
+            next_run_at  TEXT    NOT NULL,
+            created_at   TEXT    NOT NULL
+        )
+    """)
     conn.commit()
     conn.close()
 

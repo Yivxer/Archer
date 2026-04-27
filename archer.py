@@ -35,13 +35,17 @@ from memory.retrieve import for_context, format_for_prompt
 from skills.loader import load_skills, get_tools
 from skills.installer import install as skill_install, remove as skill_remove
 from core.skill_router import select_skills
+from core.scheduler import (
+    add_task, remove_task as remove_cron_task, set_enabled as cron_set_enabled,
+    list_tasks, run_due_tasks, run_task_by_id, parse_interval, fmt_interval,
+)
 
 console = Console()
 
 _CMDS = frozenset({
     "/help", "/status", "/mode", "/model", "/reflect", "/sessions",
     "/save", "/clear", "/compact", "/exit", "/memory", "/skill",
-    "/themes", "/project", "/soul", "/listen", "/doctor",
+    "/themes", "/project", "/soul", "/listen", "/doctor", "/cron",
 })
 
 # ── 后台提炼状态 ────────────────────────────────────────────────────────────────
@@ -113,6 +117,11 @@ def _help():
         ("/skill info <名字>",          "技能详情"),
         ("/model [<模型名>]",           "查看 / 切换模型"),
         ("/doctor [--fix]",             "自检系统状态，--fix 自动修复可修复问题"),
+        ("/cron list",                  "查看定时任务"),
+        ("/cron add <技能> <daily|weekly|Nh>", "添加定时任务"),
+        ("/cron remove <ID>",           "删除定时任务"),
+        ("/cron enable/disable <ID>",   "启用 / 禁用定时任务"),
+        ("/cron run <ID>",              "立即执行定时任务"),
         ("/exit",                       "退出并保存"),
     ]
     for cmd, desc in rows:
@@ -709,6 +718,111 @@ def _handle_doctor(parts: list[str], cfg: dict, skills: dict):
             console.print(f"\n  [dim]运行 /doctor --fix 可自动修复 {len(fixable)} 个问题。[/dim]")
 
 
+def _handle_cron(parts: list[str], skills: dict):
+    sub  = parts[1] if len(parts) > 1 else ""
+    rest = parts[2:] if len(parts) > 2 else []
+
+    match sub:
+        case "list" | "ls" | "":
+            tasks = list_tasks()
+            if not tasks:
+                console.print("[dim]没有定时任务。用 /cron add <技能> <daily|weekly|Nh> [标签] 创建。[/dim]")
+                return
+            t = Table(show_header=True, header_style="bold cyan", box=None)
+            t.add_column("ID",   style="dim", width=4)
+            t.add_column("状态", width=6)
+            t.add_column("技能", style="cyan", width=18)
+            t.add_column("频率", width=10)
+            t.add_column("标签")
+            t.add_column("下次执行", style="dim", width=20)
+            for tk in tasks:
+                status = "[green]启用[/green]" if tk["enabled"] else "[dim]禁用[/dim]"
+                t.add_row(
+                    str(tk["id"]),
+                    status,
+                    tk["skill_name"],
+                    fmt_interval(tk["interval_h"]),
+                    tk.get("label", ""),
+                    tk["next_run_at"][:16],
+                )
+            console.print(t)
+
+        case "add":
+            if len(rest) < 2:
+                console.print("[yellow]用法：/cron add <技能名> <daily|weekly|Nh> [标签][/yellow]")
+                return
+            skill_name     = rest[0]
+            interval_spec  = rest[1]
+            label          = " ".join(rest[2:]) if len(rest) > 2 else ""
+
+            if skill_name not in skills:
+                console.print(f"[yellow]技能不存在：{skill_name}。使用 /skill list 查看已加载技能。[/yellow]")
+                return
+            try:
+                h = parse_interval(interval_spec)
+            except ValueError as e:
+                console.print(f"[yellow]{e}[/yellow]")
+                return
+            tid = add_task(skill_name, interval_spec, label)
+            console.print(f"[green]已添加定时任务（ID {tid}）：{skill_name}，{fmt_interval(h)}执行一次。[/green]")
+            console.print("[dim]下次启动 Archer 时自动执行，或使用 /cron run {tid} 立即测试。[/dim]")
+
+        case "remove" | "rm" | "delete":
+            ident = rest[0] if rest else ""
+            if not ident.isdigit():
+                console.print("[yellow]用法：/cron remove <ID>[/yellow]")
+                return
+            if remove_cron_task(int(ident)):
+                console.print(f"[dim]定时任务 {ident} 已删除。[/dim]")
+            else:
+                console.print(f"[yellow]未找到任务：{ident}[/yellow]")
+
+        case "enable":
+            ident = rest[0] if rest else ""
+            if not ident.isdigit():
+                console.print("[yellow]用法：/cron enable <ID>[/yellow]")
+                return
+            if cron_set_enabled(int(ident), True):
+                console.print(f"[dim]任务 {ident} 已启用。[/dim]")
+            else:
+                console.print(f"[yellow]未找到任务：{ident}[/yellow]")
+
+        case "disable":
+            ident = rest[0] if rest else ""
+            if not ident.isdigit():
+                console.print("[yellow]用法：/cron disable <ID>[/yellow]")
+                return
+            if cron_set_enabled(int(ident), False):
+                console.print(f"[dim]任务 {ident} 已禁用。[/dim]")
+            else:
+                console.print(f"[yellow]未找到任务：{ident}[/yellow]")
+
+        case "run":
+            ident = rest[0] if rest else ""
+            if not ident.isdigit():
+                console.print("[yellow]用法：/cron run <ID>[/yellow]")
+                return
+            tid = int(ident)
+            tr = run_task_by_id(tid, skills)
+            if tr is None:
+                tasks = list_tasks()
+                task_names = {t["id"]: t["skill_name"] for t in tasks}
+                if tid not in task_names:
+                    console.print(f"[yellow]未找到任务：{ident}[/yellow]")
+                else:
+                    console.print(f"[yellow]技能 {task_names[tid]!r} 未加载，无法执行。[/yellow]")
+                return
+            if tr.ok:
+                console.print(f"[green]✓ 执行成功[/green]")
+                if tr.content_preview:
+                    console.print(tr.content_preview[:600], markup=False)
+            else:
+                console.print(f"[red]✗ 执行失败：{tr.summary}[/red]")
+
+        case _:
+            console.print("[dim]子命令：list · add · remove · enable · disable · run[/dim]")
+
+
 def _handle_themes(parts: list[str]):
     from memory.patterns import detect_and_save, themes_summary, theme_detail
 
@@ -1000,6 +1114,20 @@ def run():
     session = Session()
     skills = load_skills()
     _welcome()
+
+    # ── 启动时执行到期定时任务 ─────────────────────────────────────────────────
+    startup_cron = run_due_tasks(skills)
+    for task, tr in startup_cron:
+        label = task.get("label") or task["skill_name"]
+        if tr is None:
+            console.print(f"[yellow]⏰ 定时任务「{label}」：技能未加载，已跳过。[/yellow]")
+        elif tr.ok:
+            console.print(f"[dim]⏰ 定时任务「{label}」已执行。[/dim]")
+            if tr.content_preview:
+                console.print(tr.content_preview[:400], markup=False)
+        else:
+            console.print(f"[yellow]⏰ 定时任务「{label}」执行失败：{tr.summary}[/yellow]")
+
     turn_count = 0
 
     while True:
@@ -1109,6 +1237,8 @@ def run():
                     _handle_listen(parts)
                 case "/doctor":
                     _handle_doctor(parts, cfg, skills)
+                case "/cron":
+                    _handle_cron(parts, skills)
                 case "/help":
                     _help()
                 case _:
