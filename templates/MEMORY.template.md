@@ -1,51 +1,51 @@
-# MEMORY — Current State
+# MEMORY — 当前状态
 
-> This file gives Archer a snapshot of where you are right now.
-> Update it periodically (weekly or whenever your situation changes significantly).
-> Archer injects this when you ask questions that need current context.
+> 这个文件给 Archer 一个你现在在哪里的快照。
+> 定期更新（每周，或情况发生重大变化时）。
+> Archer 在你问需要当前上下文的问题时注入这个文件。
 
 ---
 
-## Active Projects
+## 活跃项目
 
-<!-- What are you currently working on? One line per project.
-Example:
-- Project A: building MVP, stuck on auth flow
-- Project B: planning phase, no blockers yet
+<!-- 你现在在做什么？每个项目一行。
+示例：
+- 项目 A：开发 MVP，卡在认证流程上
+- 项目 B：规划阶段，暂无阻塞
 -->
 
 ---
 
-## Current Focus
+## 当前关注点
 
-<!-- What's the single most important thing right now? -->
-
----
-
-## Open Questions
-
-<!-- Things you haven't decided yet, or are actively thinking through -->
+<!-- 现在最重要的那一件事是什么？ -->
 
 ---
 
-## Recent Decisions
+## 开放问题
 
-<!-- Decisions made in the last few weeks that Archer should know about -->
+<!-- 你还没有决定的事，或者正在积极思考的事 -->
 
 ---
 
-## Energy & State
+## 近期决策
 
-<!-- Optional: how you're generally doing. Helps Archer calibrate tone.
-Example: low energy week, high focus mode, recovering from burnout, etc.
+<!-- 过去几周做出的、Archer 应该知道的决策 -->
+
+---
+
+## 精力与状态
+
+<!-- 可选：你最近总体状态如何。帮助 Archer 校准语气。
+示例：精力低迷、高度专注模式、从倦怠中恢复等。
 -->
 
 ---
 
-## Upcoming
+## 近期安排
 
-<!-- Deadlines, commitments, or events in the near future -->
+<!-- 近期的截止日期、承诺或事件 -->
 
 ---
 
-*Last updated: [date]*
+*最后更新：[日期]*

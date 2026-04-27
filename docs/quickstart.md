@@ -1,93 +1,93 @@
-# Quickstart
+# 快速开始
 
-This guide walks through your first session with Archer.
+本文档引导你完成第一次 Archer 使用。
 
-## Before you start
+## 开始之前
 
-Make sure you've completed [installation](install.md). You should have:
+确认已完成 [安装](install.md)，你应该已经有：
 
-- `archer.toml` with your API key filled in
-- `~/.archer/SOUL.md` (at minimum — even a blank one works)
+- 填好 API Key 的 `archer.toml`
+- `~/.archer/SOUL.md`（哪怕空白也可以先启动）
 
-## Start Archer
+## 启动 Archer
 
 ```bash
 archer
 ```
 
-You'll see a welcome screen and a prompt (`❯`). Type anything to begin.
+你会看到欢迎界面和提示符（`❯`）。输入任何内容开始对话。
 
-## First things to do
+## 第一次该做什么
 
-### 1. Fill in your soul file
+### 1. 填写你的灵魂档案
 
-The more you put in `~/.archer/SOUL.md`, the more Archer can adapt to you. Open it in any editor:
+`~/.archer/SOUL.md` 里写的越多，Archer 越能适应你。用任意编辑器打开它：
 
 ```bash
 open ~/.archer/SOUL.md
 ```
 
-You don't need to fill everything at once. Start with your values and one or two patterns you've noticed about yourself.
+不需要一次填完。先从你的价值观和你发现的一两个自身规律开始。
 
-### 2. Add some context
+### 2. 写入当前上下文
 
-`~/.archer/MEMORY.md` is where you tell Archer what's happening in your life right now — active projects, current focus, open questions. Update it whenever things change significantly.
+`~/.archer/MEMORY.md` 是你告诉 Archer 现在发生什么的地方——当前项目、当前关注点、开放问题。情况发生重大变化时及时更新。
 
-### 3. Try a few things
+### 3. 试试这几件事
 
-**Ask for advice on a decision:**
+**请 Archer 帮你做决策：**
 ```
-I'm trying to decide whether to take on a new client. The money is good but it feels like a distraction.
-```
-
-**Start a project:**
-```
-/project new "side project" figuring out what to build next
+我在考虑要不要接一个新客户，钱不错但感觉会分心。
 ```
 
-**Reflect on a session:**
+**创建一个项目：**
+```
+/project new "副业想法" 想清楚接下来要做什么
+```
+
+**复盘当前会话：**
 ```
 /reflect
 ```
 
-**Check your memory:**
+**查看你的记忆：**
 ```
 /memory list
 ```
 
-## Conversation modes
+## 对话模式
 
-Switch with `/mode`:
+用 `/mode` 切换：
 
-| Mode | Behavior |
-|------|---------|
-| `coach` | Pushes toward action, asks "what next?" |
-| `mirror` | Only asks questions, no advice |
-| `critic` | Challenges your assumptions |
-| `operator` | Concise, task-focused, no extras |
+| 模式 | 行为 |
+|------|------|
+| `coach` | 推动行动，总问"下一步是什么？" |
+| `mirror` | 只提问，不给建议 |
+| `critic` | 挑战你的假设和盲点 |
+| `operator` | 简洁、任务导向，无额外内容 |
 
-## After your first session
+## 第一次会话结束后
 
-When you exit (`/exit` or Ctrl+C), Archer runs background memory extraction — it reads the conversation and proposes things to remember.
+退出时（`/exit` 或 Ctrl+C），Archer 会在后台提取记忆——读取对话内容并提出需要记住的事项。
 
-Next time you start, check:
+下次启动时查看：
 
 ```
 /memory pending
 ```
 
-Review the proposals and accept or reject them:
+审阅提案并接受或拒绝：
 
 ```
 /memory accept all
 /memory reject 3
 ```
 
-Only accepted memories persist long-term.
+只有被接受的记忆才会长期保存。
 
-## Tips
+## 使用技巧
 
-- Use `@/path/to/file` to attach any local file to your message (text, PDF, image)
-- `/doctor` runs a health check if something seems off
-- `/status` shows current model, token usage, and active project
-- `/help` shows all commands
+- 用 `@/path/to/file` 将任意本地文件（文本、PDF、图片）附加到消息中
+- 如果出现异常，用 `/doctor` 运行系统自检
+- `/status` 显示当前模型、Token 用量和活跃项目
+- `/help` 查看所有命令

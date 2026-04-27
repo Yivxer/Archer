@@ -1,41 +1,41 @@
-# Privacy
+# 隐私说明
 
-## Local-first design
+## 本地优先设计
 
-Archer is designed so your personal data never leaves your machine, except for the LLM API calls you make to your chosen provider.
+Archer 的设计原则是：你的个人数据不会离开你的机器，唯一的例外是你主动发起的 LLM API 调用。
 
-**What stays local:**
+**留在本地的数据：**
 
-| Data | Location |
-|------|---------|
-| Long-term memories | `~/.archer/archer.db` (SQLite) |
-| Soul archive | `~/.archer/SOUL.md` |
-| Memory snapshot | `~/.archer/MEMORY.md` |
-| Covenant | `~/.archer/COVENANT.md` |
-| Presence style | `~/.archer/PRESENCE.md` |
-| Session transcripts | `~/.archer/sessions/` |
-| Artifacts | `.artifacts/` in the project directory |
-| Configuration | `archer.toml` (in project directory, gitignored) |
+| 数据 | 位置 |
+|------|------|
+| 长期记忆 | `~/.archer/archer.db`（SQLite） |
+| 灵魂档案 | `~/.archer/SOUL.md` |
+| 记忆快照 | `~/.archer/MEMORY.md` |
+| 根契约 | `~/.archer/COVENANT.md` |
+| 在场方式 | `~/.archer/PRESENCE.md` |
+| 会话记录 | `~/.archer/sessions/` |
+| 产物文件 | 项目目录下的 `.artifacts/` |
+| 配置文件 | `archer.toml`（在项目目录，已在 gitignore 中） |
 
-None of these files are transmitted to any Archer server. There is no Archer server.
+以上文件均不会传输到任何 Archer 服务器。Archer 没有服务器。
 
-## What does leave your machine
+## 什么数据会离开你的机器
 
-**LLM API calls.** When you send a message, Archer sends:
+**LLM API 调用。** 当你发送消息时，Archer 会发送：
 
-- Your message
-- Conversation history (compressed if approaching token limits)
-- Relevant memories retrieved from your local database
-- Summaries of your soul/memory/covenant/presence files (when relevant to the query)
-- Skill schemas (for function calling)
+- 你的消息内容
+- 对话历史（接近 Token 上限时会压缩）
+- 从本地数据库中检索到的相关记忆
+- 你的灵魂/记忆/契约/在场方式文件的摘要（仅在与查询相关时）
+- 技能 Schema（用于函数调用）
 
-This data is sent to whichever LLM API you've configured (`api.base_url` in `archer.toml`). It is subject to that provider's privacy policy.
+这些数据发送给你在 `archer.toml` 中配置的 LLM API（`api.base_url`），适用于该提供商的隐私政策。
 
-**Embedding calls.** If you've installed `sentence-transformers`, memory embeddings are computed **locally** — no API call is made. The model runs on your machine.
+**嵌入向量调用。** 如果安装了 `sentence-transformers`，记忆嵌入向量在**本地**计算——不发起任何 API 调用，模型完全在你的机器上运行。
 
-## Git hygiene
+## Git 安全
 
-The following are gitignored by default and will never be committed:
+以下文件默认在 `.gitignore` 中，绝不会被意外提交：
 
 ```
 .env
@@ -49,19 +49,19 @@ sessions/
 .artifacts/
 ```
 
-If you fork or contribute to Archer, your personal data cannot accidentally be included in a commit.
+如果你 Fork 或参与贡献，你的个人数据不可能被包含在 commit 中。
 
-## No telemetry
+## 无遥测
 
-Archer collects no usage data, crash reports, or analytics. There is no built-in tracking of any kind.
+Archer 不收集任何使用数据、崩溃报告或统计信息。没有任何内置的追踪机制。
 
-## Third-party skills
+## 第三方技能
 
-Skills installed from external sources may make their own network calls. Review skill source code before installing. The skill installer shows you the full source before confirming.
+从外部来源安装的技能可能会发起自己的网络请求。安装前请查看技能源代码。技能安装流程会在确认前向你展示完整源代码。
 
-## LLM provider choice
+## LLM 提供商选择
 
-You choose your provider. If privacy is critical:
-- Run a local model via Ollama (`http://localhost:11434/v1`)
-- Use a provider with a strong data retention policy
-- Review your provider's terms before using Archer with sensitive personal data
+你选择你的提供商。如果隐私是核心要求：
+- 通过 Ollama 运行本地模型（`http://localhost:11434/v1`）
+- 选择数据保留政策较强的提供商
+- 在将敏感个人数据用于 Archer 之前，先阅读提供商的服务条款

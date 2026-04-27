@@ -1,80 +1,80 @@
-# Security
+# 安全模型
 
-## Shell command risk scoring
+## Shell 命令风险分级
 
-All shell commands are scored before execution using `score_shell_risk()`:
+所有 Shell 命令在执行前均通过 `score_shell_risk()` 评分：
 
-| Level | Action | Examples |
-|-------|--------|---------|
-| `low` | Allowed | `git status`, `ls`, `cat`, read-only commands |
-| `medium` | Requires confirmation | Most commands with side effects |
-| `high` | Requires explicit confirmation + reason | `sudo`, `shutdown`, `osascript`, recursive deletes, writing to shell config files |
-| `critical` | Denied | `sudo rm -rf /`, `dd of=/dev/...`, fork bombs, `curl \| sh` |
+| 级别 | 处理方式 | 示例 |
+|------|----------|------|
+| `low`（低风险） | 直接执行 | `git status`、`ls`、`cat`、只读命令 |
+| `medium`（中风险） | 需要确认 | 大多数有副作用的命令 |
+| `high`（高风险） | 需要明确确认 + 说明原因 | `sudo`、`shutdown`、`osascript`、递归删除、写入 Shell 配置文件 |
+| `critical`（危险） | 直接拒绝 | `sudo rm -rf /`、`dd of=/dev/...`、fork bomb、`curl \| sh` |
 
-The confirmation prompt for high-risk commands asks you to state a reason before proceeding. Critical commands cannot be executed through Archer.
+高风险命令的确认提示会要求你说明原因后再继续。危险命令无法通过 Archer 执行。
 
-## Path safety
+## 路径安全
 
-File write operations use `is_inside_vault()` to verify that a path is genuinely inside your configured vault — using `Path.resolve()` and `relative_to()` rather than string matching.
+文件写入操作使用 `is_inside_vault()` 验证路径是否真正位于你配置的 vault 内——通过 `Path.resolve()` 和 `relative_to()` 判断，而非字符串匹配。
 
-This prevents:
-- String-based bypass (a path that contains "obsidian" but isn't actually inside the vault)
-- `../` path traversal
-- Symlink escape
+防止以下攻击：
+- 基于字符串的绕过（路径包含"obsidian"但实际不在 vault 内）
+- `../` 路径穿越
+- 符号链接逃逸
 
-## Permission model
+## 权限模型
 
-| Operation | Default |
-|-----------|---------|
-| Obsidian read/write/search | Allowed (vault paths verified with `is_inside_vault`) |
-| File read / list | Allowed |
-| File write to your vault | Allowed (after path verification) |
-| File write to other paths | Requires confirmation |
-| Shell — low risk | Allowed |
-| Shell — medium/high | Requires confirmation |
-| Shell — critical | Denied |
-| Skill install from URL | Full review flow: download → code scan → preview → type `INSTALL <name>` to confirm |
+| 操作 | 默认行为 |
+|------|----------|
+| Obsidian 读取/写入/搜索 | 允许（通过 `is_inside_vault` 验证路径） |
+| 文件读取 / 列目录 | 允许 |
+| 向 vault 内写入文件 | 允许（路径验证通过后） |
+| 向其他路径写入文件 | 需要确认 |
+| Shell — 低风险 | 允许 |
+| Shell — 中/高风险 | 需要确认 |
+| Shell — 危险 | 拒绝 |
+| 从 URL 安装技能 | 完整审查流程：下载 → 代码扫描 → 预览 → 输入 `INSTALL <name>` 确认 |
 
-## Confirmation dialog
+## 确认对话框
 
-Standard confirmation (medium risk):
+标准确认（中风险）：
 ```
-  ⚠  <operation description>
-  y  confirm    n  skip    q  cancel task
+  ⚠  <操作描述>
+  y  确认    n  跳过    q  取消任务
   →
 ```
 
-Strong confirmation (high risk):
+强确认（高风险）：
 ```
-  🔴  <operation> (high risk)
-  Risk: <reason>
-  State your reason, then type YES to confirm:
+  🔴  <操作>（高风险）
+  风险原因：<原因>
+  请说明你的理由，然后输入 YES 确认：
   →
 ```
 
-`q` cancels the entire tool chain, not just the current step.
+`q` 取消整个工具链，不仅仅是当前步骤。
 
-## Skill installation
+## 技能安装流程
 
-Installing a skill from an external URL goes through a staged review:
+从外部 URL 安装技能需要经过分阶段审查：
 
-1. File is downloaded to a temp location
-2. Static code scan checks for dangerous patterns
-3. Full source is shown for your review
-4. You must type `INSTALL <skill-name>` exactly to confirm
+1. 文件下载到临时位置
+2. 静态代码扫描检查危险模式
+3. 向你展示完整源代码
+4. 你必须准确输入 `INSTALL <skill-name>` 才能确认安装
 
-## What Archer cannot do
+## Archer 不能做什么
 
-- Modify `COVENANT.md` automatically
-- Accept memories without your approval
-- Apply self-critiques to behavior automatically
-- Bypass `DENY` decisions
+- 自动修改 `COVENANT.md`
+- 在未经你批准的情况下接受记忆
+- 自动将自我批评应用到行为变化中
+- 绕过 `DENY` 决策
 
-## System health check
+## 系统健康检查
 
 ```bash
 archer
 /doctor
 ```
 
-Runs 11 checks including path safety, vault accessibility, pending memory backlog, and risk configuration. Use `--fix` to auto-repair items that can be fixed automatically.
+运行 11 项检查，包括路径安全、vault 可访问性、待处理记忆积压和风险配置。使用 `--fix` 参数可自动修复可修复的项目。

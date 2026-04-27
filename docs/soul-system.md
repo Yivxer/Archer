@@ -1,116 +1,115 @@
-# Soul System
+# 灵魂档案系统
 
-Archer has a three-layer system for shaping how it thinks about you and how it shows up in conversation.
+Archer 有三层系统，用于塑造它如何理解你、如何在对话中出现。
 
-## The three layers
+## 三个层次
 
-### SOUL.md — Who you are
+### SOUL.md — 你是谁
 
-Your long-term soul archive. Archer reads this when you ask for decisions, reflections, or emotionally-weighted guidance.
+你的长期灵魂档案。Archer 在你寻求决策、复盘或情绪加权指导时读取这个文件。
 
-**What to put here:**
-- Your values, in priority order
-- Core tensions — pairs of things that pull against each other in your life
-- Defense patterns — how you tend to avoid discomfort
-- Recovery mechanisms — what actually helps when things go wrong
-- How you want to work with AI
+**应该写什么：**
+- 你的价值观，按优先级排列
+- 核心张力——你生活中相互拉扯的一对对事物
+- 防御模式——你倾向于如何回避不适
+- 恢复机制——真正有效的应对方式
+- 你希望如何与 AI 协作
 
-Archer will never overwrite this file automatically. Changes are proposed via `/soul list` and accepted only by you.
+Archer 永远不会自动覆写这个文件。变更通过 `/soul list` 提议，只有你才能接受。
 
-### COVENANT.md — Hard limits
+### COVENANT.md — 硬性边界
 
-The root covenant defines what Archer will and won't do, regardless of how you ask.
+根契约定义了 Archer 无论如何都会或不会做的事情。
 
-**What to put here:**
-- Behaviors you never want Archer to perform
-- Positive commitments you want Archer to uphold
-- How to handle silence and absence
+**应该写什么：**
+- 你永远不希望 Archer 执行的行为
+- 你希望 Archer 坚守的正向承诺
+- 如何处理沉默和缺席
 
-This file is not editable during a session. To propose a change, use `/covenant propose`. The proposal is saved to history — you review and apply it yourself.
+这个文件在会话中不可编辑。要提议修改，用 `/covenant propose`。提案保存到历史记录——由你亲自审阅并应用。
 
-### PRESENCE.md — How Archer shows up
+### PRESENCE.md — Archer 如何出现
 
-The interaction style for this relationship. More flexible than COVENANT, more specific than mode settings.
+当前关系的互动风格。比 COVENANT 更灵活，比模式设置更具体。
 
-**What to put here:**
-- Default tone (coaching, listening, challenging)
-- Response pacing rules
-- How to handle dense or abstract topics
-- How to handle sensitive personal topics
-- When and how to push toward action
+**应该写什么：**
+- 默认语气（辅导式、倾听式、挑战式）
+- 回应节奏规则
+- 如何处理密集或抽象的话题
+- 如何处理敏感的个人话题
+- 何时以及如何推动行动
 
-To suggest a change, use `/presence suggest`. Like covenant proposals, changes are saved for your review.
-
----
-
-## Injection logic
-
-Archer doesn't inject all three layers every turn — that would waste tokens on simple questions.
-
-| Query type | SOUL injected? | MEMORY.md injected? |
-|------------|---------------|---------------------|
-| `chat` (greeting, simple question) | No | No |
-| `task` (do something) | No | Yes |
-| `project` (project-related) | No | Yes |
-| `decision` (choice, advice) | **Yes** | Yes |
-| `emotional` (feelings, wellbeing) | **Yes** | Yes |
-| `reflection` (retrospective, pattern) | **Yes** | Yes |
-
-COVENANT and PRESENCE summaries are injected on every turn (they're short).
-Runtime safety rules are always injected first, before everything else.
+要建议调整，用 `/presence suggest`。与契约提案一样，变更保存供你审阅。
 
 ---
 
-## SOUL evolution
+## 注入逻辑
 
-As you use Archer, it may detect signals worth adding to your soul archive:
+Archer 不会每轮都注入三个层次——对简单问题来说那会浪费 Token。
 
-- Identity statements ("I've realized that I...")
-- Significant decisions
-- Recurring patterns surfaced in reflections
+| 查询类型 | 注入 SOUL？ | 注入 MEMORY.md？ |
+|----------|------------|-----------------|
+| `chat`（问候、简单问题） | 否 | 否 |
+| `task`（做某事） | 否 | 是 |
+| `project`（项目相关） | 否 | 是 |
+| `decision`（选择、建议） | **是** | 是 |
+| `emotional`（情绪、身心状况） | **是** | 是 |
+| `reflection`（回顾、模式分析） | **是** | 是 |
 
-When it detects one, it creates a `soul_proposal`. You review these with:
+COVENANT 和 PRESENCE 摘要每轮都会注入（它们很短）。运行时安全规则始终优先注入，位于所有内容之前。
+
+---
+
+## 灵魂演化
+
+随着你使用 Archer，它可能会检测到值得添加到灵魂档案的信号：
+
+- 身份陈述（"我意识到我……"）
+- 重大决策
+- 在复盘中浮现的反复模式
+
+当它检测到一个信号时，会创建一条 `soul_proposal`。你用以下命令审阅：
 
 ```
 /soul list
 ```
 
-Accept proposals that resonate:
+接受你认可的提案：
 ```
 /soul accept 3
 ```
 
-Accepted proposals are **appended** to the end of SOUL.md with a timestamp. The original content is never modified.
+被接受的提案会以时间戳**追加**到 SOUL.md 末尾。原有内容永不修改。
 
 ---
 
-## Self-critique system
+## 自我批评系统
 
-Separate from soul evolution, Archer has a self-critique mechanism for observing its own behavior patterns.
+独立于灵魂演化，Archer 有一个自我批评机制，用于观察自身的行为模式。
 
 ```
 /critique list
 ```
 
-A critique is an observation about Archer's own tendencies — for example, noticing it's been over-explaining when you wanted brevity.
+批评是关于 Archer 自身倾向的观察——例如，发现它在你想要简洁时解释过多。
 
-Critiques are:
-- Stored in `self_critiques` table
-- Reviewed by you, not auto-applied
-- Rate-limited (max 1 per session from automatic detection)
-- Not used to automatically change code or behavior
+批评的特点：
+- 存储在 `self_critiques` 表中
+- 由你审阅，不自动应用
+- 有频率限制（自动检测每会话最多 1 条）
+- 不用于自动修改代码或行为
 
-Think of it as Archer's introspection log, not a behavior patch system.
+把它当作 Archer 的自省日志，而不是行为补丁系统。
 
 ---
 
-## Templates
+## 模板文件
 
-The `templates/` directory contains starting points for all four files:
+`templates/` 目录包含所有四个文件的起点：
 
 - `templates/SOUL.template.md`
 - `templates/MEMORY.template.md`
 - `templates/COVENANT.template.md`
 - `templates/PRESENCE.template.md`
 
-The installer copies these to `~/.archer/`. They're intentionally minimal — fill them in at your own pace.
+安装脚本将这些文件复制到 `~/.archer/`。它们是有意精简的——按照你自己的节奏填写。

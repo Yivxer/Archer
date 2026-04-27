@@ -1,94 +1,94 @@
-# Installation
+# 安装说明
 
-## Requirements
+## 环境要求
 
-- Python 3.11 or later
-- macOS (Linux should work; Windows is untested)
-- An API key from any OpenAI-compatible LLM provider
+- Python 3.11 或更高版本
+- macOS（Linux 应该可以运行；Windows 未测试）
+- 任何兼容 OpenAI 接口的 LLM API Key
 
-## Automated install
+## 自动安装
 
 ```bash
-git clone https://github.com/your-username/archer.git
-cd archer
+git clone https://github.com/Yivxer/Archer.git
+cd Archer
 bash install.sh
 ```
 
-The script will:
+安装脚本会自动完成：
 
-1. Create `~/.archer/` and copy template files (SOUL, MEMORY, COVENANT, PRESENCE)
-2. Generate `archer.toml` with paths pre-filled
-3. Create a Python virtualenv at `.venv/`
-4. Install Python dependencies from `requirements.txt`
-5. Install the `archer` command to `/usr/local/bin/` (requires sudo)
+1. 创建 `~/.archer/` 并复制模板文件（SOUL、MEMORY、COVENANT、PRESENCE）
+2. 生成 `archer.toml`，路径预填（你补充 API Key）
+3. 在 `.venv/` 下创建 Python 虚拟环境
+4. 从 `requirements.txt` 安装 Python 依赖
+5. 将 `archer` 命令安装到 `/usr/local/bin/`（需要 sudo）
 
-If any of your `~/.archer/` files already exist, the script will not overwrite them — it will warn you and skip.
+如果 `~/.archer/` 下已有文件，安装脚本**不会覆盖**，只会提示并跳过。
 
-## Manual install
+## 手动安装
 
 ```bash
-cd archer
+cd Archer
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 
-# Set up config
+# 配置文件
 cp templates/archer.example.toml archer.toml
 
-# Set up soul files
+# 灵魂档案
 mkdir -p ~/.archer
 cp templates/SOUL.template.md     ~/.archer/SOUL.md
 cp templates/MEMORY.template.md   ~/.archer/MEMORY.md
 cp templates/COVENANT.template.md ~/.archer/COVENANT.md
 cp templates/PRESENCE.template.md ~/.archer/PRESENCE.md
 
-# Edit config
-open archer.toml   # fill in your API key and correct paths
+# 编辑配置
+open archer.toml   # 填入 API Key 和正确路径
 ```
 
-## Configuration
+## 配置说明
 
-Edit `archer.toml` after installation. The minimum required fields are:
+安装完成后，编辑 `archer.toml`。最少必填字段：
 
 ```toml
 [api]
-api_key  = "sk-your-key-here"
-base_url = "https://api.deepseek.com/v1"   # or any OpenAI-compatible URL
+api_key  = "sk-你的密钥"
+base_url = "https://api.deepseek.com/v1"   # 或任何兼容 OpenAI 接口的 URL
 model    = "deepseek-chat"
 
 [persona]
-soul_path     = "/Users/you/.archer/SOUL.md"
-memory_path   = "/Users/you/.archer/MEMORY.md"
-covenant_path = "/Users/you/.archer/COVENANT.md"
-presence_path = "/Users/you/.archer/PRESENCE.md"
+soul_path     = "/Users/你的用户名/.archer/SOUL.md"
+memory_path   = "/Users/你的用户名/.archer/MEMORY.md"
+covenant_path = "/Users/你的用户名/.archer/COVENANT.md"
+presence_path = "/Users/你的用户名/.archer/PRESENCE.md"
 
 [memory]
-db_path = "/Users/you/.archer/archer.db"
+db_path = "/Users/你的用户名/.archer/archer.db"
 ```
 
-See `templates/archer.example.toml` for the full list of options.
+完整配置选项见 `templates/archer.example.toml`。
 
-## Optional dependencies
+## 可选依赖
 
-### Vector search (recommended)
+### 向量检索（推荐）
 
-Enables semantic memory retrieval. Without it, Archer falls back to full-text search.
+开启语义记忆检索。未安装时，Archer 回退到全文搜索。
 
 ```bash
 pip install sentence-transformers sqlite-vec
 ```
 
-The embedding model (~120MB) is downloaded on first use and cached locally.
+嵌入模型（约 120MB）在首次使用时下载并缓存到本地。
 
-### MCP tool servers
+### MCP 工具服务器
 
-Enables connecting external tool servers via the Model Context Protocol.
+通过 Model Context Protocol 连接外部工具服务器。
 
 ```bash
 pip install mcp
 ```
 
-Then add servers to `archer.toml`:
+然后在 `archer.toml` 中添加服务器配置：
 
 ```toml
 [mcp]
@@ -100,19 +100,19 @@ command = "uvx"
 args    = ["mcp-server-fetch"]
 ```
 
-## Updating
+## 更新
 
 ```bash
 git pull
 pip install -r requirements.txt
 ```
 
-Your `~/.archer/` files and `archer.toml` are not affected by updates.
+你的 `~/.archer/` 文件和 `archer.toml` 不受更新影响。
 
-## Uninstalling
+## 卸载
 
 ```bash
 sudo rm /usr/local/bin/archer
 rm -rf .venv
-# Optionally: rm -rf ~/.archer
+# 可选：rm -rf ~/.archer
 ```

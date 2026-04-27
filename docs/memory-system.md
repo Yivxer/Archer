@@ -1,111 +1,111 @@
-# Memory System
+# 记忆系统
 
-Archer maintains long-term memory across sessions using SQLite and optional vector search.
+Archer 使用 SQLite 和可选的向量检索，跨会话维护长期记忆。
 
-## How it works
+## 工作原理
 
 ```
-Conversation
-    → session ends (or /reflect, /exit, every 6 turns)
-    → background extraction thread runs
-    → LLM proposes candidate memories
-    → stored in pending_memories table
-    → you review with /memory pending
-    → /memory accept → written to memories table
-    → future sessions retrieve relevant memories automatically
+对话进行中
+    → 会话结束（或执行 /reflect、/exit、每 6 轮触发）
+    → 后台提取线程运行
+    → LLM 提出候选记忆
+    → 存入 pending_memories 表
+    → 你用 /memory pending 审阅
+    → /memory accept → 写入 memories 表
+    → 未来会话自动检索相关记忆
 ```
 
-Memories are never auto-accepted. You always decide what persists.
+记忆永远不会自动接受。你始终决定什么会被保存。
 
-## Memory types
+## 记忆类型
 
-| Type | Purpose | Decay |
-|------|---------|-------|
-| `identity` | Who you are — values, personality | never |
-| `preference` | How you work, what you like | never |
-| `decision` | Significant decisions made | never |
-| `insight` | Things you've learned | never |
-| `project` | Project progress and blockers | 60 days unused |
-| `todo` | Commitments and to-dos | 60 days unused |
-| `risk` | Potential problems flagged | 60 days unused |
-| `context` | Temporary situational context | 30 days unused |
-| `reflection` | Session reflection summaries | 30 days unused |
+| 类型 | 用途 | 衰减规则 |
+|------|------|----------|
+| `identity` | 你是谁——价值观、个性 | 永不衰减 |
+| `preference` | 你的工作方式、偏好 | 永不衰减 |
+| `decision` | 重要决策 | 永不衰减 |
+| `insight` | 你学到的东西 | 永不衰减 |
+| `project` | 项目进度和阻塞点 | 60 天未使用后衰减 |
+| `todo` | 承诺和待办 | 60 天未使用后衰减 |
+| `risk` | 标记的潜在问题 | 60 天未使用后衰减 |
+| `context` | 临时情境上下文 | 30 天未使用后衰减 |
+| `reflection` | 会话复盘摘要 | 30 天未使用后衰减 |
 
-**Decay** means importance score drops by 1 when unused past the threshold (floor: 1). Identity and decision memories are immune to decay.
+**衰减**指超过阈值且未被使用时，重要性评分降低 1（下限为 1）。身份类和决策类记忆免于衰减。
 
-## Retrieval
+## 检索机制
 
-Each turn, Archer retrieves the most relevant memories using:
+每轮对话，Archer 通过以下方式检索最相关的记忆：
 
-1. **Vector search** (if `sqlite-vec` + `sentence-transformers` are installed) — semantic similarity
-2. **FTS5 full-text search** — keyword matching
-3. **De-duplication** — combined results are de-duped
+1. **向量检索**（如果安装了 `sqlite-vec` + `sentence-transformers`）—— 语义相似度
+2. **FTS5 全文检索** —— 关键词匹配
+3. **去重** —— 合并结果并去除重复
 
-The top 5 memories (configurable) are injected into the system prompt when relevant.
+检索到的前 5 条记忆（可配置）在相关时注入系统提示词。
 
-**Lightweight queries** (short, no decision keywords) skip memory injection — this saves ~1KB/turn for simple conversation.
+**轻量查询**（短消息、无决策关键词）会跳过记忆注入——这为简单对话节省约 1KB/轮。
 
-## Memory fields
+## 记忆字段
 
 ```sql
-content      TEXT     -- the memory content
-type         TEXT     -- one of the types above
-scope        TEXT     -- 'user' (default) or custom scope
-confidence   REAL     -- 0.7 for auto-extracted, 0.9 for manual
-importance   INTEGER  -- 1-5 (★4+ are "core memories")
-valid_until  TEXT     -- expiry date (optional)
-last_used_at TEXT     -- last retrieval timestamp (used for decay)
-session_id   TEXT     -- which session created this memory
-status       TEXT     -- 'active' or 'archived'
+content      TEXT     -- 记忆内容
+type         TEXT     -- 以上类型之一
+scope        TEXT     -- 'user'（默认）或自定义作用域
+confidence   REAL     -- 0.7（自动提取）或 0.9（手动添加）
+importance   INTEGER  -- 1-5（★4+ 为"核心记忆"）
+valid_until  TEXT     -- 过期日期（可选）
+last_used_at TEXT     -- 上次检索时间戳（用于衰减）
+session_id   TEXT     -- 创建此记忆的会话
+status       TEXT     -- 'active' 或 'archived'
 ```
 
-## Memory health check
+## 记忆健康检查
 
-`/memory review` runs a health scan and flags:
+`/memory review` 运行健康扫描并标记：
 
-- Apparent duplicates
-- Conflicting memories
-- Expired entries (`valid_until` in the past)
-- High-importance insights that might need updating
+- 明显的重复条目
+- 相互冲突的记忆
+- 已过期条目（`valid_until` 已过期）
+- 可能需要更新的高重要性洞察
 
-It does not auto-delete anything — you decide what to do.
+健康检查不会自动删除任何内容——由你决定如何处理。
 
-## Behavior themes
+## 行为主题
 
-`/themes detect` runs a cross-session pattern analysis:
+`/themes detect` 运行跨会话模式分析：
 
-1. Archer reads your memory store
-2. LLM identifies recurring behavioral patterns
-3. Each pattern must pass quality gates before being stored:
-   - Name ≤ 12 characters
-   - At least 2 supporting memories
-   - Memories must come from at least 2 different sessions
+1. Archer 读取你的记忆库
+2. LLM 识别反复出现的行为模式
+3. 每个模式必须通过质量门控才能存储：
+   - 名称 ≤ 12 个字符
+   - 至少有 2 条支持记忆
+   - 记忆必须来自至少 2 个不同会话
 
-This prevents single-session "fake patterns" from being recorded as long-term themes.
+这防止了单会话"假模式"被记录为长期主题。
 
-## Searching memories
+## 搜索记忆
 
 ```
-/memory search <term>
+/memory search <关键词>
 ```
 
-- Terms of 3+ characters use the FTS5 index
-- Terms of 1-2 characters fall back to LIKE search
-- With vector search installed, semantic similarity is also applied
+- 3 个字符及以上的词使用 FTS5 索引
+- 1-2 个字符的词回退到 LIKE 搜索
+- 安装向量检索后，同时应用语义相似度
 
-## Manual memory management
+## 手动管理记忆
 
-Add a memory directly:
+直接添加一条记忆：
 ```
-/memory add I work best when I have one clear priority, not three parallel tracks.
-```
-
-Update an existing memory:
-```
-/memory update 42 I work best in 90-minute focused blocks, not open-ended sessions.
+/memory add 我在有一个明确优先项时工作最好，而不是三条并行的轨道。
 ```
 
-Archive (soft-delete):
+更新已有记忆：
+```
+/memory update 42 我在 90 分钟专注块中工作最好，而不是开放式的会话。
+```
+
+归档（软删除）：
 ```
 /memory archive 42
 ```

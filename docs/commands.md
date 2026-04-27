@@ -1,109 +1,109 @@
-# Command Reference
+# 命令手册
 
-## Conversation management
+## 对话管理
 
-| Command | Description |
-|---------|-------------|
-| `/help` | Show all commands |
-| `/status` | Model, mode, token usage, active project, soul proposals |
-| `/mode <mirror\|coach\|critic\|operator>` | Switch conversation mode (persisted to toml) |
-| `/model [<name>]` | View or switch the active LLM model |
-| `/reflect` | Structured reflection on the current session (JSON output, stays in history) |
-| `/listen [stop]` | Silent recording mode — notes are saved, no LLM response triggered |
-| `/sessions [days]` | Session history statistics |
-| `/save` | Explicitly save current session |
-| `/clear` | Clear conversation history (starts fresh) |
-| `/compact` | Summarize and compress current history |
-| `/exit` | Exit Archer (saves session, runs background extraction) |
+| 命令 | 说明 |
+|------|------|
+| `/help` | 显示所有命令 |
+| `/status` | 当前模型、模式、Token 用量、活跃项目、灵魂提案 |
+| `/mode <mirror\|coach\|critic\|operator>` | 切换对话模式（持久化到 toml） |
+| `/model [<name>]` | 查看或切换当前 LLM 模型 |
+| `/reflect` | 对当前会话进行结构化复盘（输出 JSON，保留在历史中） |
+| `/listen [stop]` | 静默记录模式——保存笔记，不触发 LLM 响应 |
+| `/sessions [days]` | 会话历史统计 |
+| `/save` | 显式保存当前会话 |
+| `/clear` | 清空对话历史（重新开始） |
+| `/compact` | 压缩并总结当前历史 |
+| `/exit` | 退出 Archer（保存会话，运行后台提取） |
 
-## Memory system
+## 记忆系统
 
-| Command | Description |
-|---------|-------------|
-| `/memory list` | List all active memories |
-| `/memory search <term>` | Hybrid search (vector + full-text) |
-| `/memory add <content>` | Manually add a memory |
-| `/memory pending` | View memories proposed by Archer, awaiting your review |
-| `/memory accept [ID\|all]` | Accept proposed memories |
-| `/memory reject [ID\|all]` | Reject proposed memories |
-| `/memory update <ID> <content>` | Update an existing memory |
-| `/memory archive <ID>` | Archive (soft-delete) a memory |
-| `/memory delete <ID>` | Permanently delete |
-| `/memory review` | Health check — flags duplicates, conflicts, stale entries |
-| `/memory extract` | Manually trigger background extraction |
-| `/memory reindex` | Rebuild vector index |
+| 命令 | 说明 |
+|------|------|
+| `/memory list` | 列出所有活跃记忆 |
+| `/memory search <关键词>` | 混合检索（向量 + 全文） |
+| `/memory add <内容>` | 手动添加一条记忆 |
+| `/memory pending` | 查看 Archer 提案的待审阅记忆 |
+| `/memory accept [ID\|all]` | 接受提案记忆 |
+| `/memory reject [ID\|all]` | 拒绝提案记忆 |
+| `/memory update <ID> <内容>` | 更新已有记忆 |
+| `/memory archive <ID>` | 归档（软删除）一条记忆 |
+| `/memory delete <ID>` | 永久删除 |
+| `/memory review` | 健康检查——标记重复、冲突、过期条目 |
+| `/memory extract` | 手动触发后台提取 |
+| `/memory reindex` | 重建向量索引 |
 
-## Soul system
+## 灵魂档案系统
 
-| Command | Description |
-|---------|-------------|
-| `/soul list` | View pending SOUL.md evolution proposals |
-| `/soul accept <ID\|all>` | Accept — appends to SOUL.md |
-| `/soul reject <ID\|all>` | Discard proposal |
-| `/soul view` | View recent SOUL.md evolution history |
-| `/covenant view` | View your COVENANT.md |
-| `/covenant propose <text>` | Propose a covenant change (saved to history, not auto-applied) |
-| `/presence view` | View your PRESENCE.md |
-| `/presence suggest <text>` | Suggest a presence change (saved to history, not auto-applied) |
+| 命令 | 说明 |
+|------|------|
+| `/soul list` | 查看待处理的 SOUL.md 演化提案 |
+| `/soul accept <ID\|all>` | 接受——追加到 SOUL.md |
+| `/soul reject <ID\|all>` | 丢弃提案 |
+| `/soul view` | 查看近期 SOUL.md 演化历史 |
+| `/covenant view` | 查看你的 COVENANT.md |
+| `/covenant propose <内容>` | 提议修改根契约（保存到历史，不自动应用） |
+| `/presence view` | 查看你的 PRESENCE.md |
+| `/presence suggest <内容>` | 建议调整在场方式（保存到历史，不自动应用） |
 
-## Self-critique system
+## 自我批评系统
 
-| Command | Description |
-|---------|-------------|
-| `/critique list` | View all critique records (open / dismissed) |
-| `/critique add` | Manually add a critique observation (min 30 chars) |
-| `/critique dismiss <ID>` | Dismiss a critique |
+| 命令 | 说明 |
+|------|------|
+| `/critique list` | 查看所有批评记录（开放 / 已关闭） |
+| `/critique add` | 手动添加一条批评观察（最少 30 个字符） |
+| `/critique dismiss <ID>` | 关闭一条批评 |
 
-## Themes
+## 行为主题
 
-| Command | Description |
-|---------|-------------|
-| `/themes` | List detected behavior themes |
-| `/themes detect` | Run pattern detection across memory |
-| `/themes <ID>` | View theme details and linked memories |
+| 命令 | 说明 |
+|------|------|
+| `/themes` | 列出检测到的行为主题 |
+| `/themes detect` | 跨记忆运行模式检测 |
+| `/themes <ID>` | 查看主题详情及关联记忆 |
 
-## Projects
+## 项目管理
 
-| Command | Description |
-|---------|-------------|
-| `/project list` | List all projects |
-| `/project new <name> [description]` | Create a project |
-| `/project use <ID\|name>` | Set active project (auto-injected into context) |
-| `/project log <ID\|name> <content>` | Log a project event |
-| `/project status <ID\|name>` | View project details |
-| `/project archive <ID\|name>` | Archive a project |
+| 命令 | 说明 |
+|------|------|
+| `/project list` | 列出所有项目 |
+| `/project new <名称> [描述]` | 创建项目 |
+| `/project use <ID\|名称>` | 设置活跃项目（自动注入上下文） |
+| `/project log <ID\|名称> <内容>` | 记录项目事件 |
+| `/project status <ID\|名称>` | 查看项目详情 |
+| `/project archive <ID\|名称>` | 归档项目 |
 
-## Automation
+## 定时任务
 
-| Command | Description |
-|---------|-------------|
-| `/cron list` | List scheduled tasks |
-| `/cron add <interval> <task>` | Add a task (daily / weekly / monthly / Nh) |
-| `/cron del <ID>` | Remove a scheduled task |
-| `/cron run <ID>` | Run a task immediately |
+| 命令 | 说明 |
+|------|------|
+| `/cron list` | 列出计划任务 |
+| `/cron add <周期> <任务>` | 添加任务（daily / weekly / monthly / Nh） |
+| `/cron del <ID>` | 删除计划任务 |
+| `/cron run <ID>` | 立即运行任务 |
 
-## Skills
+## 技能管理
 
-| Command | Description |
-|---------|-------------|
-| `/skill list` | List installed skills |
-| `/skill info <name>` | Skill details and schema |
-| `/skill install <path\|URL>` | Install from local path or GitHub URL |
-| `/skill remove <name>` | Uninstall |
+| 命令 | 说明 |
+|------|------|
+| `/skill list` | 列出已安装技能 |
+| `/skill info <名称>` | 技能详情和 Schema |
+| `/skill install <路径\|URL>` | 从本地路径或 GitHub URL 安装 |
+| `/skill remove <名称>` | 卸载技能 |
 
-## System
+## 系统
 
-| Command | Description |
-|---------|-------------|
-| `/doctor [--fix]` | System health check (11 items); `--fix` auto-repairs what it can |
+| 命令 | 说明 |
+|------|------|
+| `/doctor [--fix]` | 系统健康检查（11 项）；`--fix` 自动修复可修复项 |
 
-## Input shortcuts
+## 输入快捷键
 
-| Action | Shortcut |
-|--------|----------|
-| Send message | `Enter` |
-| New line | `Option+Enter` (macOS) / `Alt+Enter` |
-| Attach file | `@/path/to/file` or `@~/path` |
-| Attach file with spaces | `@"path with spaces"` |
-| Command completion | `Tab` after `/` |
-| Exit | `Ctrl+C` |
+| 操作 | 快捷键 |
+|------|--------|
+| 发送消息 | `Enter` |
+| 换行 | `Option+Enter`（macOS） / `Alt+Enter` |
+| 附加文件 | `@/path/to/file` 或 `@~/path` |
+| 附加带空格路径的文件 | `@"path with spaces"` |
+| 命令补全 | 输入 `/` 后按 `Tab` |
+| 退出 | `Ctrl+C` |

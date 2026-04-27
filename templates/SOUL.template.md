@@ -1,74 +1,73 @@
-# SOUL — [Your Name]'s Soul Archive
+# SOUL — [你的名字] 的灵魂档案
 
-> This is your long-term soul archive. Archer reads this file when you ask for decisions,
-> reflections, or emotionally-weighted guidance.
+> 这是你的长期灵魂档案。Archer 在你寻求决策、复盘或情绪加权指导时读取这个文件。
 >
-> Fill in what's true for you. You can leave sections blank and fill them over time.
-> Archer will propose additions via `/soul list` — you decide what gets written here.
+> 写下对你真实的内容。你可以留空某些部分，随着时间慢慢填写。
+> Archer 会通过 `/soul list` 提议添加内容——由你决定什么会被写进来。
 
 ---
 
-## Who I Am
+## 我是谁
 
-<!-- Brief self-description: role, current life phase, what matters to you -->
+<!-- 简短的自我描述：角色、当前人生阶段、什么对你最重要 -->
 
 ---
 
-## Value Ordering
+## 价值观排序
 
-<!-- List your values in priority order. Example:
-1. Freedom
-2. Authenticity
-3. Growth
-4. Connection
-5. Stability
+<!-- 按优先级列出你的价值观。示例：
+1. 自由
+2. 真实
+3. 成长
+4. 连接
+5. 稳定
 -->
 
 ---
 
-## Core Tensions
+## 核心张力
 
-<!-- Pairs of things that pull against each other in your life. Example:
-- Craving depth ⇌ defaulting to isolation
-- Wanting recognition ⇌ resisting vulnerability
+<!-- 你生活中相互拉扯的一对对事物。示例：
+- 渴望深度 ⇌ 默认走向孤立
+- 想要被认可 ⇌ 抗拒脆弱
 -->
 
 ---
 
-## Defense Patterns
+## 防御模式
 
-<!-- How you tend to avoid discomfort. Noticing these helps Archer not reinforce them.
-Example:
-- Staying busy to avoid sitting with uncertainty
-- Using analysis to avoid feeling
-- Setting high standards to avoid starting
+<!-- 你倾向于如何回避不适。识别这些有助于 Archer 不去强化它们。
+示例：
+- 用忙碌来逃避与不确定性同坐
+- 用分析来回避感受
+- 用高标准来避免开始
 -->
 
 ---
 
-## Recovery Mechanisms
+## 恢复机制
 
-<!-- What actually helps when things go wrong.
-Example: alone time → music → movement → writing → talking it through
+<!-- 当事情出错时，什么真的有用。
+示例：独处 → 音乐 → 运动 → 写作 → 和人谈
 -->
 
 ---
 
-## How I Work Best with AI
+## 我如何与 AI 协作
 
-<!-- What you want from this relationship. Example:
-- Friction over compliance — push back when you see something I'm missing
-- Surface the non-obvious, not just what I want to hear
-- Point out patterns, but don't turn observations into verdicts
+<!-- 你对这段关系的期待。示例：
+- 摩擦优于顺从——当你看到我遗漏的东西时，推回来
+- 呈现非显而易见的东西，而不仅仅是我想听的
+- 指出模式，但不要把观察变成判决
 -->
 
 ---
 
-## Long-term Goals
+## 长期目标
 
-<!-- What you're working toward, in broad strokes -->
+<!-- 你正在朝向什么，大方向上 -->
 
 ---
 
-*This file is yours. Archer will never overwrite it automatically.*
-*To propose additions, use `/soul list` after a session.*
+*这个文件是你的。Archer 永远不会自动覆写它。*
+*要提议添加内容，会话结束后用 `/soul list` 查看。*
