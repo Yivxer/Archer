@@ -251,7 +251,11 @@ def get_by_ids(ids: list[int]) -> dict[int, dict]:
 
 def search(keyword: str, limit: int = 10) -> list[dict]:
     conn = sqlite3.connect(DB_PATH)
+    # FTS5 trigram 索引需要 ≥3 个字符，短词直接走 LIKE
+    use_fts = len(keyword.strip()) >= 3
     try:
+        if not use_fts:
+            raise ValueError("keyword too short for FTS5 trigram")
         rows = conn.execute(
             "SELECT m.id, m.content, m.tags, m.type, m.importance, m.created_at, m.confidence, m.valid_until "
             "FROM memories_fts f JOIN memories m ON f.rowid = m.id "

@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 from difflib import SequenceMatcher
 import json
+import re
 import sys
 import threading
 from pathlib import Path
+
+_TOML_PATH = Path(__file__).parent / "archer.toml"
 from rich.console import Console
 from rich.live import Live
 from rich.panel import Panel
@@ -170,6 +173,17 @@ def _handle_model(parts: list[str], cfg: dict):
     cfg["api"]["model"] = new_model
     console.print(f"[bold #c44e00]已切换至 {new_model}[/]")
 
+def _persist_mode(mode: str) -> None:
+    """将 current_mode 写入 archer.toml，插入或替换 [persona] 段中的对应行。"""
+    text = _TOML_PATH.read_text(encoding="utf-8")
+    new_line = f'current_mode = "{mode}"'
+    if re.search(r'^current_mode\s*=', text, re.MULTILINE):
+        text = re.sub(r'^current_mode\s*=.*$', new_line, text, flags=re.MULTILINE)
+    else:
+        text = re.sub(r'^(default_mode\s*=.*)$', rf'\1\n{new_line}', text, flags=re.MULTILINE)
+    _TOML_PATH.write_text(text, encoding="utf-8")
+
+
 def _handle_mode(parts: list[str], cfg: dict):
     modes = cfg.get("persona", {}).get("modes", {})
     valid = list(modes.keys())
@@ -183,6 +197,7 @@ def _handle_mode(parts: list[str], cfg: dict):
     cfg["persona"]["current_mode"] = mode
     mode_name = modes[mode].get("name", mode)
     console.print(f"[dim]已切换至 {mode_name} 模式[/dim]")
+    _persist_mode(mode)
 
 _REFLECT_PROMPT = """\
 你是复盘专家。分析以下对话，严格以 JSON 输出，不要其他内容：
@@ -317,6 +332,8 @@ def _memory_search(keyword: str):
     if not keyword:
         console.print("[yellow]用法：/memory search <关键词>[/yellow]")
         return
+    if len(keyword.strip()) < 3:
+        console.print("[dim]搜索词过短，使用模糊匹配（FTS5 全文索引需 ≥3 个字符）。[/dim]")
     mems = search(keyword)
     if not mems:
         console.print(f"[dim]没有找到「{keyword}」相关记忆。[/dim]")
@@ -1011,7 +1028,8 @@ def _run_with_tools(messages: list[dict], skills: dict, model: str = "") -> str:
     MAX_ROUNDS = 10
 
     for round_n in range(MAX_ROUNDS):
-        msg = call_with_tools(messages, tools, model=model)
+        with Live(Spinner("arc", text="  [dim]思考中…[/dim]"), refresh_per_second=20, transient=True, console=console):
+            msg = call_with_tools(messages, tools, model=model)
 
         if not msg.tool_calls:
             break
