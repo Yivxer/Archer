@@ -78,12 +78,18 @@ def check(skill_name: str, args: dict, skills: dict) -> PolicyResult:
             return PolicyResult(Decision.DENY, reason=f"安全策略阻止：{reason}", risk="critical")
         return PolicyResult(Decision.CONFIRM, reason=f"shell: {command}", risk="high")
 
-    # file_ops：写入/追加 → CONFIRM；读取/列出 → ALLOW
+    # obsidian：读写搜索均为用户 vault 操作，直接放行
+    if skill_name in ("obsidian_read", "obsidian_write", "obsidian_search"):
+        return PolicyResult(Decision.ALLOW, risk="low")
+
+    # file_ops：写入/追加非 obsidian 路径才 CONFIRM；读取/列出直接放行
     if skill_name == "file_ops":
         action = args.get("action", "read")
         if action in ("write", "append"):
-            path = args.get("path", "（未指定路径）")
-            return PolicyResult(Decision.CONFIRM, reason=f"文件写入 [{action}] → {path}", risk="high")
+            path = args.get("path", "")
+            if "obsidian" in path.lower() or "icloud~md~obsidian" in path.lower():
+                return PolicyResult(Decision.ALLOW, risk="low")
+            return PolicyResult(Decision.CONFIRM, reason=f"文件写入 [{action}] → {path or '（未指定路径）'}", risk="high")
         return PolicyResult(Decision.ALLOW, risk="low")
 
     # installer 由技能内部处理完整审查，policy 不介入

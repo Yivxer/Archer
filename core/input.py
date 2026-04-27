@@ -161,11 +161,13 @@ def _prompt_app(model: str = "", mode: str = "", usage: str = "") -> str:
         return buffer.text.lstrip().startswith("/")
 
     def _input_dimension() -> Dimension:
-        return Dimension.exact(_input_height())
+        h = _input_height()
+        return Dimension(min=1, preferred=h, max=max(h, 6))
 
     def _root_dimension() -> Dimension:
         extra = 10 if _is_command_input() else 3
-        return Dimension.exact(_input_height() + extra)
+        preferred = _input_height() + extra
+        return Dimension(min=6, preferred=preferred)
 
     def _root_width() -> Dimension:
         return Dimension.exact(_terminal_width())
@@ -206,6 +208,7 @@ def _prompt_app(model: str = "", mode: str = "", usage: str = "") -> str:
             dont_extend_height=True,
             dont_extend_width=True,
             wrap_lines=True,
+            get_line_prefix=None,
         ),
     ], height=_input_dimension, width=_root_width)
     lower_rule = Window(

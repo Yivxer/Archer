@@ -1057,17 +1057,27 @@ def _run_with_tools(messages: list[dict], skills: dict, model: str = "") -> str:
                 continue
 
             if pr.decision == Decision.CONFIRM:
-                console.print(f"[yellow]  ⚠ 高风险操作 — {pr.reason}[/yellow]")
+                console.print(f"\n[yellow]  ⚠  {pr.reason}[/yellow]")
+                console.print("  [bold white]需要确认：[/bold white]")
+                console.print("  [green bold]y[/green bold] 确认执行    [yellow bold]n[/yellow bold] 跳过此步    [red bold]q[/red bold] 取消任务\n")
                 try:
-                    answer = input("  执行？[y/N] ").strip().lower()
+                    answer = input("  → ").strip().lower()
                 except (EOFError, KeyboardInterrupt):
-                    answer = "n"
-                if answer != "y":
-                    console.print("[dim]  已取消。[/dim]")
+                    answer = "q"
+                if answer == "q":
+                    console.print("[dim]  任务已取消。[/dim]")
                     messages.append({
                         "role": "tool",
                         "tool_call_id": tc.id,
-                        "content": "[用户取消] 操作已拒绝",
+                        "content": "[用户取消] 任务已终止",
+                    })
+                    break
+                if answer != "y":
+                    console.print("[dim]  已跳过此步。[/dim]")
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tc.id,
+                        "content": "[用户跳过] 此步骤已跳过",
                     })
                     continue
             # ───────────────────────────────────────────────────────

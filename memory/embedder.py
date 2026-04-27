@@ -9,6 +9,14 @@
 encode() 抛出 ImportError，调用方负责捕获。
 """
 from __future__ import annotations
+import logging
+import os
+
+# 抑制 HuggingFace Hub 鉴权提示和下载进度条（模型已缓存到本地）
+os.environ.setdefault("HF_HUB_DISABLE_IMPLICIT_TOKEN", "1")
+os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+logging.getLogger("huggingface_hub").setLevel(logging.ERROR)
+logging.getLogger("sentence_transformers").setLevel(logging.ERROR)
 
 _MODEL_NAME = "paraphrase-multilingual-MiniLM-L12-v2"
 DIM = 384
@@ -27,8 +35,11 @@ def is_available() -> bool:
 def _get_model():
     global _model
     if _model is None:
-        from sentence_transformers import SentenceTransformer
-        _model = SentenceTransformer(_MODEL_NAME)
+        import warnings
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            from sentence_transformers import SentenceTransformer
+            _model = SentenceTransformer(_MODEL_NAME, show_progress_bar=False)
     return _model
 
 
