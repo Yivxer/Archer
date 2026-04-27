@@ -34,6 +34,7 @@ from memory.extract import extract
 from memory.retrieve import for_context, format_for_prompt
 from skills.loader import load_skills, get_tools
 from skills.installer import install as skill_install, remove as skill_remove
+from core.skill_router import select_skills
 
 console = Console()
 
@@ -1090,8 +1091,9 @@ def run():
                 console.print(f"[dim]图片模式 → {active_model}[/dim]")
 
         try:
-            if skills:
-                full_response = _run_with_tools(messages, skills, model=active_model)
+            active_skills = select_skills(user_text, skills)
+            if active_skills:
+                full_response = _run_with_tools(messages, active_skills, model=active_model)
             else:
                 full_response = _stream(messages, model=active_model)
         except Exception as e:
