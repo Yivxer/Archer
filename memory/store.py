@@ -539,14 +539,14 @@ def get_memories_for_detection(limit: int = 50) -> list[dict]:
     """返回用于主题检测的核心记忆（importance >= 3，排除 reflection/context）。"""
     conn = sqlite3.connect(DB_PATH)
     rows = conn.execute(
-        "SELECT id, content, tags, type, importance, confidence, valid_until FROM memories "
+        "SELECT id, content, tags, type, importance, created_at, confidence, valid_until FROM memories "
         "WHERE status = 'active' AND importance >= 3 "
         "AND type NOT IN ('reflection', 'context') "
         "ORDER BY importance DESC, updated_at DESC LIMIT ?",
         (limit,),
     ).fetchall()
     conn.close()
-    return [_row_to_dict(r) for r in rows]
+    return [_row_to_dict(r, has_date=True) for r in rows]
 
 
 # ── Projects（多项目追踪）──────────────────────────────────────────────────────

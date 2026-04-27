@@ -10,11 +10,21 @@ ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 
 
+import sqlite3
+
 def _setup_tmp_db(tmp: str):
     import memory.store as store_mod
     store_mod.DB_PATH = Path(tmp) / "test.db"
     store_mod.init_db()
     return store_mod
+
+
+def _set_created_at(db_path, mem_id: int, date_str: str):
+    """直接修改记忆的 created_at，用于触发跨日期约束。"""
+    conn = sqlite3.connect(db_path)
+    conn.execute("UPDATE memories SET created_at = ? WHERE id = ?", (date_str, mem_id))
+    conn.commit()
+    conn.close()
 
 
 # ── schema ─────────────────────────────────────────────────────────────────────
@@ -139,8 +149,10 @@ def _mock_stream(text: str):
 def test_detect_and_save_creates_theme():
     with tempfile.TemporaryDirectory() as tmp:
         store = _setup_tmp_db(tmp)
-        for i in range(4):
-            store.save(f"重复行为模式记忆 {i}", type="insight", importance=4)
+        ids = [store.save(f"重复行为模式记忆 {i}", type="insight", importance=4) for i in range(4)]
+        # _SAMPLE_DETECT_RESPONSE 引用 memory_id 1 和 2，需让它们跨不同日期
+        _set_created_at(store.DB_PATH, ids[0], "2026-04-01T10:00:00")
+        _set_created_at(store.DB_PATH, ids[1], "2026-04-02T10:00:00")
 
         import memory.store as orig_store
         orig_db = orig_store.DB_PATH
@@ -162,6 +174,9 @@ def test_detect_and_save_links_memories():
         m1 = store.save("工具研究记忆一号内容", type="insight", importance=4)
         m2 = store.save("工具研究记忆二号内容", type="insight", importance=4)
         store.save("工具研究记忆三号内容", type="insight", importance=4)
+        # 让 m1/m2 跨不同日期，满足跨会话代理约束
+        _set_created_at(store.DB_PATH, m1, "2026-04-01T10:00:00")
+        _set_created_at(store.DB_PATH, m2, "2026-04-03T10:00:00")
 
         # Build response with actual memory IDs
         response = f"""{{

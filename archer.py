@@ -14,7 +14,7 @@ from rich.spinner import Spinner
 from rich.table import Table
 
 from core.llm import stream_chat, call_with_tools, load_config, get_last_usage, get_session_tokens, pop_config_reloaded
-from core.context import build_messages
+from core.context import build_messages, is_heavy_query
 from core.session import Session
 from core.input import prompt as get_input
 from core.compressor import should_compress, compress
@@ -1304,7 +1304,14 @@ def run():
 
         core_mems, related_mems = for_context(user_text, limit=cfg["memory"]["max_context_memories"])
         mem_block = format_for_prompt(core_mems, related_mems)
-        messages  = build_messages(session.history, user_content, cfg, db_memories=mem_block)
+        heavy     = is_heavy_query(user_text)
+        project   = get_project(_active_project_id) if _active_project_id else None
+        proj_evts = get_project_events(_active_project_id, limit=3) if _active_project_id else []
+        messages  = build_messages(
+            session.history, user_content, cfg,
+            db_memories=mem_block, project=project,
+            project_events=proj_evts, heavy=heavy,
+        )
 
         has_images = any(r["type"] == "image" for r in refs)
         active_model = ""
@@ -1315,7 +1322,11 @@ def run():
                 console.print("[yellow]图片需要支持视觉的模型，请在 archer.toml 中配置 vision_model。[/yellow]")
                 has_images = False
                 user_content = user_text
-                messages = build_messages(session.history, user_content, cfg, db_memories=mem_block)
+                messages = build_messages(
+                    session.history, user_content, cfg,
+                    db_memories=mem_block, project=project,
+                    project_events=proj_evts, heavy=heavy,
+                )
             else:
                 active_model = vision_model
                 console.print(f"[dim]图片模式 → {active_model}[/dim]")

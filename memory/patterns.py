@@ -13,6 +13,10 @@ from memory.store import (
     get_theme_memories,
 )
 
+_MAX_THEME_NAME_CHARS = 12   # 主题名称最大字符数
+_MIN_EVIDENCE_LINKS    = 2   # 每个主题至少需要的证据条数
+_MIN_DATE_SPAN         = 2   # 证据必须跨越的最少不同日期数（跨会话代理）
+
 _DETECT_PROMPT = """\
 你是行为模式分析助手。分析以下记忆条目，识别其中反复出现的主题和行为模式。
 
@@ -74,11 +78,41 @@ def detect_and_save(limit: int = 50) -> list[dict]:
     except Exception:
         return []
 
+    # 构建 memory_id → 日期 的快速查找表（用于跨日期检查）
+    mem_date_lookup: dict[int, str] = {
+        m["id"]: (m.get("created_at") or "")[:10]
+        for m in memories
+        if m.get("created_at")
+    }
+
     saved = []
     for t in raw_themes[:5]:
         name = str(t.get("name", "")).strip()
         if not name:
             continue
+
+        # 约束 1：名称不超过 _MAX_THEME_NAME_CHARS 个字符
+        if len(name) > _MAX_THEME_NAME_CHARS:
+            continue
+
+        links = t.get("links", [])
+        if not isinstance(links, list):
+            links = []
+
+        # 约束 2：至少需要 _MIN_EVIDENCE_LINKS 条证据
+        valid_links = [lk for lk in links if isinstance(lk, dict) and lk.get("memory_id") is not None]
+        if len(valid_links) < _MIN_EVIDENCE_LINKS:
+            continue
+
+        # 约束 3：证据必须跨越至少 _MIN_DATE_SPAN 个不同日期（跨会话代理）
+        evidence_dates = {
+            mem_date_lookup.get(int(lk["memory_id"]), "")
+            for lk in valid_links
+        }
+        evidence_dates.discard("")
+        if len(evidence_dates) < _MIN_DATE_SPAN:
+            continue
+
         description = str(t.get("description", "")).strip()
         category = str(t.get("category", "behavior")).strip()
         if category not in ("behavior", "interest", "struggle", "growth"):
@@ -86,18 +120,13 @@ def detect_and_save(limit: int = 50) -> list[dict]:
 
         tid = save_theme(name, description, category)
 
-        links = t.get("links", [])
-        if isinstance(links, list):
-            for link in links:
-                if not isinstance(link, dict):
-                    continue
-                mid = link.get("memory_id")
-                strength = link.get("strength", 0.5)
-                if mid is not None:
-                    try:
-                        link_memory_to_theme(int(mid), tid, float(strength))
-                    except Exception:
-                        pass
+        for link in valid_links:
+            mid = link.get("memory_id")
+            strength = link.get("strength", 0.5)
+            try:
+                link_memory_to_theme(int(mid), tid, float(strength))
+            except Exception:
+                pass
 
         saved.append({"id": tid, "name": name, "description": description, "category": category})
 
