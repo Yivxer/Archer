@@ -1,14 +1,58 @@
+# Python
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
-.env
-.venv/
+*.egg-info/
+dist/
+build/
+.eggs/
 
-# 含 API key，不进 git
+# Virtual environment
+.venv/
+venv/
+env/
+
+# ── Private user files (never commit) ────────────────────────────────────────
+# Configuration with API keys
+.env
 archer.toml
 
-# 运行时数据
+# Soul system — these are yours, not the project's
+SOUL.md
+MEMORY.md
+COVENANT.md
+PRESENCE.md
+
+# Runtime data
+*.db
+*.db-shm
+*.db-wal
+
+# Session & artifact storage
+sessions/
 memory/sessions/
-memory/archer.db
 .artifacts/
+artifacts/
+logs/
+private/
+vault/
+
+# History directories (covenant/presence proposal archives)
+history/
+
+# ── macOS ─────────────────────────────────────────────────────────────────────
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# ── Editor ────────────────────────────────────────────────────────────────────
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# ── Test cache ────────────────────────────────────────────────────────────────
+.pytest_cache/
+.coverage
+htmlcov/

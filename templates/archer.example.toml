@@ -1,0 +1,76 @@
+# Archer Configuration
+# Copy this file to archer.toml and fill in your values.
+# archer.toml is gitignored — it will never be committed.
+
+[api]
+base_url     = "https://api.deepseek.com/v1"   # or any OpenAI-compatible endpoint
+api_key      = "sk-your-api-key-here"
+model        = "deepseek-chat"
+vision_model = "deepseek-chat"                  # model to use when images are attached
+models       = ["deepseek-chat", "deepseek-reasoner"]  # available via /model command
+
+# [api] OpenAI example:
+# base_url = "https://api.openai.com/v1"
+# api_key  = "sk-..."
+# model    = "gpt-4o"
+
+[persona]
+name          = "Archer"                        # Archer's display name
+soul_path     = "~/.archer/SOUL.md"             # your soul archive (never committed)
+memory_path   = "~/.archer/MEMORY.md"           # your current-state snapshot
+covenant_path = "~/.archer/COVENANT.md"         # root covenant (never auto-modified)
+presence_path = "~/.archer/PRESENCE.md"         # interaction style
+default_mode  = "coach"                         # mirror | coach | critic | operator
+current_mode  = "coach"                         # updated automatically by /mode
+
+[persona.history]
+covenant_dir = "~/.archer/history/covenant/"    # proposed covenant revisions
+presence_dir = "~/.archer/history/presence/"    # presence change history
+
+[persona.modes.mirror]
+name   = "Mirror"
+prompt = "Current mode: mirror. Your only job is to ask questions and clarify. No advice."
+
+[persona.modes.coach]
+name   = "Coach"
+prompt = "Current mode: coach. Drive toward action. End each response by asking: what will you do next?"
+
+[persona.modes.critic]
+name   = "Critic"
+prompt = "Current mode: critic. Challenge assumptions, find logic gaps and inconsistencies."
+
+[persona.modes.operator]
+name   = "Operator"
+prompt = "Current mode: operator. Concise responses, complete the task directly, no extra questions."
+
+[memory]
+db_path              = "~/.archer/archer.db"    # SQLite database (never committed)
+max_context_memories = 5                        # max memories injected per turn
+
+[context]
+token_limit = 1000000                           # soft limit for context compression
+
+[ui]
+stream = true                                   # stream LLM responses
+
+[obsidian]
+vault_path = "/path/to/your/obsidian/vault"     # optional: your Obsidian vault
+
+[critique]
+weekly_enabled              = false             # periodic self-critique (off by default)
+user_signal_cooldown_h      = 24                # minimum hours between same-type critiques
+max_user_signal_per_session = 1                 # max auto-critiques per session
+
+[security]
+shell_risk_scoring = true                       # enable 4-tier shell risk scoring
+strong_confirm     = true                       # enable STRONG_CONFIRM for high-risk commands
+
+[mcp]
+enabled             = false                     # enable MCP tool servers
+schema_policy       = "capability_aware"        # inject schemas on-demand (not every turn)
+recent_window_turns = 10                        # turns within which a server counts as "recent"
+
+# [[mcp.servers]]
+# name    = "fetch"
+# command = "uvx"
+# args    = ["mcp-server-fetch"]
