@@ -41,7 +41,7 @@ console = Console()
 _CMDS = frozenset({
     "/help", "/status", "/mode", "/model", "/reflect", "/sessions",
     "/save", "/clear", "/compact", "/exit", "/memory", "/skill",
-    "/themes", "/project", "/soul", "/listen",
+    "/themes", "/project", "/soul", "/listen", "/doctor",
 })
 
 # ── 后台提炼状态 ────────────────────────────────────────────────────────────────
@@ -112,6 +112,7 @@ def _help():
         ("/skill remove <名字>",        "卸载技能"),
         ("/skill info <名字>",          "技能详情"),
         ("/model [<模型名>]",           "查看 / 切换模型"),
+        ("/doctor [--fix]",             "自检系统状态，--fix 自动修复可修复问题"),
         ("/exit",                       "退出并保存"),
     ]
     for cmd, desc in rows:
@@ -662,6 +663,52 @@ def _handle_project(parts: list[str]):
             console.print("[dim]子命令：list · new · use · log · status · archive[/dim]")
 
 
+def _handle_doctor(parts: list[str], cfg: dict, skills: dict):
+    from core.doctor import run_checks, apply_fixes, Level
+
+    do_fix = len(parts) > 1 and parts[1] == "--fix"
+    from datetime import datetime as _dt
+    console.print(f"\n[bold cyan]Archer Doctor Report[/bold cyan]  [dim]{_dt.now().strftime('%Y-%m-%d %H:%M')}[/dim]\n")
+
+    results = run_checks(cfg, skills)
+
+    _STYLE = {
+        Level.OK:    ("[green]OK   [/green]",    "green"),
+        Level.INFO:  ("[cyan]INFO [/cyan]",       "cyan"),
+        Level.WARN:  ("[yellow]WARN [/yellow]",   "yellow"),
+        Level.ERROR: ("[red]ERROR[/red]",         "red"),
+    }
+
+    for r in results:
+        badge, _ = _STYLE[r.level]
+        console.print(f"  {badge}  [bold]{r.name:<12}[/bold]{r.message}")
+
+    warns  = sum(1 for r in results if r.level == Level.WARN)
+    errors = sum(1 for r in results if r.level == Level.ERROR)
+    total  = len(results)
+
+    console.print()
+    if errors:
+        console.print(f"  [red]✗ {errors} 个错误，{warns} 个警告[/red]（共 {total} 项）")
+    elif warns:
+        console.print(f"  [yellow]△ {warns} 个警告[/yellow]（共 {total} 项正常）")
+    else:
+        console.print(f"  [green]✓ 全部 {total} 项检查通过[/green]")
+
+    if do_fix:
+        console.print()
+        fixes = apply_fixes(results)
+        if fixes:
+            for msg in fixes:
+                console.print(f"  [cyan]{msg}[/cyan]")
+        else:
+            console.print("  [dim]没有可自动修复的问题。[/dim]")
+    elif warns or errors:
+        fixable = [r for r in results if r.fix_fn is not None and r.level in (Level.WARN, Level.ERROR)]
+        if fixable:
+            console.print(f"\n  [dim]运行 /doctor --fix 可自动修复 {len(fixable)} 个问题。[/dim]")
+
+
 def _handle_themes(parts: list[str]):
     from memory.patterns import detect_and_save, themes_summary, theme_detail
 
@@ -1060,6 +1107,8 @@ def run():
                     _handle_soul(parts, cfg)
                 case "/listen":
                     _handle_listen(parts)
+                case "/doctor":
+                    _handle_doctor(parts, cfg, skills)
                 case "/help":
                     _help()
                 case _:
