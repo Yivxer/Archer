@@ -120,7 +120,7 @@ def _check_pending(cfg: dict) -> CheckResult:
     try:
         conn = sqlite3.connect(db_path)
         count = conn.execute(
-            "SELECT COUNT(*) FROM pending_memories WHERE status='pending'"
+            "SELECT COUNT(*) FROM pending_memories"
         ).fetchone()[0]
         conn.close()
     except Exception:

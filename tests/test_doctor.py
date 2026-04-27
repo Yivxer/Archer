@@ -37,7 +37,7 @@ def _init_db(db: Path):
     conn = sqlite3.connect(db)
     tables = [
         "CREATE TABLE IF NOT EXISTS memories (id INTEGER PRIMARY KEY, content TEXT, tags TEXT DEFAULT '', type TEXT DEFAULT 'insight', importance INTEGER DEFAULT 3, status TEXT DEFAULT 'active', source TEXT DEFAULT '', created_at TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL DEFAULT '', archived_at TEXT, scope TEXT DEFAULT 'user', confidence REAL DEFAULT 0.8, last_used_at TEXT, valid_until TEXT)",
-        "CREATE TABLE IF NOT EXISTS pending_memories (id INTEGER PRIMARY KEY, content TEXT, type TEXT, importance INTEGER, tags TEXT, source TEXT, confidence REAL, created_at TEXT, status TEXT DEFAULT 'pending')",
+        "CREATE TABLE IF NOT EXISTS pending_memories (id INTEGER PRIMARY KEY, content TEXT, type TEXT, importance INTEGER, tags TEXT, source TEXT, confidence REAL, created_at TEXT)",
         "CREATE TABLE IF NOT EXISTS themes (id INTEGER PRIMARY KEY, name TEXT, category TEXT, description TEXT, occurrence_count INTEGER DEFAULT 1, last_seen_at TEXT)",
         "CREATE TABLE IF NOT EXISTS memory_links (id INTEGER PRIMARY KEY, memory_id INTEGER, theme_id INTEGER, strength REAL)",
         "CREATE TABLE IF NOT EXISTS projects (id INTEGER PRIMARY KEY, name TEXT, description TEXT, status TEXT DEFAULT 'active', current_phase TEXT, goal TEXT, created_at TEXT, updated_at TEXT)",
@@ -126,7 +126,7 @@ def test_pending_many():
         conn = sqlite3.connect(db)
         for i in range(12):
             conn.execute(
-                "INSERT INTO pending_memories (content, type, importance, tags, source, confidence, created_at, status) VALUES (?, 'insight', 3, '', 'test', 0.7, '2026-01-01', 'pending')",
+                "INSERT INTO pending_memories (content, type, importance, tags, source, confidence, created_at) VALUES (?, 'insight', 3, '', 'test', 0.7, '2026-01-01')",
                 (f"mem {i}",),
             )
         conn.commit()

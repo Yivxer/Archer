@@ -39,6 +39,7 @@ from core.scheduler import (
     add_task, remove_task as remove_cron_task, set_enabled as cron_set_enabled,
     list_tasks, run_due_tasks, run_task_by_id, parse_interval, fmt_interval,
 )
+from core.mcp import load_from_config as mcp_load
 
 console = Console()
 
@@ -1113,6 +1114,19 @@ def run():
     cfg = load_config()
     session = Session()
     skills = load_skills()
+
+    # ── MCP 初始化（可选，配置驱动）─────────────────────────────────────────
+    _mcp_manager = None
+    _mcp_skills: dict = {}
+    try:
+        _mcp_manager = mcp_load(cfg)
+        if _mcp_manager:
+            _mcp_skills = _mcp_manager.make_skill_modules()
+            if _mcp_skills:
+                console.print(f"[dim]MCP：已加载 {len(_mcp_skills)} 个工具（{', '.join(sorted(_mcp_skills))}）[/dim]")
+    except Exception as _e:
+        console.print(f"[dim]MCP 初始化失败，已跳过：{_e}[/dim]")
+
     _welcome()
 
     # ── 启动时执行到期定时任务 ─────────────────────────────────────────────────
@@ -1170,6 +1184,8 @@ def run():
             if len(session.history) >= 2:
                 _auto_extract(session.history, silent=True)
             session.save()
+            if _mcp_manager:
+                _mcp_manager.stop()
             console.print("[dim]已退出。[/dim]")
             break
 
@@ -1195,6 +1211,8 @@ def run():
                         _auto_extract(session.history, silent=False)
                     saved = session.save()
                     console.print(f"[dim]会话已保存 → {saved}[/dim]")
+                    if _mcp_manager:
+                        _mcp_manager.stop()
                     break
                 case "/save":
                     console.print(f"[dim]会话已保存 → {session.save()}[/dim]")
@@ -1271,6 +1289,9 @@ def run():
 
         try:
             active_skills = select_skills(user_text, skills)
+            # MCP 工具由用户显式配置，始终暴露（不经过 skill_router 过滤）
+            if _mcp_skills:
+                active_skills = {**active_skills, **_mcp_skills}
             if active_skills:
                 full_response = _run_with_tools(messages, active_skills, model=active_model)
             else:
