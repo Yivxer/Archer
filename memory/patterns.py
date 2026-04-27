@@ -15,7 +15,9 @@ from memory.store import (
 
 _MAX_THEME_NAME_CHARS = 12   # 主题名称最大字符数
 _MIN_EVIDENCE_LINKS    = 2   # 每个主题至少需要的证据条数
-_MIN_DATE_SPAN         = 2   # 证据必须跨越的最少不同日期数（跨会话代理）
+_MIN_SESSION_SPAN      = 2   # 证据必须跨越的最少不同 session_id 数（v1.2）
+_MIN_DATE_SPAN         = 2   # 证据必须跨越的最少不同日期数（fallback）
+_SAME_DAY_CONF_CAP     = 0.65  # 两个 session 在同一天时置信度上限
 
 _DETECT_PROMPT = """\
 你是行为模式分析助手。分析以下记忆条目，识别其中反复出现的主题和行为模式。
@@ -78,9 +80,12 @@ def detect_and_save(limit: int = 50) -> list[dict]:
     except Exception:
         return []
 
-    # 构建 memory_id → 日期 的快速查找表（用于跨日期检查）
-    mem_date_lookup: dict[int, str] = {
-        m["id"]: (m.get("created_at") or "")[:10]
+    # 构建 memory_id → (date, session_id) 的快速查找表
+    mem_meta_lookup: dict[int, tuple[str, str]] = {
+        m["id"]: (
+            (m.get("created_at") or "")[:10],
+            m.get("session_id") or "",
+        )
         for m in memories
         if m.get("created_at")
     }
@@ -104,14 +109,27 @@ def detect_and_save(limit: int = 50) -> list[dict]:
         if len(valid_links) < _MIN_EVIDENCE_LINKS:
             continue
 
-        # 约束 3：证据必须跨越至少 _MIN_DATE_SPAN 个不同日期（跨会话代理）
+        # 约束 3（v1.2）：证据必须跨越至少 _MIN_SESSION_SPAN 个不同 session_id
+        evidence_sessions = {
+            mem_meta_lookup.get(int(lk["memory_id"]), ("", ""))[1]
+            for lk in valid_links
+        }
+        evidence_sessions.discard("")
         evidence_dates = {
-            mem_date_lookup.get(int(lk["memory_id"]), "")
+            mem_meta_lookup.get(int(lk["memory_id"]), ("", ""))[0]
             for lk in valid_links
         }
         evidence_dates.discard("")
-        if len(evidence_dates) < _MIN_DATE_SPAN:
-            continue
+
+        if len(evidence_sessions) >= _MIN_SESSION_SPAN:
+            # 有跨 session 证据：使用 session 门控
+            # 若两个 session 在同一天，置信度上限为 _SAME_DAY_CONF_CAP
+            cross_day = len(evidence_dates) >= _MIN_DATE_SPAN
+        else:
+            # 无 session_id 数据（旧记忆兼容）：降级到跨日期门控
+            if len(evidence_dates) < _MIN_DATE_SPAN:
+                continue
+            cross_day = True
 
         description = str(t.get("description", "")).strip()
         category = str(t.get("category", "behavior")).strip()
@@ -122,9 +140,12 @@ def detect_and_save(limit: int = 50) -> list[dict]:
 
         for link in valid_links:
             mid = link.get("memory_id")
-            strength = link.get("strength", 0.5)
+            raw_strength = float(link.get("strength", 0.5))
+            # 同 session 同日场景：限制 strength 上限
+            if not cross_day:
+                raw_strength = min(raw_strength, _SAME_DAY_CONF_CAP)
             try:
-                link_memory_to_theme(int(mid), tid, float(strength))
+                link_memory_to_theme(int(mid), tid, raw_strength)
             except Exception:
                 pass
 

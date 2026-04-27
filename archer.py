@@ -14,7 +14,7 @@ from rich.spinner import Spinner
 from rich.table import Table
 
 from core.llm import stream_chat, call_with_tools, load_config, get_last_usage, get_session_tokens, pop_config_reloaded
-from core.context import build_messages, is_heavy_query
+from core.context import build_messages, is_heavy_query, classify_query_intent
 from core.session import Session
 from core.input import prompt as get_input
 from core.compressor import should_compress, compress
@@ -27,7 +27,7 @@ from memory.store import (
     add_pending, list_pending, count_pending, accept_pending, reject_pending,
     create_project, list_projects, get_project, get_project_by_name,
     archive_project, log_project_event, get_project_events,
-    count_soul_proposals,
+    count_soul_proposals, generate_session_id,
 )
 from memory.soul import (
     propose_from_memories, propose_from_obsidian_hints, get_pending as get_soul_pending,
@@ -50,6 +50,7 @@ _CMDS = frozenset({
     "/help", "/status", "/mode", "/model", "/reflect", "/sessions",
     "/save", "/clear", "/compact", "/exit", "/memory", "/skill",
     "/themes", "/project", "/soul", "/listen", "/doctor", "/cron",
+    "/covenant", "/presence", "/critique",
 })
 
 # ── 后台提炼状态 ────────────────────────────────────────────────────────────────
@@ -57,6 +58,20 @@ _extract_thread: threading.Thread | None = None
 
 # ── 当前会话活跃项目 ─────────────────────────────────────────────────────────────
 _active_project_id: int | None = None
+
+# ── 当前会话 ID（v1.2 Phase 3）────────────────────────────────────────────────────
+_current_session_id: str = ""
+
+# ── MCP 最近使用追踪（v1.2 Phase 4）──────────────────────────────────────────────
+_mcp_last_used_turn: int = -999   # 记录最近一次调用 MCP 工具的 turn 编号
+_turn_counter: int = 0
+
+# MCP capability 关键词（命中 → 注入 MCP schema）
+_MCP_CAPABILITY_KW = frozenset([
+    "url", "网页", "抓取", "fetch", "读取链接", "远程资源",
+    "github", "filesystem", "browser", "文件系统", "仓库", "issue", "pull request",
+    "搜索网页", "browse", "screenshot", "截图",
+])
 
 # ── 静默录入模式 ─────────────────────────────────────────────────────────────────
 _listen_mode: bool = False
@@ -127,6 +142,18 @@ def _help():
         ("/cron remove <ID>",           "删除定时任务"),
         ("/cron enable/disable <ID>",   "启用 / 禁用定时任务"),
         ("/cron run <ID>",              "立即执行定时任务"),
+        ("/covenant view",              "查看根契约"),
+        ("/covenant history",           "查看契约历史版本"),
+        ("/covenant propose",           "提出契约修改申请（需用户主动触发）"),
+        ("/presence view",              "查看当前在场方式"),
+        ("/presence edit",              "编辑在场方式（用编辑器打开）"),
+        ("/presence suggest",           "生成在场方式调整建议（仅建议，不写入）"),
+        ("/presence history",           "查看在场方式历史"),
+        ("/critique scan",              "扫描生成自我批评诊断"),
+        ("/critique list",              "列出当前开放的批评条目"),
+        ("/critique view <ID>",         "查看批评详情（证据 / 假设 / 建议方向）"),
+        ("/critique dismiss <ID>",      "驳回批评（诊断不成立）"),
+        ("/critique new",               "手动创建批评条目"),
         ("/exit",                       "退出并保存"),
     ]
     for cmd, desc in rows:
@@ -578,6 +605,215 @@ def _handle_soul(parts: list[str], cfg: dict):
 
         case _:
             console.print("[dim]子命令：list · accept <ID|all> · reject <ID|all> · view[/dim]")
+
+
+def _handle_covenant(parts: list[str], cfg: dict):
+    """根契约管理：view / history / propose。"""
+    covenant_path = cfg.get("persona", {}).get("covenant_path", "")
+    history_dir   = cfg.get("persona", {}).get("history", {}).get("covenant_dir", "")
+    sub = parts[1] if len(parts) > 1 else "view"
+
+    match sub:
+        case "view":
+            if not covenant_path:
+                console.print("[yellow]未配置 persona.covenant_path[/yellow]")
+                return
+            p = Path(covenant_path).expanduser()
+            if not p.exists():
+                console.print(f"[yellow]COVENANT.md 不存在：{p}[/yellow]")
+                return
+            console.print(p.read_text(encoding="utf-8"), markup=False)
+
+        case "history":
+            if not history_dir:
+                console.print("[dim]未配置 persona.history.covenant_dir，暂无历史记录。[/dim]")
+                return
+            hdir = Path(history_dir).expanduser()
+            if not hdir.exists() or not list(hdir.glob("*.md")):
+                console.print("[dim]尚无历史版本。[/dim]")
+                return
+            files = sorted(hdir.glob("*.md"), reverse=True)
+            for f in files[:5]:
+                console.print(f"  [dim]{f.name}[/dim]")
+
+        case "propose":
+            console.print(
+                "[yellow]根契约修改需要你主动提出具体变更内容。[/yellow]\n"
+                "[dim]请告诉我：你想修改哪一条，改成什么，以及原因。[/dim]\n"
+                "[dim]修改会存入待审提议，需要强确认后才会备份并写入。[/dim]"
+            )
+
+        case _:
+            console.print("[dim]子命令：view · history · propose[/dim]")
+
+
+def _handle_presence(parts: list[str], cfg: dict):
+    """在场方式管理：view / edit / suggest / history。"""
+    presence_path = cfg.get("persona", {}).get("presence_path", "")
+    history_dir   = cfg.get("persona", {}).get("history", {}).get("presence_dir", "")
+    sub = parts[1] if len(parts) > 1 else "view"
+
+    match sub:
+        case "view":
+            if not presence_path:
+                console.print("[yellow]未配置 persona.presence_path[/yellow]")
+                return
+            p = Path(presence_path).expanduser()
+            if not p.exists():
+                console.print(f"[yellow]PRESENCE.md 不存在：{p}[/yellow]")
+                return
+            console.print(p.read_text(encoding="utf-8"), markup=False)
+
+        case "edit":
+            if not presence_path:
+                console.print("[yellow]未配置 persona.presence_path[/yellow]")
+                return
+            import subprocess
+            p = Path(presence_path).expanduser()
+            editor = __import__("os").environ.get("EDITOR", "nano")
+            try:
+                # 备份当前版本
+                if history_dir and p.exists():
+                    hdir = Path(history_dir).expanduser()
+                    hdir.mkdir(parents=True, exist_ok=True)
+                    from datetime import datetime
+                    backup = hdir / f"PRESENCE_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md"
+                    backup.write_text(p.read_text(encoding="utf-8"), encoding="utf-8")
+                subprocess.run([editor, str(p)])
+                console.print(f"[green]PRESENCE.md 已更新。[/green]")
+            except Exception as e:
+                console.print(f"[red]打开编辑器失败：{e}[/red]")
+
+        case "suggest":
+            console.print(
+                "[dim]在场方式建议模式：我会根据最近对话分析，生成调整建议。[/dim]\n"
+                "[dim]建议不会自动写入，需要你通过 /presence edit 手动确认更新。[/dim]\n\n"
+                "请告诉我：最近哪些交互让你觉得我的回应节奏或方式不对？"
+            )
+
+        case "history":
+            if not history_dir:
+                console.print("[dim]未配置 persona.history.presence_dir，暂无历史记录。[/dim]")
+                return
+            hdir = Path(history_dir).expanduser()
+            if not hdir.exists() or not list(hdir.glob("*.md")):
+                console.print("[dim]尚无历史版本。[/dim]")
+                return
+            files = sorted(hdir.glob("*.md"), reverse=True)
+            for f in files[:5]:
+                console.print(f"  [dim]{f.name}[/dim]")
+
+        case _:
+            console.print("[dim]子命令：view · edit · suggest · history[/dim]")
+
+
+def _handle_critique(parts: list[str], cfg: dict):
+    """自我批评管理：scan / list / view / dismiss / new。"""
+    from memory.critique import (
+        scan_critiques, list_critiques, get_critique,
+        dismiss_critique, create_critique,
+    )
+    sub = parts[1] if len(parts) > 1 else "list"
+    arg = parts[2] if len(parts) > 2 else ""
+
+    match sub:
+        case "list":
+            items = list_critiques(status="open")
+            if not items:
+                console.print("[dim]当前没有开放的自我批评条目。使用 /critique scan 生成。[/dim]")
+                return
+            console.print(f"\n[bold cyan]自我批评[/bold cyan]  [dim]（{len(items)} 条开放）[/dim]\n")
+            for c in items:
+                sev = "⚠" if c.get("severity", 3) >= 4 else "·"
+                console.print(
+                    f"  [dim]{c['id']}[/dim]  {sev}  [yellow]{c['title']}[/yellow]"
+                    f"  [dim]{(c.get('created_at') or '')[:10]}  [{c.get('source','')}][/dim]"
+                )
+            console.print("\n[dim]/critique view <ID> · /critique dismiss <ID>[/dim]")
+
+        case "view":
+            if not arg.isdigit():
+                console.print("[yellow]用法：/critique view <ID>[/yellow]")
+                return
+            c = get_critique(int(arg))
+            if not c:
+                console.print(f"[yellow]找不到 ID={arg} 的批评条目。[/yellow]")
+                return
+            console.print(f"\n[bold]{c['title']}[/bold]  [dim]#{c['id']}  {(c.get('created_at') or '')[:16]}[/dim]")
+            console.print(f"来源：{c.get('source','')}  严重度：{c.get('severity',3)}/5  置信度：{c.get('confidence',0.7):.0%}")
+            console.print(f"\n观察：\n{c.get('observation','')}")
+            if c.get("hypothesis"):
+                console.print(f"\n假设：\n{c['hypothesis']}")
+            if c.get("suggested_direction"):
+                console.print(f"\n建议方向：\n{c['suggested_direction']}")
+            evidence = c.get("evidence_json") or "[]"
+            try:
+                import json
+                evs = json.loads(evidence)
+                if evs:
+                    console.print(f"\n证据（{len(evs)} 条）：")
+                    for ev in evs[:3]:
+                        console.print(f"  · {ev}")
+            except Exception:
+                pass
+
+        case "dismiss":
+            if not arg.isdigit():
+                console.print("[yellow]用法：/critique dismiss <ID>[/yellow]")
+                return
+            reason = " ".join(parts[3:]) if len(parts) > 3 else ""
+            dismiss_critique(int(arg), reason)
+            console.print(f"[dim]已驳回 ID={arg} 的批评条目。[/dim]")
+
+        case "scan":
+            items = scan_critiques(cfg)
+            if not items:
+                console.print("[dim]扫描完成，未发现需要记录的批评条目。[/dim]")
+                return
+            console.print(f"[green]扫描完成，生成 {len(items)} 条自我批评条目。使用 /critique list 查看。[/green]")
+
+        case "new":
+            console.print("[dim]手动创建批评条目。请描述你观察到的问题（至少 30 字）：[/dim]")
+            try:
+                obs = input("> ").strip()
+            except (EOFError, KeyboardInterrupt):
+                return
+            if len(obs) < 30:
+                console.print("[yellow]描述太短，至少需要 30 字。[/yellow]")
+                return
+            title = obs[:20] + "…" if len(obs) > 20 else obs
+            cid = create_critique(
+                title=title, observation=obs, source="manual",
+                evidence=[], session_id=None,
+            )
+            console.print(f"[green]已创建批评条目 #{cid}。[/green]")
+
+        case _:
+            console.print("[dim]子命令：scan · list · view <ID> · dismiss <ID> · new[/dim]")
+
+
+def _should_inject_mcp(user_text: str, mcp_skills: dict, cfg: dict) -> bool:
+    """
+    MCP schema 三条件注入策略（v1.2 Phase 4）：
+    1. 最近 N 轮使用过 MCP 工具
+    2. 用户输入包含 MCP server 名称
+    3. 用户输入包含 capability 关键词
+    """
+    if not mcp_skills:
+        return False
+    recent_window = cfg.get("mcp", {}).get("recent_window_turns", 10)
+    recent_mcp_used = (_turn_counter - _mcp_last_used_turn) <= recent_window
+    if recent_mcp_used:
+        return True
+    text_lower = user_text.lower()
+    # server name 命中（工具名格式：{server}__{tool}）
+    server_names = {name.split("__")[0] for name in mcp_skills}
+    if any(s in text_lower for s in server_names):
+        return True
+    # capability keyword 命中
+    if any(kw in text_lower for kw in _MCP_CAPABILITY_KW):
+        return True
+    return False
 
 
 def _handle_project(parts: list[str]):
@@ -1147,7 +1383,9 @@ def _wait_for_extract(timeout: float = 12.0):
         _extract_thread.join(timeout=timeout)
 
 def run():
+    global _current_session_id, _turn_counter, _mcp_last_used_turn
     init_db()
+    _current_session_id = generate_session_id()
     # 初始化向量索引表（sqlite-vec 未安装时静默跳过）
     try:
         from memory.vector_store import init_vec_table
@@ -1294,6 +1532,12 @@ def run():
                     _handle_project(parts)
                 case "/soul":
                     _handle_soul(parts, cfg)
+                case "/covenant":
+                    _handle_covenant(parts, cfg)
+                case "/presence":
+                    _handle_presence(parts, cfg)
+                case "/critique":
+                    _handle_critique(parts, cfg)
                 case "/listen":
                     _handle_listen(parts)
                 case "/doctor":
@@ -1314,13 +1558,16 @@ def run():
 
         core_mems, related_mems = for_context(user_text, limit=cfg["memory"]["max_context_memories"])
         mem_block = format_for_prompt(core_mems, related_mems)
-        heavy     = is_heavy_query(user_text)
-        project   = get_project(_active_project_id) if _active_project_id else None
-        proj_evts = get_project_events(_active_project_id, limit=3) if _active_project_id else []
-        messages  = build_messages(
+        intent_info = classify_query_intent(user_text)
+        heavy       = intent_info["needs_memory"]
+        intent      = intent_info["intent"]
+        project     = get_project(_active_project_id) if _active_project_id else None
+        proj_evts   = get_project_events(_active_project_id, limit=3) if _active_project_id else []
+        messages    = build_messages(
             session.history, user_content, cfg,
             db_memories=mem_block, project=project,
             project_events=proj_evts, heavy=heavy,
+            intent=intent,
         )
 
         has_images = any(r["type"] == "image" for r in refs)
@@ -1343,8 +1590,8 @@ def run():
 
         try:
             active_skills = select_skills(user_text, skills)
-            # MCP 工具由用户显式配置，始终暴露（不经过 skill_router 过滤）
-            if _mcp_skills:
+            # MCP 工具：三条件策略注入（recent/server_name/capability_keyword）
+            if _mcp_skills and _should_inject_mcp(user_text, _mcp_skills, cfg):
                 active_skills = {**active_skills, **_mcp_skills}
             if active_skills:
                 full_response = _run_with_tools(messages, active_skills, model=active_model)
@@ -1365,6 +1612,7 @@ def run():
                 history_user += f"\n[附件：{', '.join(names)}]"
         session.add(history_user, full_response)
         turn_count += 1
+        _turn_counter += 1
 
         if turn_count % 6 == 0 and len(session.history) >= 6:
             _bg_extract(session.history[-8:])

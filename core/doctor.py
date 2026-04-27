@@ -156,6 +156,35 @@ def _check_obsidian(cfg: dict) -> CheckResult:
     return CheckResult(Level.ERROR, "obsidian", f"vault 路径不存在：{p}")
 
 
+def _check_path_safety(cfg: dict) -> list[CheckResult]:
+    """v1.2 Phase 0：检查路径安全配置是否符合要求。"""
+    results = []
+    vault_str = cfg.get("obsidian", {}).get("vault_path", "")
+
+    if not vault_str:
+        results.append(CheckResult(Level.WARN, "path_safety", "obsidian.vault_path 未配置，file_ops 写入无法判断归属"))
+        return results
+
+    vault_p = Path(vault_str).expanduser()
+    if not vault_p.exists():
+        results.append(CheckResult(Level.ERROR, "path_safety", f"vault_path 不存在：{vault_p}"))
+        return results
+    if not vault_p.is_dir():
+        results.append(CheckResult(Level.ERROR, "path_safety", f"vault_path 不是目录：{vault_p}"))
+        return results
+
+    # 检查 vault_path 是否可 resolve（符号链接穿透检测）
+    try:
+        resolved = vault_p.resolve()
+        if resolved != vault_p.resolve():
+            results.append(CheckResult(Level.WARN, "path_safety", "vault_path 含符号链接，已 resolve"))
+        results.append(CheckResult(Level.OK, "path_safety", f"vault_path 安全，resolve → {resolved}"))
+    except OSError as e:
+        results.append(CheckResult(Level.ERROR, "path_safety", f"vault_path resolve 失败：{e}"))
+
+    return results
+
+
 def _check_skills(skills: dict) -> list[CheckResult]:
     results = []
     count = len(skills)
@@ -224,6 +253,7 @@ def run_checks(cfg: dict, skills: dict) -> list[CheckResult]:
     results.append(_check_pending(cfg))
     results.append(_check_soul(cfg))
     results.append(_check_obsidian(cfg))
+    results.extend(_check_path_safety(cfg))
     results.extend(_check_skills(skills))
     results.append(_check_artifacts())
     results.append(_check_sessions())

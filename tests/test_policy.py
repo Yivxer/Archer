@@ -9,7 +9,7 @@ from pathlib import Path
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 
-from core.policy import check, check_shell_command, scan_code_for_dangers, Decision
+from core.policy import check, check_shell_command, scan_code_for_dangers, score_shell_risk, Decision
 
 
 def _make_skill(name, risk="low", requires_confirmation=False):
@@ -20,7 +20,7 @@ def _make_skill(name, risk="low", requires_confirmation=False):
     return mod
 
 
-# ── shell 黑名单：DENY ─────────────────────────────────────────────────────────
+# ── shell DENY（critical）────────────────────────────────────────────────────────
 
 def test_deny_rm_rf_home():
     allowed, reason = check_shell_command("rm -rf ~")
@@ -34,8 +34,9 @@ def test_deny_rm_rf_root():
     allowed, _ = check_shell_command("rm -rf /")
     assert not allowed
 
-def test_deny_sudo():
-    allowed, _ = check_shell_command("sudo apt-get install vim")
+def test_deny_sudo_rm():
+    """sudo rm 是 critical，直接 DENY。"""
+    allowed, _ = check_shell_command("sudo rm -rf /tmp/x")
     assert not allowed
 
 def test_deny_curl_pipe_sh():
@@ -46,23 +47,41 @@ def test_deny_fork_bomb():
     allowed, _ = check_shell_command(":(){ :|:& };:")
     assert not allowed
 
-def test_deny_shutdown():
-    allowed, _ = check_shell_command("shutdown -h now")
-    assert not allowed
-
 def test_deny_mkfs():
     allowed, _ = check_shell_command("mkfs.ext4 /dev/sdb")
     assert not allowed
 
 
+# ── shell STRONG_CONFIRM（high）──────────────────────────────────────────────────
+
+def test_sudo_is_high_not_deny():
+    """v1.2: sudo（非 sudo rm）升级为 STRONG_CONFIRM，不再 DENY。"""
+    risk, _ = score_shell_risk("sudo apt-get install vim")
+    assert risk == "high"
+    # check_shell_command 向后兼容：only critical → not allowed
+    allowed, _ = check_shell_command("sudo apt-get install vim")
+    assert allowed  # high 是 allowed（由 STRONG_CONFIRM 处理）
+
+def test_shutdown_is_high_not_deny():
+    """v1.2: shutdown/reboot 降为 STRONG_CONFIRM，不再 DENY。"""
+    risk, _ = score_shell_risk("shutdown -h now")
+    assert risk == "high"
+    allowed, _ = check_shell_command("shutdown -h now")
+    assert allowed  # STRONG_CONFIRM，不是 DENY
+
+def test_chmod_recursive_is_high():
+    risk, _ = score_shell_risk("chmod -R 777 /tmp")
+    assert risk == "high"
+
+
 # ── shell 安全命令：CONFIRM（非 DENY）────────────────────────────────────────
 
 def test_allow_git_status():
-    """git status 安全，policy 返回 CONFIRM（需确认），不是 DENY。"""
+    """git status 安全，v1.2 risk 评为 low → CONFIRM with low risk。"""
     skills = {"shell": _make_skill("shell", risk="high", requires_confirmation=True)}
     result = check("shell", {"command": "git status"}, skills)
     assert result.decision == Decision.CONFIRM
-    assert result.risk == "high"
+    assert result.risk == "low"  # v1.2: 风险评分后 git status 为 low
 
 def test_allow_ls():
     skills = {"shell": _make_skill("shell", risk="high")}

@@ -1,5 +1,6 @@
 import sqlite3
-from datetime import datetime
+import uuid
+from datetime import datetime, timedelta
 from pathlib import Path
 
 DB_PATH = Path(__file__).parent / "archer.db"
@@ -161,8 +162,21 @@ def init_db():
             created_at   TEXT    NOT NULL
         )
     """)
+    # v1.2 Phase 3: session_id 列（幂等补列）
+    for tbl_col in [
+        ("memories",       "session_id TEXT"),
+        ("project_events", "session_id TEXT"),
+        ("soul_proposals", "session_id TEXT"),
+    ]:
+        try:
+            conn.execute(f"ALTER TABLE {tbl_col[0]} ADD COLUMN {tbl_col[1]}")
+        except Exception:
+            pass
     conn.commit()
     conn.close()
+    # v1.2 Phase 2: 自我批评表
+    from memory.critique import init_critiques_table
+    init_critiques_table()
 
 def _now() -> str:
     return datetime.now().isoformat(timespec="seconds")
@@ -179,7 +193,7 @@ def _try_embed(memory_id: int, content: str) -> None:
 
 def save(content: str, tags: str = "", type: str = "insight", importance: int = 3,
          source: str = "", scope: str = "user", confidence: float = 0.8,
-         valid_until: str | None = None) -> int:
+         valid_until: str | None = None, session_id: str | None = None) -> int:
     content = content.strip()
     tags = tags.strip()
     if type not in MEMORY_TYPES:
@@ -205,9 +219,10 @@ def save(content: str, tags: str = "", type: str = "insight", importance: int = 
         return existing[0]
 
     cur = conn.execute(
-        "INSERT INTO memories (content, tags, type, importance, source, scope, confidence, valid_until, created_at, updated_at) "
-        "VALUES (?,?,?,?,?,?,?,?,?,?)",
-        (content, tags, type, importance, source, scope, confidence, valid_until, _now(), _now()),
+        "INSERT INTO memories (content, tags, type, importance, source, scope, confidence, "
+        "valid_until, session_id, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        (content, tags, type, importance, source, scope, confidence,
+         valid_until, session_id, _now(), _now()),
     )
     conn.commit()
     mid = cur.lastrowid
@@ -536,17 +551,22 @@ def get_theme_memories(theme_id: int, limit: int = 10) -> list[dict]:
 
 
 def get_memories_for_detection(limit: int = 50) -> list[dict]:
-    """返回用于主题检测的核心记忆（importance >= 3，排除 reflection/context）。"""
+    """返回用于主题检测的核心记忆（importance >= 3，排除 reflection/context）。含 session_id。"""
     conn = sqlite3.connect(DB_PATH)
     rows = conn.execute(
-        "SELECT id, content, tags, type, importance, created_at, confidence, valid_until FROM memories "
-        "WHERE status = 'active' AND importance >= 3 "
+        "SELECT id, content, tags, type, importance, created_at, confidence, valid_until, session_id "
+        "FROM memories WHERE status = 'active' AND importance >= 3 "
         "AND type NOT IN ('reflection', 'context') "
         "ORDER BY importance DESC, updated_at DESC LIMIT ?",
         (limit,),
     ).fetchall()
     conn.close()
-    return [_row_to_dict(r, has_date=True) for r in rows]
+    result = []
+    for r in rows:
+        d = _row_to_dict(r[:8], has_date=True)
+        d["session_id"] = r[8] if len(r) > 8 else None
+        result.append(d)
+    return result
 
 
 # ── Projects（多项目追踪）──────────────────────────────────────────────────────
@@ -720,3 +740,58 @@ def resolve_soul_proposal(pid: int | str, accepted: bool) -> list[int]:
     conn.commit()
     conn.close()
     return ids
+
+
+# ── Session ID 生成 ──────────────────────────────────────────────────────────────
+
+def generate_session_id() -> str:
+    """生成会话 ID：日期时间 + 短 UUID。"""
+    short_uuid = str(uuid.uuid4())[:8]
+    return datetime.now().strftime("%Y%m%d-%H%M%S") + "-" + short_uuid
+
+
+# ── Importance Decay（v1.2 Phase 3）────────────────────────────────────────────
+
+# 只对短中期记忆类型执行衰减，不影响身份/决策/偏好
+_DECAY_TYPES = {"context", "state", "todo", "risk", "project"}
+_NO_DECAY_TYPES = {"identity", "decision", "preference"}
+
+
+def run_importance_decay() -> int:
+    """
+    对超期未使用的短中期记忆执行 importance -1 衰减。
+    - context/state：超 30 天未使用 → importance -1
+    - todo/risk/project：超 60 天未使用 → importance -1
+    - 最低降到 1，不自动 archive，不自动删除。
+    返回影响的记忆条数。
+    """
+    now = datetime.now()
+    cutoff_30 = (now - timedelta(days=30)).isoformat(timespec="seconds")
+    cutoff_60 = (now - timedelta(days=60)).isoformat(timespec="seconds")
+
+    conn = sqlite3.connect(DB_PATH)
+    affected = 0
+
+    # context/state 30天
+    for t in ("context", "state"):
+        cur = conn.execute(
+            """UPDATE memories SET importance = MAX(1, importance - 1), updated_at = ?
+               WHERE type = ? AND status = 'active' AND importance > 1
+               AND (last_used_at IS NULL OR last_used_at < ?)""",
+            (_now(), t, cutoff_30),
+        )
+        affected += cur.rowcount
+
+    # todo/risk/project 60天
+    for t in ("todo", "risk", "project"):
+        cur = conn.execute(
+            """UPDATE memories SET importance = MAX(1, importance - 1), updated_at = ?
+               WHERE type = ? AND status = 'active' AND importance > 1
+               AND (last_used_at IS NULL OR last_used_at < ?)""",
+            (_now(), t, cutoff_60),
+        )
+        affected += cur.rowcount
+
+    conn.commit()
+    conn.close()
+    return affected
