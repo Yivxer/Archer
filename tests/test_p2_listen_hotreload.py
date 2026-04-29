@@ -15,32 +15,84 @@ sys.path.insert(0, str(ROOT))
 
 def test_config_loads_on_first_call():
     import core.llm as llm_mod
-    old_cfg, old_mtime = llm_mod._cfg, llm_mod._config_mtime
+    old_cfg, old_path = llm_mod._cfg, llm_mod._CONFIG_PATH
+    old_mtime = llm_mod._config_mtime
     try:
-        llm_mod._cfg = None
-        llm_mod._config_mtime = 0.0
-        cfg = llm_mod._load_config()
-        assert isinstance(cfg, dict)
-        assert "api" in cfg
+        with tempfile.TemporaryDirectory() as tmp:
+            toml_path = Path(tmp) / "archer.toml"
+            toml_path.write_text(
+                '[api]\napi_key = "test"\nbase_url = "http://x"\nmodel = "m"\n',
+                encoding="utf-8",
+            )
+            llm_mod._CONFIG_PATH = toml_path
+            llm_mod._cfg = None
+            llm_mod._config_mtime = 0.0
+            cfg = llm_mod._load_config()
+            assert isinstance(cfg, dict)
+            assert "api" in cfg
     finally:
         llm_mod._cfg = old_cfg
+        llm_mod._CONFIG_PATH = old_path
         llm_mod._config_mtime = old_mtime
+
+
+def test_config_applies_env_overrides():
+    import os
+    import core.llm as llm_mod
+    old_cfg, old_path = llm_mod._cfg, llm_mod._CONFIG_PATH
+    old_mtime = llm_mod._config_mtime
+    old_env = {k: os.environ.get(k) for k in ("ARCHER_API_KEY", "ARCHER_BASE_URL", "ARCHER_MODEL")}
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            toml_path = Path(tmp) / "archer.toml"
+            toml_path.write_text(
+                '[api]\napi_key = "toml-key"\nbase_url = "https://toml.test/v1"\nmodel = "toml-model"\n',
+                encoding="utf-8",
+            )
+            os.environ["ARCHER_API_KEY"] = "env-key"
+            os.environ["ARCHER_BASE_URL"] = "https://env.test/v1"
+            os.environ["ARCHER_MODEL"] = "env-model"
+            llm_mod._CONFIG_PATH = toml_path
+            llm_mod._cfg = None
+            llm_mod._config_mtime = 0.0
+
+            cfg = llm_mod._load_config()
+            assert cfg["api"]["api_key"] == "env-key"
+            assert cfg["api"]["base_url"] == "https://env.test/v1"
+            assert cfg["api"]["model"] == "env-model"
+    finally:
+        llm_mod._cfg = old_cfg
+        llm_mod._CONFIG_PATH = old_path
+        llm_mod._config_mtime = old_mtime
+        for key, value in old_env.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
 
 
 def test_config_no_reload_when_unchanged():
     """文件未改动时，_load_config 返回同一个对象（无重载）。"""
     import core.llm as llm_mod
-    old_cfg, old_mtime, old_flag = llm_mod._cfg, llm_mod._config_mtime, llm_mod._config_reloaded
+    old_cfg, old_path = llm_mod._cfg, llm_mod._CONFIG_PATH
+    old_mtime, old_flag = llm_mod._config_mtime, llm_mod._config_reloaded
     try:
-        # 先加载一次确保缓存
-        llm_mod._cfg = None
-        llm_mod._config_mtime = 0.0
-        first = llm_mod._load_config()
-        second = llm_mod._load_config()
-        assert first is second, "文件未改动时应返回缓存对象"
-        assert not llm_mod._config_reloaded
+        with tempfile.TemporaryDirectory() as tmp:
+            toml_path = Path(tmp) / "archer.toml"
+            toml_path.write_text(
+                '[api]\napi_key = "test"\nbase_url = "http://x"\nmodel = "m"\n',
+                encoding="utf-8",
+            )
+            llm_mod._CONFIG_PATH = toml_path
+            llm_mod._cfg = None
+            llm_mod._config_mtime = 0.0
+            first = llm_mod._load_config()
+            second = llm_mod._load_config()
+            assert first is second, "文件未改动时应返回缓存对象"
+            assert not llm_mod._config_reloaded
     finally:
         llm_mod._cfg = old_cfg
+        llm_mod._CONFIG_PATH = old_path
         llm_mod._config_mtime = old_mtime
         llm_mod._config_reloaded = old_flag
 
@@ -49,6 +101,7 @@ def test_config_reloads_when_file_changes():
     """文件 mtime 变化时，_load_config 返回新 dict 并置 _config_reloaded=True。"""
     import core.llm as llm_mod
     old_cfg, old_path = llm_mod._cfg, llm_mod._CONFIG_PATH
+    old_client, old_client_key = llm_mod._client, llm_mod._client_key
     old_mtime, old_flag = llm_mod._config_mtime, llm_mod._config_reloaded
     try:
         with tempfile.TemporaryDirectory() as tmp:
@@ -60,11 +113,14 @@ def test_config_reloads_when_file_changes():
             )
             llm_mod._CONFIG_PATH = toml_path
             llm_mod._cfg = None
+            llm_mod._client = object()
+            llm_mod._client_key = ("old-key", "http://old")
             llm_mod._config_mtime = 0.0
 
             # 首次加载
             llm_mod._load_config()
             assert not llm_mod._config_reloaded  # 首次加载不算 reload
+            assert llm_mod._client is not None
 
             # 修改文件，确保 mtime 变化
             time.sleep(0.02)
@@ -78,9 +134,13 @@ def test_config_reloads_when_file_changes():
             cfg2 = llm_mod._load_config()
             assert llm_mod._config_reloaded is True
             assert cfg2["api"]["model"] == "m2"
+            assert llm_mod._client is None
+            assert llm_mod._client_key is None
     finally:
         llm_mod._cfg = old_cfg
         llm_mod._CONFIG_PATH = old_path
+        llm_mod._client = old_client
+        llm_mod._client_key = old_client_key
         llm_mod._config_mtime = old_mtime
         llm_mod._config_reloaded = old_flag
 
@@ -213,6 +273,7 @@ def test_listen_write_also_logs_to_project():
 if __name__ == "__main__":
     tests = [
         test_config_loads_on_first_call,
+        test_config_applies_env_overrides,
         test_config_no_reload_when_unchanged,
         test_config_reloads_when_file_changes,
         test_pop_config_reloaded_resets_flag,

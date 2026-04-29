@@ -8,6 +8,8 @@ api_key      = "sk-your-api-key-here"
 model        = "deepseek-chat"
 vision_model = "deepseek-chat"                  # model to use when images are attached
 models       = ["deepseek-chat", "deepseek-reasoner"]  # available via /model command
+timeout_s    = 45
+max_retries  = 1
 
 # [api] OpenAI example:
 # base_url = "https://api.openai.com/v1"

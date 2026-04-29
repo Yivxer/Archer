@@ -15,7 +15,7 @@ import core.artifacts as art_mod
 from core.doctor import (
     Level, apply_fixes, run_checks,
     _check_api, _check_config, _check_memory, _check_pending,
-    _check_soul, _check_obsidian, _check_skills, _check_artifacts,
+    _check_api_dns, _check_soul, _check_obsidian, _check_skills, _check_artifacts,
 )
 
 
@@ -81,6 +81,30 @@ def test_api_placeholder_key():
     cfg = {"api": {"api_key": "your-api-key", "base_url": "https://api.test/v1", "model": "gpt"}}
     r = _check_api(cfg)
     assert r.level == Level.WARN
+
+
+def test_api_dns_ok(monkeypatch):
+    monkeypatch.setattr(
+        "core.doctor.socket.getaddrinfo",
+        lambda host, port, type=None: [(None, None, None, None, ("1.2.3.4", port))],
+    )
+    cfg = {"api": {"base_url": "https://api.test/v1"}}
+    r = _check_api_dns(cfg)
+    assert r.level == Level.OK
+    assert "api.test" in r.message
+
+
+def test_api_dns_failure(monkeypatch):
+    import socket
+
+    def fail(*_args, **_kwargs):
+        raise socket.gaierror(8, "nodename nor servname provided, or not known")
+
+    monkeypatch.setattr("core.doctor.socket.getaddrinfo", fail)
+    cfg = {"api": {"base_url": "https://api.test/v1"}}
+    r = _check_api_dns(cfg)
+    assert r.level == Level.ERROR
+    assert "DNS" in r.message
 
 
 # ── memory / schema checks ────────────────────────────────────────────────────
@@ -233,6 +257,7 @@ def test_run_checks_returns_list():
         assert len(results) >= 8
         names = {r.name for r in results}
         assert "config" in names
+        assert "api_dns" in names
         assert "schema" in names
         assert "soul" in names
         assert "skills" in names

@@ -8,11 +8,13 @@ P2-C: /doctor 自检系统
 from __future__ import annotations
 
 import sqlite3
+import socket
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
 from typing import Callable
+from urllib.parse import urlparse
 
 import core.artifacts as _artifacts
 
@@ -67,6 +69,33 @@ def _check_api(cfg: dict) -> CheckResult:
     if not key or key.startswith("your-") or len(key) < 10:
         return CheckResult(Level.WARN, "api", "api_key 看起来是占位符或未配置")
     return CheckResult(Level.OK, "api", f"base_url = {base_url}，model = {model}")
+
+
+def _check_api_dns(cfg: dict) -> CheckResult:
+    base_url = cfg.get("api", {}).get("base_url", "")
+    if not base_url:
+        return CheckResult(Level.WARN, "api_dns", "api.base_url 未配置，跳过 DNS 检查")
+
+    host = urlparse(base_url).hostname
+    if not host:
+        return CheckResult(Level.ERROR, "api_dns", f"无法从 base_url 解析域名：{base_url}")
+
+    try:
+        infos = socket.getaddrinfo(host, 443, type=socket.SOCK_STREAM)
+    except socket.gaierror as e:
+        return CheckResult(
+            Level.ERROR,
+            "api_dns",
+            f"DNS 无法解析 {host}：{e}。如果刚断开 VPN，请先刷新/重设系统 DNS；国内用户建议使用可直连的 API 端点。",
+        )
+    except OSError as e:
+        return CheckResult(Level.WARN, "api_dns", f"DNS 检查异常：{e}")
+
+    addrs = sorted({info[4][0] for info in infos if info and info[4]})
+    shown = ", ".join(addrs[:3])
+    if len(addrs) > 3:
+        shown += "…"
+    return CheckResult(Level.OK, "api_dns", f"{host} 可解析：{shown}")
 
 
 def _check_memory(cfg: dict) -> list[CheckResult]:
@@ -249,6 +278,7 @@ def run_checks(cfg: dict, skills: dict) -> list[CheckResult]:
     results: list[CheckResult] = []
     results.append(_check_config(cfg))
     results.append(_check_api(cfg))
+    results.append(_check_api_dns(cfg))
     results.extend(_check_memory(cfg))
     results.append(_check_pending(cfg))
     results.append(_check_soul(cfg))
