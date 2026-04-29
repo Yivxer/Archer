@@ -40,6 +40,31 @@ def is_inside_vault(child: str, vault_path: str) -> bool:
     except (ValueError, OSError):
         return False
 
+def is_sensitive_path(path: str) -> bool:
+    """判断路径是否可能包含密钥、token 或本地身份凭证。"""
+    if not path:
+        return False
+    p = Path(path).expanduser()
+    parts = {part.lower() for part in p.parts}
+    name = p.name.lower()
+    sensitive_dirs = {".ssh", ".gnupg", ".aws", ".kube"}
+    sensitive_files = {
+        ".env",
+        ".netrc",
+        "archer.toml",
+        "id_rsa",
+        "id_dsa",
+        "id_ecdsa",
+        "id_ed25519",
+        "credentials",
+    }
+    return (
+        bool(parts & sensitive_dirs)
+        or name in sensitive_files
+        or name.startswith(".env.")
+        or name.endswith((".pem", ".key", ".p12", ".pfx"))
+    )
+
 
 # ── shell 黑名单（critical → DENY）───────────────────────────────────────────────
 _SHELL_DENYLIST: list[tuple[re.Pattern, str]] = [
@@ -72,6 +97,17 @@ _SHELL_HIGH_RISK: list[tuple[re.Pattern, str]] = [
     (re.compile(r">\s*~/\.(zshrc|bashrc|bash_profile|gitconfig)", re.I), "写入 shell 配置"),
 ]
 
+# ── shell 中风险（medium → CONFIRM）────────────────────────────────────────────
+_SHELL_MEDIUM_RISK: list[tuple[re.Pattern, str]] = [
+    (re.compile(r"(^|[^\d])>>?\s*(?!/dev/null\b)"), "输出重定向写入"),
+    (re.compile(r"\btee\s+(-a\s+)?(?!/dev/null\b)", re.I), "tee 写入文件"),
+    (re.compile(r"\b(touch|mkdir|cp|mv|rm|ln)\b", re.I), "文件系统变更"),
+    (re.compile(r"\b(sed|perl)\b.*\s-i(\b|[.])", re.I), "原地修改文件"),
+    (re.compile(r"\b(git\s+(commit|push|reset|clean|rebase|merge)|gh\s+pr\s+merge)\b", re.I), "版本库变更"),
+    (re.compile(r"\b(npm|pnpm|yarn|bun)\s+(install|add|remove|update)\b", re.I), "依赖变更"),
+    (re.compile(r"\b(pip|pip3)\s+install\b|\bpython3?\s+-m\s+pip\s+install\b", re.I), "Python 依赖变更"),
+]
+
 
 def score_shell_risk(command: str) -> tuple[str, str]:
     """评估 shell 命令风险等级，返回 (risk_level, reason)。
@@ -83,6 +119,9 @@ def score_shell_risk(command: str) -> tuple[str, str]:
     for pattern, desc in _SHELL_HIGH_RISK:
         if pattern.search(command):
             return "high", desc
+    for pattern, desc in _SHELL_MEDIUM_RISK:
+        if pattern.search(command):
+            return "medium", desc
     if re.search(r"\|\s*(sh|bash|zsh|python|python3|ruby|perl)\b", command, re.I):
         return "medium", "管道到解释器"
     return "low", ""
@@ -128,15 +167,21 @@ def check(skill_name: str, args: dict, skills: dict, cfg: dict | None = None) ->
             return PolicyResult(Decision.STRONG_CONFIRM, reason=f"高风险命令：{reason}\n$ {command}", risk="high")
         if risk_level == "medium":
             return PolicyResult(Decision.CONFIRM, reason=f"shell: {command}", risk="medium")
-        return PolicyResult(Decision.CONFIRM, reason=f"shell: {command}", risk="low")
+        return PolicyResult(Decision.ALLOW, reason=f"shell: {command}", risk="low")
 
     if skill_name in ("obsidian_read", "obsidian_write", "obsidian_search"):
         return PolicyResult(Decision.ALLOW, risk="low")
 
     if skill_name == "file_ops":
         action = args.get("action", "read")
+        path = args.get("path", "")
+        if is_sensitive_path(path):
+            return PolicyResult(
+                Decision.CONFIRM,
+                reason=f"敏感路径访问 [{action}] → {path or '（未指定路径）'}",
+                risk="high",
+            )
         if action in ("write", "append"):
-            path = args.get("path", "")
             vault_path = (cfg or {}).get("obsidian", {}).get("vault_path", "")
             if vault_path and path and is_inside_vault(path, vault_path):
                 return PolicyResult(Decision.ALLOW, risk="low")
@@ -149,6 +194,13 @@ def check(skill_name: str, args: dict, skills: dict, cfg: dict | None = None) ->
 
     if skill_name == "installer":
         return PolicyResult(Decision.ALLOW, risk="critical")
+
+    if skill_name == "github_ops" and args.get("action") == "run":
+        return PolicyResult(
+            Decision.STRONG_CONFIRM,
+            reason=f"GitHub 任意子命令需要强确认：gh {args.get('command', '')}",
+            risk="high",
+        )
 
     if risk in ("high", "critical") and meta.get("requires_confirmation", False):
         return PolicyResult(

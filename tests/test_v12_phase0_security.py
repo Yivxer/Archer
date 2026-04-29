@@ -94,8 +94,12 @@ def test_pipe_to_python_is_medium():
     risk, _ = score_shell_risk("cat script.py | python3")
     assert risk == "medium"
 
-def test_git_commit_is_low():
+def test_git_commit_is_medium():
     risk, _ = score_shell_risk("git commit -m 'fix bug'")
+    assert risk == "medium"
+
+def test_stderr_redirect_to_dev_null_is_low():
+    risk, _ = score_shell_risk("find /tmp -name '*.txt' 2>/dev/null")
     assert risk == "low"
 
 
@@ -121,7 +125,7 @@ def test_critical_triggers_deny():
     result = check("shell", {"command": "rm -rf /"}, skills)
     assert result.decision == Decision.DENY
 
-def test_low_shell_triggers_confirm():
+def test_low_shell_is_allowed():
     import types
     mod = types.ModuleType("shell")
     mod.SKILL = {"name": "shell", "risk": "low"}
@@ -129,8 +133,19 @@ def test_low_shell_triggers_confirm():
     mod.run = lambda _: ""
     skills = {"shell": mod}
     result = check("shell", {"command": "echo hello"}, skills)
-    assert result.decision == Decision.CONFIRM
+    assert result.decision == Decision.ALLOW
     assert result.risk == "low"
+
+def test_medium_shell_triggers_confirm():
+    import types
+    mod = types.ModuleType("shell")
+    mod.SKILL = {"name": "shell", "risk": "low"}
+    mod.schema = lambda: {}
+    mod.run = lambda _: ""
+    skills = {"shell": mod}
+    result = check("shell", {"command": "echo hello > /tmp/hello.txt"}, skills)
+    assert result.decision == Decision.CONFIRM
+    assert result.risk == "medium"
 
 
 # ── file_ops vault 路径判断 ─────────────────────────────────────────────────────

@@ -1,6 +1,8 @@
 import re
 import urllib.request
 import urllib.error
+from core.llm import stream_chat
+from core.url_safety import open_public_http_url, validate_public_http_url
 
 SKILL = {
     "name": "summarize",
@@ -44,9 +46,9 @@ def schema() -> dict:
     }
 
 def _fetch(url: str) -> str:
-    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-    with urllib.request.urlopen(req, timeout=15) as resp:
-        raw = resp.read().decode("utf-8", errors="ignore")
+    url = validate_public_http_url(url)
+    with open_public_http_url(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=15) as resp:
+        raw = resp.read(1_000_000).decode("utf-8", errors="ignore")
     raw = re.sub(r"<script[^>]*>.*?</script>", "", raw, flags=re.DOTALL | re.IGNORECASE)
     raw = re.sub(r"<style[^>]*>.*?</style>",  "", raw, flags=re.DOTALL | re.IGNORECASE)
     raw = re.sub(r"<[^>]+>", " ", raw)
@@ -69,11 +71,25 @@ def run(args: dict) -> str:
         return "错误：请提供 content 文本或 url 网址"
 
     style_hint = {
-        "bullet":    "用要点列表（- ）格式输出",
+        "bullet":    "用要点列表（- ）格式输出，每条一句话",
         "paragraph": "用段落摘要形式输出，不超过 200 字",
-        "outline":   "用大纲（## / ###）结构输出",
-    }.get(style, "用要点列表格式输出")
+        "outline":   "用层级大纲结构输出（一级标题 + 子要点）",
+    }.get(style, "用要点列表格式输出，每条一句话")
 
     focus_hint = f"，重点关注：{focus}" if focus else ""
 
-    return f"请总结以下内容，{style_hint}{focus_hint}：\n\n{content}"
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                f"你是内容总结专家。{style_hint}{focus_hint}。"
+                "只输出总结结果，不要说「以下是总结」之类的开场白。"
+            ),
+        },
+        {"role": "user", "content": content},
+    ]
+
+    result = ""
+    for chunk in stream_chat(messages):
+        result += chunk
+    return result

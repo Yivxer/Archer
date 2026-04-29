@@ -1,7 +1,8 @@
 import shutil
 import tempfile
 import urllib.request
-import importlib.util
+import ast
+import re
 from pathlib import Path
 
 SKILLS_DIR = Path(__file__).parent
@@ -24,17 +25,42 @@ def _github_raw(url: str) -> str:
 
 
 def _validate(path: Path) -> str:
-    """验证技能文件格式（只做结构检查，不运行业务逻辑）。"""
-    spec = importlib.util.spec_from_file_location(path.stem, path)
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    if not hasattr(mod, "SKILL"):
-        raise ValueError("缺少 SKILL 元数据")
-    if not hasattr(mod, "schema"):
+    """静态验证技能文件格式，不 import、不执行待安装代码。"""
+    code = path.read_text(encoding="utf-8", errors="replace")
+    tree = ast.parse(code, filename=str(path))
+
+    skill_name = ""
+    has_schema = False
+    has_run = False
+
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name) and target.id == "SKILL":
+                    if not isinstance(node.value, ast.Dict):
+                        raise ValueError("SKILL 必须是字面量 dict")
+                    try:
+                        meta = ast.literal_eval(node.value)
+                    except (ValueError, SyntaxError):
+                        raise ValueError("SKILL 必须是可静态解析的 dict")
+                    if not isinstance(meta, dict):
+                        raise ValueError("SKILL 必须是 dict")
+                    skill_name = str(meta.get("name", "")).strip()
+        elif isinstance(node, ast.FunctionDef):
+            if node.name == "schema":
+                has_schema = True
+            elif node.name == "run":
+                has_run = True
+
+    if not skill_name:
+        raise ValueError("缺少 SKILL.name")
+    if not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_-]{0,63}", skill_name):
+        raise ValueError("SKILL.name 只能包含字母、数字、下划线或短横线")
+    if not has_schema:
         raise ValueError("缺少 schema() 函数")
-    if not hasattr(mod, "run"):
+    if not has_run:
         raise ValueError("缺少 run() 函数")
-    return mod.SKILL["name"]
+    return skill_name
 
 
 def _review_and_confirm(code: str, filename: str, is_url: bool) -> bool:
@@ -130,6 +156,8 @@ def install(source: str) -> str:
 
 
 def remove(name: str):
+    if not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_-]{0,63}", name):
+        raise ValueError("技能名只能包含字母、数字、下划线或短横线")
     path = SKILLS_DIR / f"{name}.py"
     if not path.exists():
         raise FileNotFoundError(f"技能不存在：{name}")

@@ -1,4 +1,4 @@
-import subprocess
+import os
 from pathlib import Path
 
 SKILL = {
@@ -53,31 +53,47 @@ def run(args: dict) -> str:
     mode      = args.get("mode", "name")
     directory = args.get("directory", str(Path.home()))
     ext       = args.get("ext", "")
-    limit     = int(args.get("limit", 20))
+    try:
+        limit = int(args.get("limit", 20))
+    except (TypeError, ValueError):
+        limit = 20
 
     if not keyword:
         return "错误：keyword 不能为空"
 
-    directory = str(Path(directory).expanduser())
+    directory_path = Path(directory).expanduser()
+    if not directory_path.exists():
+        return f"搜索失败：目录不存在：{directory_path}"
+
+    limit = max(1, min(limit, 100))
+
+    ext = ext.strip().lstrip(".")
 
     try:
+        lines: list[str] = []
         if mode == "name":
-            name_pat = f"*{keyword}*" + (f".{ext}" if ext else "")
-            cmd = (
-                f'find "{directory}" -iname "{name_pat}" '
-                f'-not -path "*/.*" -not -path "*/node_modules/*" '
-                f'2>/dev/null | head -{limit}'
-            )
+            needle = keyword.lower()
+            suffix = f".{ext.lower()}" if ext else ""
+            for path in _walk_files(directory_path):
+                name = path.name.lower()
+                if needle in name and (not suffix or name.endswith(suffix)):
+                    lines.append(str(path))
+                    if len(lines) >= limit:
+                        break
         else:  # content
-            ext_flag = f'--include="*.{ext}"' if ext else '--include="*.md" --include="*.txt" --include="*.py"'
-            cmd = (
-                f'grep -r -l {ext_flag} -i "{keyword}" "{directory}" '
-                f'--exclude-dir=".git" --exclude-dir="node_modules" '
-                f'2>/dev/null | head -{limit}'
-            )
-
-        result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=15)
-        lines  = [l.strip() for l in result.stdout.splitlines() if l.strip()]
+            allowed_exts = {f".{ext.lower()}"} if ext else {".md", ".txt", ".py"}
+            needle = keyword.lower()
+            for path in _walk_files(directory_path):
+                if path.suffix.lower() not in allowed_exts:
+                    continue
+                try:
+                    text = path.read_text(encoding="utf-8", errors="ignore")
+                except Exception:
+                    continue
+                if needle in text.lower():
+                    lines.append(str(path))
+                    if len(lines) >= limit:
+                        break
 
         if not lines:
             return f'未找到{"文件名" if mode == "name" else "内容"}包含「{keyword}」的文件。'
@@ -88,7 +104,14 @@ def run(args: dict) -> str:
         output.append('\n提示：用 @路径 直接引用文件内容')
         return '\n'.join(output)
 
-    except subprocess.TimeoutExpired:
-        return "搜索超时（15s）"
     except Exception as e:
         return f"搜索失败：{e}"
+
+def _walk_files(root: Path):
+    skip_dirs = {".git", "node_modules", "__pycache__"}
+    for current, dirs, files in os.walk(root):
+        dirs[:] = [d for d in dirs if d not in skip_dirs and not d.startswith(".")]
+        for filename in files:
+            if filename.startswith("."):
+                continue
+            yield Path(current) / filename

@@ -14,9 +14,19 @@ import re
 import base64
 from pathlib import Path
 
-# 匹配 @ 后跟路径（支持中文、空格用引号包裹）
-_REF_PLAIN  = re.compile(r'@([~/\w.\-][\w./\-一-鿿@]*)')
-_REF_QUOTED = re.compile(r'@"([^"]+)"')
+# 匹配 @ 后跟路径
+# 带引号：@"路径（可含空格）"  或  @'路径'
+# 不带引号：@ 后跟非空格字符串（遇空格停止）
+_REF_QUOTED = re.compile(r'@["\']([^"\']+)["\']')
+_REF_PLAIN  = re.compile(r'@([~/][^\s，。！？、\'"]+)')
+
+# 裸路径检测：用户直接粘贴路径（不带 @ 前缀），遇到已知扩展名停止
+# 支持含空格文件名（含 shell 转义 "\ "）
+_BARE_EXTS = r'(?:png|jpe?g|gif|webp|bmp|heic|heif|txt|md|py|js|ts|json|toml|yaml|log|pdf|csv)'
+_REF_BARE  = re.compile(
+    r'(?:^|(?<=\s))((?:/Users/|/tmp/|~/)[^\n]+?\.(?:' + _BARE_EXTS + r'))',
+    re.IGNORECASE,
+)
 
 IMAGE_EXTS = {'.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.heic', '.heif'}
 
@@ -30,6 +40,11 @@ def _resolve(raw: str) -> Path | None:
     p = Path(raw).expanduser()
     if p.exists():
         return p
+    # 反转义 shell 空格转义（"\ " → " "）
+    unescaped = raw.replace('\\ ', ' ')
+    p2 = Path(unescaped).expanduser()
+    if p2.exists():
+        return p2
     return None
 
 def parse_refs(text: str) -> tuple[str, list[dict]]:
@@ -45,7 +60,11 @@ def parse_refs(text: str) -> tuple[str, list[dict]]:
     cleaned = text
     seen    = set()
 
-    matches = list(_REF_QUOTED.finditer(text)) + list(_REF_PLAIN.finditer(text))
+    matches = (
+        list(_REF_QUOTED.finditer(text))
+        + list(_REF_PLAIN.finditer(text))
+        + list(_REF_BARE.finditer(text))
+    )
     matches.sort(key=lambda m: m.start())
 
     for m in matches:

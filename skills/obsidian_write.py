@@ -15,6 +15,18 @@ def _vault() -> Path:
         cfg = tomllib.load(f)
     return Path(cfg["obsidian"]["vault_path"])
 
+def _resolve_note_path(raw_path: str) -> Path:
+    vault = _vault().expanduser().resolve()
+    p = Path(raw_path).expanduser()
+    if not p.is_absolute():
+        p = vault / raw_path
+    resolved = p.resolve()
+    try:
+        resolved.relative_to(vault)
+    except ValueError:
+        raise PermissionError("路径必须位于 Obsidian vault 内")
+    return resolved
+
 def schema() -> dict:
     return {
         "type": "function",
@@ -57,9 +69,10 @@ def run(args: dict) -> str:
     mode = args.get("mode", "append")
     add_ts = args.get("add_timestamp", False)
 
-    p = Path(raw_path)
-    if not p.is_absolute():
-        p = _vault() / raw_path
+    try:
+        p = _resolve_note_path(raw_path)
+    except Exception as e:
+        return f"路径被拒绝：{e}"
 
     try:
         p.parent.mkdir(parents=True, exist_ok=True)

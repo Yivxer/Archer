@@ -2,8 +2,9 @@ import sqlite3
 import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
+from core.paths import memory_db_path
 
-DB_PATH = Path(__file__).parent / "archer.db"
+DB_PATH = memory_db_path(Path(__file__).parent / "archer.db")
 
 MEMORY_TYPES = [
     "identity",   # 身份信息（我是谁、价值观）
@@ -419,6 +420,22 @@ def count_pending() -> int:
     n = conn.execute("SELECT COUNT(*) FROM pending_memories").fetchone()[0]
     conn.close()
     return n
+
+
+def update_pending(pid: int, content: str) -> bool:
+    """编辑一条待确认记忆的内容，返回是否更新成功。"""
+    content = content.strip()
+    if not content:
+        return False
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.execute(
+        "UPDATE pending_memories SET content = ? WHERE id = ?",
+        (content, int(pid)),
+    )
+    conn.commit()
+    ok = cur.rowcount > 0
+    conn.close()
+    return ok
 
 
 def accept_pending(pid: int | str) -> list[int]:

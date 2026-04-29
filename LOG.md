@@ -4,6 +4,60 @@
 
 ---
 
+## [Claude Code] 初衍 v1.2 稳定在场版（20260427）
+
+设计文档：`初衍进化1.2-最终整合执行版.md`，git commit `2a33c1d`，339 个测试全绿（新增 57 个）。
+
+**Phase 0 — 安全热修**
+- `core/policy.py`：新增 `is_inside_vault(resolve+relative_to)`，替换原 `"obsidian" in path.lower()` 字符串匹配，修复路径遍历/字符串绕过漏洞；`score_shell_risk()` 实现 low/medium/high/critical 四级评分；shell DENY 范围收窄（仅 critical 命中），high 风险触发新增 `STRONG_CONFIRM` 决策；`sudo` 从 DENY 改为 STRONG_CONFIRM（`sudo rm` 仍 DENY）；新增高风险模式：osascript/launchctl/nohup/defaults write/pmset/crontab -r 等
+- `core/doctor.py`：新增 `_check_path_safety()` 检查 vault_path 是否存在、是否可 resolve、是否含符号链接
+- `tests/test_policy.py`：更新 `test_deny_sudo` → `test_deny_sudo_rm`，新增 `test_sudo_is_high_not_deny`、`test_shutdown_is_high_not_deny`、`test_chmod_recursive_is_high`
+- `tests/test_v12_phase0_security.py`：新增 18 个专项测试（vault 路径判断 / shell 评分 / STRONG_CONFIRM / file_ops 归属）
+
+**Phase 1 — 灵魂三层**
+- 新建 `COVENANT.md`（根契约 v1.0，不接受自动 proposal，修改需 `/covenant propose` + 强确认）
+- 新建 `PRESENCE.md`（在场方式 v1.0，只 suggest 不 smart update）
+- `archer.toml`：新增 `[persona] covenant_path/presence_path`、`[persona.history] covenant_dir/presence_dir`、`[critique] weekly_enabled=false`、`[security] shell_risk_scoring=true`、`[mcp] schema_policy/recent_window_turns`
+- `core/context.py` 全面重构：8 层注入顺序（Runtime Safety→COVENANT→PRESENCE→核心人格+mode→SOUL→MEMORY→活跃项目→DB Memories）；SOUL 从 Layer 1 常驻下沉到按 intent 按需注入（只在 decision/emotional/reflection 时注入，chat/task 不注入）；`is_heavy_query()` 升级为 `classify_query_intent()`（返回 intent/needs_memory/needs_soul 等字段，向后兼容）；关键词集合分为 decision/project/reflection/emotional/task 五类
+- `archer.py`：新增 `_handle_covenant()`（view/history/propose）、`_handle_presence()`（view/edit/suggest/history，edit 前自动备份）、`_handle_critique()`（scan/list/view/dismiss/new）；主循环引入 `classify_query_intent()`，`intent` 字段传入 `build_messages()`
+- `tests/test_v12_phase1_soul_layers.py`：21 个测试（意图分类/heavy 兼容/COVENANT-PRESENCE-SOUL 注入顺序）
+
+**Phase 2 — 自我批评**
+- 新建 `memory/critique.py`：`self_critiques` 表（含 evidence_json 必填、observation ≥30字约束）；`create_critique/list_critiques/get_critique/dismiss_critique/scan_critiques`；`try_create_from_user_signal()` 实现会话级限流（同 session 最多 1 条 / 24h 同类不重复）；所有接口通过 `_conn()` 动态引用 `store.DB_PATH`，支持测试 monkeypatch
+- `memory/store.py`：`init_db()` 末尾调用 `init_critiques_table()`
+- `weekly_self_critique` 默认关闭（`cfg["critique"]["weekly_enabled"]=false`）
+- `scope=skill_router_hint` 仅建议展示，不写任何文件
+- `tests/test_v12_phase2_critique.py`：8 个测试
+
+**Phase 3 — 记忆质量**
+- `memory/store.py`：`init_db()` 新增幂等 ALTER TABLE，为 memories/project_events/soul_proposals 补 `session_id TEXT` 列；`save()` 接受 `session_id` 参数；新增 `generate_session_id()`（YYYYMMDD-HHMMSS-uuid8 格式）；新增 `run_importance_decay()`（context/state 30天/todo/risk/project 60天 decay importance-1，最低 1，identity/decision/preference 不 decay）；`get_memories_for_detection()` 返回结果含 `session_id` 字段
+- `memory/patterns.py`：themes 检测从"跨≥2个不同日期"升级为"跨≥2个 session_id + 尽量跨不同日期"；同日不同 session 时 strength 上限 0.65；兼容旧记忆（无 session_id 时降级到跨日期门控）
+- `archer.py`：`run()` 启动时调用 `generate_session_id()` 初始化 `_current_session_id`
+- `tests/test_v12_phase3_session_memory.py`：10 个测试
+
+**Phase 4 — MCP 注入优化**
+- `archer.py`：新增 `_MCP_CAPABILITY_KW` 关键词集合；新增 `_should_inject_mcp()`（recent/server_name/capability_keyword 三条件策略）；MCP 从"始终暴露"改为按需注入；新增 `_turn_counter` + `_mcp_last_used_turn` 追踪最近使用轮次
+
+---
+
+## [Claude Code] 架构重构 P4 — 上下文治理 + 质量约束（20260427）
+
+- **Step 17 Context Builder 三层上下文**：`core/context.py` 全面重构；Layer 1（System，始终注入）= `_ARCHER_CORE` + 模式 prompt + SOUL.md；Layer 2（Working，heavy=True 时注入）= MEMORY.md + 活跃项目摘要（名称/描述/最近 3 条事件）；Layer 3（Memory）= DB 检索结果；新增 `is_heavy_query()`（输入 ≥40 字或含决策关键词）；`_load_soul/_load_memory` 改用 `is_file()` 防空路径报错；`archer.py` 每轮传入 `heavy`/`project`/`proj_evts`；git tag `step-17-context-builder`
+- **Step 18 Pattern 质量约束**：`memory/patterns.py` 新增三重门控：名称 ≤12 字符、证据 ≥2 条、证据跨 ≥2 个不同日期（跨会话代理）；`store.get_memories_for_detection()` 补 `created_at` 字段供跨日期检查；git tag `step-18-pattern-quality`
+- **测试**：新增 `tests/test_p4_context_patterns.py`（13 个测试），更新 `test_patterns.py`（跨日期测试数据），280 个测试全绿
+
+---
+
+## [Claude Code] 架构重构 P3 — 体验修补（20260427）
+
+- **Step 16 call_with_tools spinner**：`_run_with_tools()` 中 `call_with_tools` 非流式调用期间加 `Live(Spinner("arc"))` 弧形进度指示，transient 模式不残留；git tag `step-16-p3-fixes`
+- **ui/app.py 清理**：删除 502 行废弃 Textual TUI 代码（`ui/` 目录整体移除）；`requirements.txt` 移除 `textual>=0.47.0`
+- **/mode 持久化**：新增 `_persist_mode(mode)` 函数（regex 插入/替换 `[persona]` 段中 `current_mode` 字段）；`_handle_mode()` 切换成功后写入 `archer.toml`，重启后生效
+- **FTS5 ≤2 字符降级**：`memory/store.py search()` 预检关键词长度，<3 字符直接走 LIKE 跳过 FTS5 trigram；`_memory_search()` 增加 UI 提示说明使用模糊匹配
+- **测试**：新增 `tests/test_p3_fixes.py`，8 个测试（ui 清理验证、mode 持久化插入/替换、FTS5 短词/正常词、spinner 结构性导入验证），267 个全绿
+
+---
+
 ## [Claude Code] 架构重构 P2 — 增强层（20260427）
 
 - **P2-B 技能路由过滤**：新增 `core/skill_router.py`；关键词表（15 组）+ URL/路径正则，纯聊天 → `{}` 跳过全部 tool schema（省 ~3k tokens/轮）；MCP skills 绕过路由始终暴露；27 个测试；git tag `step-11-skill-router`

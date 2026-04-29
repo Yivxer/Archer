@@ -88,8 +88,9 @@ class TestFTS5ShortKeyword(unittest.TestCase):
 
 class TestSpinnerStructural(unittest.TestCase):
     def test_run_with_tools_imports_live(self):
-        """archer.py 应能正常导入（spinner 依赖的 Live/Spinner 已在导入中）。"""
+        """工具循环已抽出，spinner 依赖应能正常导入。"""
         import archer  # noqa
+        import core.tool_loop  # noqa
         from rich.live import Live
         from rich.spinner import Spinner
         self.assertTrue(True)

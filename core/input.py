@@ -75,6 +75,7 @@ _COMMANDS = [
     ("/memory search ",       "搜索记忆：/memory search <关键词>"),
     ("/memory add ",          "手动添加记忆：/memory add <内容>"),
     ("/memory pending",       "查看待确认记忆"),
+    ("/memory pending review", "交互审阅待确认记忆"),
     ("/memory accept all",     "确认写入全部待确认记忆"),
     ("/memory reject all",     "丢弃全部待确认记忆"),
     ("/memory update ",       "更新记忆：/memory update <ID> <新内容>"),
@@ -89,6 +90,8 @@ _COMMANDS = [
 ]
 
 _INPUT_RULE_CHAR = "─"
+_INPUT_MAX_WIDTH = 92
+_COMPLETION_MAX_HEIGHT = 8
 
 
 class _SlashCompleter(Completer):
@@ -133,6 +136,9 @@ def _prompt_app(model: str = "", mode: str = "", usage: str = "") -> str:
     def _terminal_width() -> int:
         return max(20, shutil.get_terminal_size((80, 24)).columns)
 
+    def _content_width() -> int:
+        return min(_terminal_width(), _INPUT_MAX_WIDTH)
+
     @kb.add("enter")
     def _submit(event):
         event.app.exit(result=buffer.text)
@@ -150,7 +156,7 @@ def _prompt_app(model: str = "", mode: str = "", usage: str = "") -> str:
         event.app.exit(exception=EOFError)
 
     def _input_height() -> int:
-        width = max(1, _terminal_width() - 2)
+        width = max(1, _content_width() - 2)
         lines = buffer.text.split("\n") or [""]
         visual_lines = 0
         for line in lines:
@@ -165,15 +171,20 @@ def _prompt_app(model: str = "", mode: str = "", usage: str = "") -> str:
         return Dimension(min=1, preferred=h, max=max(h, 6))
 
     def _root_dimension() -> Dimension:
-        extra = 10 if _is_command_input() else 3
-        preferred = _input_height() + extra
-        return Dimension(min=6, preferred=preferred)
+        h = _input_height()
+        fixed_rows = 2 if _is_command_input() else 3
+        completion_state = buffer.complete_state
+        completion_rows = 0
+        if _is_command_input() and completion_state:
+            completion_rows = min(_COMPLETION_MAX_HEIGHT, len(completion_state.completions))
+        preferred = h + fixed_rows + completion_rows
+        return Dimension(min=preferred, preferred=preferred)
 
     def _root_width() -> Dimension:
-        return Dimension.exact(_terminal_width())
+        return Dimension.exact(_content_width())
 
     def _buffer_width() -> Dimension:
-        return Dimension.exact(max(1, _terminal_width() - 2))
+        return Dimension.exact(max(1, _content_width() - 2))
 
     def _status_height() -> Dimension:
         return Dimension.exact(0 if _is_command_input() else 1)
@@ -226,16 +237,22 @@ def _prompt_app(model: str = "", mode: str = "", usage: str = "") -> str:
         dont_extend_height=True,
         dont_extend_width=True,
     )
-    completions = CompletionsMenu(max_height=8, scroll_offset=1)
+    completions = CompletionsMenu(max_height=_COMPLETION_MAX_HEIGHT, scroll_offset=1)
 
     root = FloatContainer(
         content=HSplit(
-            [top_rule, input_row, lower_rule, status_line, completions],
+            [top_rule, input_row, lower_rule, status_line],
             height=_root_dimension,
             width=_root_width,
             align=VerticalAlign.TOP,
         ),
-        floats=[],
+        floats=[
+            Float(
+                xcursor=True,
+                ycursor=True,
+                content=completions,
+            )
+        ],
     )
 
     app = Application(

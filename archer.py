@@ -13,18 +13,17 @@ from rich.panel import Panel
 from rich.spinner import Spinner
 from rich.table import Table
 
-from core.llm import stream_chat, call_with_tools, load_config, get_last_usage, get_session_tokens, pop_config_reloaded
+from core.llm import stream_chat, load_config, get_last_usage, get_session_tokens, pop_config_reloaded
 from core.context import build_messages, is_heavy_query, classify_query_intent
 from core.session import Session
 from core.input import prompt as get_input
 from core.compressor import should_compress, compress
 from core.file_ref import parse_refs, build_user_content, ref_summary
-from core.tool_runtime import invoke as runtime_invoke
-from core.policy import check as policy_check, Decision
+from core.tool_loop import run_with_tools
 from memory.store import (
     init_db, save, list_all, search, delete,
     update as update_memory, archive as archive_memory,
-    add_pending, list_pending, count_pending, accept_pending, reject_pending,
+    add_pending, list_pending, count_pending, update_pending, accept_pending, reject_pending,
     create_project, list_projects, get_project, get_project_by_name,
     archive_project, log_project_event, get_project_events,
     count_soul_proposals, generate_session_id,
@@ -35,7 +34,7 @@ from memory.soul import (
 )
 from memory.extract import extract
 from memory.retrieve import for_context, format_for_prompt
-from skills.loader import load_skills, get_tools
+from skills.loader import load_skills
 from skills.installer import install as skill_install, remove as skill_remove
 from core.skill_router import select_skills
 from core.scheduler import (
@@ -392,7 +391,10 @@ def _stage_memories(mems: list[dict], source: str = "auto", silent: bool = False
     if not silent:
         console.print(f"[dim]提议写入 {count} 条记忆，使用 /memory pending 查看。[/dim]")
 
-def _memory_pending():
+def _memory_pending(arg: str = ""):
+    if arg.strip() in ("review", "interactive"):
+        _memory_pending_review()
+        return
     pends = list_pending()
     if not pends:
         console.print("[dim]没有待确认记忆。[/dim]")
@@ -410,7 +412,66 @@ def _memory_pending():
             p.get("content", ""),
         )
     console.print(t)
-    console.print("[dim]确认：/memory accept <ID|all>  丢弃：/memory reject <ID|all>[/dim]")
+    console.print("[dim]确认：/memory accept <ID|all>  丢弃：/memory reject <ID|all>  交互审阅：/memory pending review[/dim]")
+
+
+def _memory_pending_review():
+    pends = list_pending()
+    if not pends:
+        console.print("[dim]没有待确认记忆。[/dim]")
+        return
+
+    accepted = rejected = edited = skipped = 0
+    console.print("[dim]交互审阅：a 接受 · r 丢弃 · e 编辑后接受 · s 跳过 · q 退出[/dim]")
+    for p in pends:
+        pid = int(p["id"])
+        console.print()
+        console.print(f"[cyan]#{pid}[/cyan] [{p.get('type', 'insight')}] 重要度 {p.get('importance', 3)}")
+        console.print(p.get("content", ""), markup=False)
+        try:
+            action = input("  a/r/e/s/q → ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            action = "q"
+
+        if action == "q":
+            break
+        if action == "s" or not action:
+            skipped += 1
+            continue
+        if action == "r":
+            rejected += reject_pending(pid)
+            console.print("[dim]  已丢弃。[/dim]")
+            continue
+        if action == "e":
+            try:
+                new_content = input("  新内容 → ").strip()
+            except (EOFError, KeyboardInterrupt):
+                new_content = ""
+            if not new_content:
+                console.print("[yellow]  内容为空，已跳过。[/yellow]")
+                skipped += 1
+                continue
+            if update_pending(pid, new_content):
+                edited += 1
+                mids = accept_pending(pid)
+                accepted += len(mids)
+                console.print(f"[green]  已编辑并写入记忆 {', '.join(str(i) for i in mids)}。[/green]")
+            else:
+                console.print("[yellow]  这条待确认记忆已不存在。[/yellow]")
+            continue
+        if action == "a":
+            mids = accept_pending(pid)
+            if mids:
+                accepted += len(mids)
+                console.print(f"[green]  已写入记忆 {', '.join(str(i) for i in mids)}。[/green]")
+            else:
+                console.print("[yellow]  这条待确认记忆已不存在。[/yellow]")
+            continue
+
+        console.print("[yellow]  未识别操作，已跳过。[/yellow]")
+        skipped += 1
+
+    console.print(f"[dim]审阅结束：接受 {accepted} · 丢弃 {rejected} · 编辑 {edited} · 跳过 {skipped}[/dim]")
 
 def _memory_accept(arg: str):
     arg = arg.strip() or "all"
@@ -1156,7 +1217,7 @@ def _handle_memory(parts: list[str], session=None):
         case "list":   _memory_list()
         case "search": _memory_search(arg)
         case "add":    _memory_add(arg)
-        case "pending": _memory_pending()
+        case "pending": _memory_pending(arg)
         case "accept": _memory_accept(arg)
         case "reject": _memory_reject(arg)
         case "update": _memory_update(arg)
@@ -1179,7 +1240,7 @@ def _handle_memory(parts: list[str], session=None):
             except Exception as e:
                 console.print(f"[yellow]向量索引失败（sqlite-vec 或 sentence-transformers 未安装？）：{e}[/yellow]")
         case _:
-            console.print("[dim]子命令：list · search <词> · add <内容> · pending · accept · reject · update · archive · delete · review · extract · reindex[/dim]")
+            console.print("[dim]子命令：list · search <词> · add <内容> · pending [review] · accept · reject · update · archive · delete · review · extract · reindex[/dim]")
 
 def _skill_list(skills: dict):
     if not skills:
@@ -1259,80 +1320,7 @@ def _stream(messages: list[dict], model: str = "") -> str:
     return full
 
 def _run_with_tools(messages: list[dict], skills: dict, model: str = "") -> str:
-    tools = get_tools(skills)
-    messages = list(messages)
-    MAX_ROUNDS = 10
-
-    for round_n in range(MAX_ROUNDS):
-        with Live(Spinner("arc", text="  [dim]思考中…[/dim]"), refresh_per_second=20, transient=True, console=console):
-            msg = call_with_tools(messages, tools, model=model)
-
-        if not msg.tool_calls:
-            break
-
-        messages.append(msg)
-
-        for tc in msg.tool_calls:
-            fn_name = tc.function.name
-            try:
-                fn_args = json.loads(tc.function.arguments)
-            except json.JSONDecodeError:
-                fn_args = {}
-
-            console.print(f"[dim]→ {fn_name}…[/dim]")
-
-            # ── Policy check ───────────────────────────────────────
-            pr = policy_check(fn_name, fn_args, skills)
-            if pr.decision == Decision.DENY:
-                console.print(f"[red]  ✗ [策略拒绝] {pr.reason}[/red]")
-                messages.append({
-                    "role": "tool",
-                    "tool_call_id": tc.id,
-                    "content": f"[策略拒绝] {pr.reason}",
-                })
-                continue
-
-            if pr.decision == Decision.CONFIRM:
-                console.print(f"\n[yellow]  ⚠  {pr.reason}[/yellow]")
-                console.print("  [bold white]需要确认：[/bold white]")
-                console.print("  [green bold]y[/green bold] 确认执行    [yellow bold]n[/yellow bold] 跳过此步    [red bold]q[/red bold] 取消任务\n")
-                try:
-                    answer = input("  → ").strip().lower()
-                except (EOFError, KeyboardInterrupt):
-                    answer = "q"
-                if answer == "q":
-                    console.print("[dim]  任务已取消。[/dim]")
-                    messages.append({
-                        "role": "tool",
-                        "tool_call_id": tc.id,
-                        "content": "[用户取消] 任务已终止",
-                    })
-                    break
-                if answer != "y":
-                    console.print("[dim]  已跳过此步。[/dim]")
-                    messages.append({
-                        "role": "tool",
-                        "tool_call_id": tc.id,
-                        "content": "[用户跳过] 此步骤已跳过",
-                    })
-                    continue
-            # ───────────────────────────────────────────────────────
-
-            tr = runtime_invoke(fn_name, fn_args, skills)
-            if not tr.ok:
-                console.print(f"[yellow]  ✗ {tr.summary}[/yellow]")
-            elif tr.truncated:
-                console.print(f"[dim]  ↳ {tr.summary}[/dim]")
-
-            messages.append({
-                "role": "tool",
-                "tool_call_id": tc.id,
-                "content": tr.to_message_content(),
-            })
-    else:
-        console.print("[dim]已达最大工具调用轮次（10轮）[/dim]")
-
-    return _stream(messages, model=model)
+    return run_with_tools(messages, skills, stream_fn=_stream, console=console, model=model)
 
 def _auto_extract(history: list[dict], silent: bool = False):
     if len(history) < 2:

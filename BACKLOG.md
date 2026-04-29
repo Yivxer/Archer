@@ -44,13 +44,20 @@
 - [x] **P2-E MCP Adapter**：`core/mcp.py`，MCPManager（daemon asyncio 线程 + AsyncExitStack）；工具命名 `{server}__{tool}`；`load_from_config` 读 `archer.toml [mcp]`；MCP skills 绕过 skill_router 始终暴露；pip install mcp 启用；git tag `step-14-mcp`
 - [x] **P2-F 向量检索**：`memory/embedder.py`（paraphrase-multilingual-MiniLM-L12-v2，384维，懒加载）；`memory/vector_store.py`（sqlite-vec KNN，静默降级）；`memory/store.py` save 触发嵌入；`memory/retrieve.py` 混合检索（向量优先 + FTS5 补充）；`/memory reindex`；git tag `step-15-vector-search`
 
-## P3 候选
+## P4 已完成（20260427）
 
-- [ ] `call_with_tools` 非流式调用期间无进度反馈（spinner 缺失）
-- [ ] `ui/app.py` Textual TUI 代码废弃未清理
-- [ ] `/mode` 切换不持久化到 toml，重启后恢复默认
-- [ ] `memory/store.py search()`：FTS5 ≤2 字符返回空且无降级提示
+- [x] Context Builder 三层上下文（架构计划 Section 2-E）→ **P4 完成**（is_heavy_query + MEMORY.md 条件注入 + 活跃项目注入）
+- [x] Pattern 质量约束（架构计划 Section 4.1）→ **P4 完成**（名称≤12字、证据≥2条、跨日期≥2天）
 
 ---
 
-*最后更新：2026-04-27 · P2 全部完成（step-11 → step-15），259 个测试全绿*
+## P3 已完成（20260427）
+
+- [x] `call_with_tools` 非流式调用期间无进度反馈 → **P3 完成**（Live spinner arc 动画）
+- [x] `ui/app.py` Textual TUI 代码废弃未清理 → **P3 完成**（整目录删除，移除 textual 依赖）
+- [x] `/mode` 切换不持久化到 toml → **P3 完成**（_persist_mode 写入 current_mode 字段）
+- [x] `memory/store.py search()`：FTS5 ≤2 字符返回空且无降级提示 → **P3 完成**（预检长度跳过 FTS5，UI 提示）
+
+---
+
+*最后更新：2026-04-27 · P3 全部完成（step-16），267 个测试全绿*

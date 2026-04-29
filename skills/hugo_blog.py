@@ -14,6 +14,7 @@ SKILL = {
 }
 
 VALID_CATEGORIES = ["系统", "健身", "复盘", "阅读", "产品", "写作"]
+MAX_POST_CHARS = 200_000
 
 def schema() -> dict:
     return {
@@ -80,6 +81,29 @@ def _slugify(text: str) -> str:
     return text or "untitled"
 
 
+def _safe_slug(text: str) -> str:
+    slug = (text or "").strip().lower()
+    if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,79}", slug):
+        slug = _slugify(slug)
+    slug = re.sub(r"[^a-z0-9-]", "", slug)
+    slug = re.sub(r"-+", "-", slug).strip("-")
+    return slug[:80] or "untitled"
+
+
+def _post_path(filename: str) -> Path:
+    name = filename.strip()
+    if not name:
+        raise ValueError("filename 不能为空")
+    if not name.endswith(".md"):
+        name += ".md"
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,120}\.md", name):
+        raise ValueError("filename 只能包含字母、数字、点、下划线或短横线")
+    posts_dir = POSTS_DIR.resolve()
+    path = (POSTS_DIR / name).resolve()
+    path.relative_to(posts_dir)
+    return path
+
+
 def _new_post(args: dict) -> str:
     title = args.get("title", "").strip()
     if not title:
@@ -93,12 +117,18 @@ def _new_post(args: dict) -> str:
     if not desc:
         return "错误：description 不能为空"
 
-    slug = args.get("slug", "").strip() or _slugify(title)
+    slug = _safe_slug(args.get("slug", "").strip() or title)
     body = args.get("body", "").strip()
+    if len(body) > MAX_POST_CHARS:
+        return f"错误：body 过长（{len(body)} 字符），上限 {MAX_POST_CHARS}"
 
     today = date.today().isoformat()
     filename = f"{slug}.md"
-    filepath = POSTS_DIR / filename
+    try:
+        filepath = _post_path(filename)
+    except ValueError as e:
+        return f"错误：{e}"
+    POSTS_DIR.mkdir(parents=True, exist_ok=True)
 
     if filepath.exists():
         return f"错误：文件已存在 → {filepath}"
@@ -127,6 +157,7 @@ def _new_post(args: dict) -> str:
 
 
 def _list_posts(limit: int = 10) -> str:
+    limit = max(1, min(limit, 50))
     posts = sorted(POSTS_DIR.glob("*.md"), key=lambda p: p.stat().st_mtime, reverse=True)
     if not posts:
         return "暂无文章。"
@@ -149,12 +180,10 @@ def _list_posts(limit: int = 10) -> str:
 
 
 def _read_post(filename: str) -> str:
-    if not filename:
-        return "错误：filename 不能为空"
-    p = POSTS_DIR / filename
-    if not p.exists():
-        # 尝试不带 .md
-        p = POSTS_DIR / (filename + ".md")
+    try:
+        p = _post_path(filename)
+    except ValueError as e:
+        return f"错误：{e}"
     if not p.exists():
         return f"文件不存在：{filename}"
     content = p.read_text(encoding="utf-8", errors="ignore")
@@ -204,7 +233,11 @@ def run(args: dict) -> str:
         case "new":
             return _new_post(args)
         case "list":
-            return _list_posts(int(args.get("limit", 10)))
+            try:
+                limit = int(args.get("limit", 10))
+            except (TypeError, ValueError):
+                limit = 10
+            return _list_posts(limit)
         case "read":
             return _read_post(args.get("filename", ""))
         case "deploy":

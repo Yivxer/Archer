@@ -1,6 +1,7 @@
 import urllib.request
 import urllib.error
 import re
+from core.url_safety import open_public_http_url, validate_public_http_url
 
 SKILL = {
     "name": "web_fetch",
@@ -46,17 +47,21 @@ def _strip_html(html: str) -> str:
 
 def run(args: dict) -> str:
     url = args.get("url", "").strip()
-    max_chars = args.get("max_chars", 4000)
-
-    if not url.startswith("http"):
-        return f"无效 URL：{url}"
-
-    headers = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"}
-    req = urllib.request.Request(url, headers=headers)
+    try:
+        max_chars = int(args.get("max_chars", 4000))
+    except (TypeError, ValueError):
+        max_chars = 4000
+    max_chars = max(200, min(max_chars, 12000))
 
     try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            raw = resp.read().decode("utf-8", errors="ignore")
+        url = validate_public_http_url(url)
+    except ValueError as e:
+        return f"无效 URL：{e}"
+
+    headers = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"}
+    try:
+        with open_public_http_url(url, headers=headers, timeout=15) as resp:
+            raw = resp.read(1_000_000).decode("utf-8", errors="ignore")
         text = _strip_html(raw)
         if len(text) > max_chars:
             return text[:max_chars] + f"\n\n…（已截断，共 {len(text)} 字符）"
@@ -65,5 +70,7 @@ def run(args: dict) -> str:
         return f"HTTP 错误 {e.code}：{url}"
     except urllib.error.URLError as e:
         return f"网络错误：{e.reason}"
+    except ValueError as e:
+        return f"抓取被拒绝：{e}"
     except Exception as e:
         return f"抓取失败：{e}"

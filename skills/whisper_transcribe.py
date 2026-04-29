@@ -1,5 +1,6 @@
 import subprocess
 import tempfile
+import re
 from pathlib import Path
 
 SKILL = {
@@ -11,6 +12,8 @@ SKILL = {
 
 AUDIO_EXTS = {".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac", ".opus"}
 VIDEO_EXTS = {".mp4", ".mov", ".mkv", ".avi", ".webm", ".m4v"}
+MODELS = {"tiny", "base", "small", "medium"}
+MAX_MEDIA_BYTES = 2 * 1024 * 1024 * 1024
 
 def schema() -> dict:
     return {
@@ -58,13 +61,25 @@ def run(args: dict) -> str:
     if not raw_path:
         return "错误：path 不能为空"
 
-    p = Path(raw_path).expanduser()
+    p = Path(raw_path).expanduser().resolve()
     if not p.exists():
         return f"文件不存在：{p}"
+    if not p.is_file():
+        return f"不是文件：{p}"
+    try:
+        size = p.stat().st_size
+    except OSError as e:
+        return f"无法读取文件信息：{e}"
+    if size > MAX_MEDIA_BYTES:
+        return f"文件过大：{size // (1024 * 1024)} MB，上限 {MAX_MEDIA_BYTES // (1024 * 1024)} MB"
 
     ext = p.suffix.lower()
     model = args.get("model", "base")
     lang  = args.get("language", "")
+    if model not in MODELS:
+        return f"不支持的模型：{model}。可选：{', '.join(sorted(MODELS))}"
+    if lang and not re.fullmatch(r"[A-Za-z]{2,8}(-[A-Za-z0-9]{2,8})?", lang):
+        return "错误：language 必须是类似 zh、en、zh-CN 的语言代码"
 
     is_video = ext in VIDEO_EXTS
     is_audio = ext in AUDIO_EXTS

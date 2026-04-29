@@ -1,7 +1,9 @@
+from core.llm import stream_chat
+
 SKILL = {
     "name": "humanizer",
     "description": "把文字改得更自然，去掉 AI 腔、官腔和空泛排比",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "author": "archer-builtin",
 }
 
@@ -37,8 +39,8 @@ def schema() -> dict:
     }
 
 def run(args: dict) -> str:
-    text          = args.get("text", "").strip()
-    style         = args.get("style", "natural")
+    text           = args.get("text", "").strip()
+    style          = args.get("style", "natural")
     keep_structure = args.get("keep_structure", True)
 
     if not text:
@@ -52,9 +54,19 @@ def run(args: dict) -> str:
 
     structure_hint = "保持原文段落结构。" if keep_structure else "可以重新组织段落结构。"
 
-    return (
-        f"请润色以下文字，风格要求：{style_hint}。{structure_hint}"
-        f"去掉明显的 AI 腔、空泛排比、宣传腔和套话，让表达更真实自然。"
-        f"直接输出润色后的结果，不要解释修改了什么。\n\n"
-        f"原文：\n{text}"
-    )
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                f"你是文本润色专家。把以下文字改写成「{style_hint}」风格，{structure_hint}"
+                "去掉明显的 AI 腔、空泛排比、宣传腔和套话，让表达更真实自然。"
+                "直接输出润色后的结果，不要解释修改了什么。"
+            ),
+        },
+        {"role": "user", "content": text},
+    ]
+
+    result = ""
+    for chunk in stream_chat(messages):
+        result += chunk
+    return result

@@ -9,7 +9,7 @@ from pathlib import Path
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 
-from core.policy import check, check_shell_command, scan_code_for_dangers, score_shell_risk, Decision
+from core.policy import check, check_shell_command, scan_code_for_dangers, score_shell_risk, Decision, is_sensitive_path
 
 
 def _make_skill(name, risk="low", requires_confirmation=False):
@@ -74,24 +74,36 @@ def test_chmod_recursive_is_high():
     assert risk == "high"
 
 
-# ── shell 安全命令：CONFIRM（非 DENY）────────────────────────────────────────
+# ── shell 安全命令：ALLOW（非 DENY）──────────────────────────────────────────
 
 def test_allow_git_status():
-    """git status 安全，v1.2 risk 评为 low → CONFIRM with low risk。"""
+    """git status 安全，risk 评为 low → ALLOW。"""
     skills = {"shell": _make_skill("shell", risk="high", requires_confirmation=True)}
     result = check("shell", {"command": "git status"}, skills)
-    assert result.decision == Decision.CONFIRM
-    assert result.risk == "low"  # v1.2: 风险评分后 git status 为 low
+    assert result.decision == Decision.ALLOW
+    assert result.risk == "low"
 
 def test_allow_ls():
     skills = {"shell": _make_skill("shell", risk="high")}
     result = check("shell", {"command": "ls -la"}, skills)
-    assert result.decision == Decision.CONFIRM
+    assert result.decision == Decision.ALLOW
 
 def test_allow_echo():
     skills = {"shell": _make_skill("shell", risk="high")}
     result = check("shell", {"command": "echo hello"}, skills)
+    assert result.decision == Decision.ALLOW
+
+def test_shell_write_redirect_confirm():
+    skills = {"shell": _make_skill("shell", risk="high")}
+    result = check("shell", {"command": "echo hello > /tmp/hello.txt"}, skills)
     assert result.decision == Decision.CONFIRM
+    assert result.risk == "medium"
+
+def test_shell_git_commit_confirm():
+    skills = {"shell": _make_skill("shell", risk="high")}
+    result = check("shell", {"command": "git commit -m 'fix bug'"}, skills)
+    assert result.decision == Decision.CONFIRM
+    assert result.risk == "medium"
 
 
 # ── file_ops ───────────────────────────────────────────────────────────────────
@@ -112,10 +124,30 @@ def test_file_ops_read_allow():
     result = check("file_ops", {"action": "read", "path": "/tmp/test.txt"}, skills)
     assert result.decision == Decision.ALLOW
 
+def test_file_ops_sensitive_read_confirm():
+    skills = {"file_ops": _make_skill("file_ops", risk="medium")}
+    result = check("file_ops", {"action": "read", "path": "~/.ssh/id_ed25519"}, skills)
+    assert result.decision == Decision.CONFIRM
+    assert result.risk == "high"
+
+def test_file_ops_sensitive_write_confirm_even_in_vault():
+    skills = {"file_ops": _make_skill("file_ops", risk="medium")}
+    cfg = {"obsidian": {"vault_path": "/tmp/vault"}}
+    result = check("file_ops", {"action": "write", "path": "/tmp/vault/.env"}, skills, cfg=cfg)
+    assert result.decision == Decision.CONFIRM
+    assert result.risk == "high"
+
 def test_file_ops_list_allow():
     skills = {"file_ops": _make_skill("file_ops", risk="medium")}
     result = check("file_ops", {"action": "list", "path": "/tmp"}, skills)
     assert result.decision == Decision.ALLOW
+
+def test_sensitive_path_patterns():
+    assert is_sensitive_path("~/.ssh/id_rsa")
+    assert is_sensitive_path("/tmp/project/.env.local")
+    assert is_sensitive_path("/tmp/project/archer.toml")
+    assert is_sensitive_path("/tmp/cert.pem")
+    assert not is_sensitive_path("/tmp/project/readme.md")
 
 
 # ── github_ops ─────────────────────────────────────────────────────────────────
@@ -129,6 +161,12 @@ def test_github_ops_create_issue_confirm():
     skills = {"github_ops": _make_skill("github_ops", risk="high", requires_confirmation=True)}
     result = check("github_ops", {"action": "create_issue", "title": "bug"}, skills)
     assert result.decision == Decision.CONFIRM
+
+def test_github_ops_run_strong_confirm():
+    skills = {"github_ops": _make_skill("github_ops", risk="high", requires_confirmation=True)}
+    result = check("github_ops", {"action": "run", "command": "repo delete owner/repo"}, skills)
+    assert result.decision == Decision.STRONG_CONFIRM
+    assert result.risk == "high"
 
 
 # ── installer 由技能内部处理 ────────────────────────────────────────────────────
@@ -177,20 +215,28 @@ if __name__ == "__main__":
         test_deny_rm_rf_home,
         test_deny_rm_rf_home_variant,
         test_deny_rm_rf_root,
-        test_deny_sudo,
+        test_deny_sudo_rm,
         test_deny_curl_pipe_sh,
         test_deny_fork_bomb,
-        test_deny_shutdown,
+        test_shutdown_is_high_not_deny,
         test_deny_mkfs,
+        test_sudo_is_high_not_deny,
+        test_chmod_recursive_is_high,
         test_allow_git_status,
         test_allow_ls,
         test_allow_echo,
+        test_shell_write_redirect_confirm,
+        test_shell_git_commit_confirm,
         test_file_ops_write_confirm,
         test_file_ops_append_confirm,
         test_file_ops_read_allow,
+        test_file_ops_sensitive_read_confirm,
+        test_file_ops_sensitive_write_confirm_even_in_vault,
         test_file_ops_list_allow,
+        test_sensitive_path_patterns,
         test_github_ops_confirm,
         test_github_ops_create_issue_confirm,
+        test_github_ops_run_strong_confirm,
         test_installer_policy_allow,
         test_low_risk_skill_allow,
         test_unknown_skill_allow,

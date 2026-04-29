@@ -15,6 +15,9 @@ memory_path = "/path/to/your/MEMORY.md"
 db_path              = "/path/to/Archer/memory/archer.db"
 max_context_memories = 5
 
+[context]
+token_limit = 1000000
+
 [ui]
 stream = true
 
