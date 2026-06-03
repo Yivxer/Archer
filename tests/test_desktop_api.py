@@ -514,6 +514,46 @@ class TestApiSkillRouting:
         assert tool_event["draft"]["skillName"] == "hugo_blog"
         assert tool_event["draft"]["args"] == {"action": "deploy"}
 
+    def test_hugo_deploy_chat_stops_after_approval_card(self, monkeypatch):
+        from terminal.api import _tools as tools
+
+        monkeypatch.setattr(tools, "_select_api_skills", lambda _query: {"hugo_blog": object()})
+        monkeypatch.setattr(tools, "_run_desktop_tool_loop", lambda messages, _skills, _query: (messages, []))
+
+        def fake_make(skill_name, args, **kwargs):
+            return {
+                "kind": "tool_request",
+                "eventId": kwargs["event_id"],
+                "skillName": skill_name,
+                "displayName": kwargs["display_name"],
+                "args": args,
+                "policy": {"decision": "allow", "risk": "low", "reason": ""},
+                "requiresApproval": True,
+                "blocked": False,
+                **(kwargs.get("extra") or {}),
+            }
+
+        def fail_stream_chat(_messages):
+            raise AssertionError("direct hugo deploy approval must not call the model")
+
+        monkeypatch.setattr(tools, "_make_api_tool_request", fake_make)
+        monkeypatch.setattr("core.llm.stream_chat", fail_stream_chat)
+
+        events = list(tools._iter_chat_chunks(
+            [{"role": "user", "content": "部署枫弋札记"}],
+            memory_mode="off",
+            obsidian_mode="off",
+            file_refs=[],
+        ))
+
+        assert any(
+            event.get("toolEvent", {}).get("name") == "hugo_blog"
+            and event.get("toolEvent", {}).get("requiresApproval") is True
+            for event in events
+        )
+        assert any("请在工具卡片中确认" in event.get("text", "") for event in events)
+        assert events[-1] == {"type": "done", "done": True}
+
     def test_hugo_new_approval_runs_deploy_after_create(self, monkeypatch):
         PENDING_TOOL_DRAFTS.clear()
         event_id = "hugo-blog-test"

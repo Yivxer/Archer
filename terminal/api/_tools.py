@@ -1299,6 +1299,27 @@ def _iter_chat_chunks(
                     "抓取失败", str(exc)[:240],
                 )
 
+    # ── 预检工具事件。显式 Hugo 部署请求必须先于模型工具循环处理，
+    # 避免用户只想确认部署时仍卡在“思考中”。
+    api_tool_events = list(_iter_api_tool_events(query))
+    direct_hugo_deploy_approval = any(
+        isinstance(event, dict)
+        and event.get("toolEvent", {}).get("name") == "hugo_blog"
+        and event.get("toolEvent", {}).get("requiresApproval")
+        and event.get("toolEvent", {}).get("draft", {}).get("args", {}).get("action") == "deploy"
+        for event in api_tool_events
+    )
+    if direct_hugo_deploy_approval:
+        for event in api_tool_events:
+            yield event
+        yield {"type": "ready", "ready": True}
+        yield {
+            "type": "token",
+            "text": "已准备部署枫弋札记，请在工具卡片中确认。确认后会执行 Hugo 构建、部署，并验证单页可访问。",
+        }
+        yield {"type": "done", "done": True}
+        return
+
     # ── Desktop Tool Loop：让 LLM 通过 function calling 自主调用未被专用 builder 覆盖的技能 ──
     _all_selected = _select_api_skills(query)
     enriched_messages, tool_loop_events = _run_desktop_tool_loop(
@@ -1308,7 +1329,6 @@ def _iter_chat_chunks(
         yield event
 
     # ── 预检工具事件（Shell / GitHub / Obsidian 搜索） ──
-    api_tool_events = list(_iter_api_tool_events(query))
     for event in api_tool_events:
         yield event
 
