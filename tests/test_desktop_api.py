@@ -535,20 +535,29 @@ class TestApiSkillRouting:
                 "ok": True,
                 "executed": True,
                 "summary": "文章已创建",
-                "output": "文章已创建：/tmp/test.md",
+                "output": "文章已创建：/Users/Yivxer/yivxer-blog/content/posts/test.md",
                 "policy": {"decision": "allow", "risk": "low", "reason": ""},
             }
 
+        deploy_calls = []
+
+        def fake_hugo_run(args):
+            deploy_calls.append(args)
+            if args["action"] == "deploy":
+                return "部署成功！\n单页验证成功：HTTP 200 https://iver.yivxer.com/posts/test/"
+            return ""
+
         monkeypatch.setattr("core.api_tool_service.execute_tool_request", fake_execute)
         monkeypatch.setattr("skills.loader.load_skills", lambda: {})
-        monkeypatch.setattr("skills.hugo_blog.run", lambda args: "部署成功！\nOK" if args["action"] == "deploy" else "")
+        monkeypatch.setattr("skills.hugo_blog.run", fake_hugo_run)
 
         result = _tool_approval({"eventId": event_id, "decision": "approved"})
 
         assert result["executed"] is True
+        assert deploy_calls == [{"action": "deploy", "filename": "test.md"}]
         assert "文章已创建" in result["output"]
         assert "部署成功" in result["output"]
-        assert "hugo deploy 已自动执行" in result["message"]
+        assert "hugo deploy 已自动执行并验证单页可访问" in result["message"]
 
 
 class TestGitHubArgsExtraction:

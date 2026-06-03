@@ -904,9 +904,17 @@ def _tool_approval(payload: dict) -> dict:
                     if action == "new":
                         try:
                             from skills.hugo_blog import run as hugo_run
-                            deploy_result = hugo_run({"action": "deploy"})
+                            deploy_args = {"action": "deploy"}
+                            created_file = re.search(r"文章已创建：(.+?\.md)", result_output)
+                            if created_file:
+                                deploy_args["filename"] = Path(created_file.group(1)).name
+                            elif args.get("slug"):
+                                deploy_args["slug"] = args.get("slug")
+                            deploy_result = hugo_run(deploy_args)
                             result_output += "\n\n" + str(deploy_result)
-                            if "部署成功" in str(deploy_result):
+                            if "单页验证成功" in str(deploy_result):
+                                message += " | hugo deploy 已自动执行并验证单页可访问"
+                            elif "部署成功" in str(deploy_result):
                                 message += " | hugo deploy 已自动执行"
                             else:
                                 message += " | hugo deploy 执行完成但可能失败"
@@ -920,9 +928,12 @@ def _tool_approval(payload: dict) -> dict:
                     if "/yivxer-blog/content/posts/" in target_path and args.get("action") == "write":
                         try:
                             from skills.hugo_blog import run as hugo_run
-                            deploy_result = hugo_run({"action": "deploy"})
+                            deploy_result = hugo_run({"action": "deploy", "filename": Path(target_path).name})
                             result_output += "\n\n" + str(deploy_result)
-                            message += " | hugo deploy 已自动执行"
+                            if "单页验证成功" in str(deploy_result):
+                                message += " | hugo deploy 已自动执行并验证单页可访问"
+                            else:
+                                message += " | hugo deploy 已自动执行"
                         except Exception as deploy_exc:
                             result_output += f"\n\n部署失败：{deploy_exc}"
                             message += " | 部署失败"
