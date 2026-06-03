@@ -1,0 +1,417 @@
+/* ═══════════════════════════════════════════════════════════════════════
+   tools.css — All .tool-* rules (tool-event-card, tool-terminal-block, etc.)
+   ═══════════════════════════════════════════════════════════════════════ */
+
+.tool-event-card {
+  display: grid;
+  gap: 9px;
+  width: min(620px, calc(100% - 38px));
+  margin: 0 0 16px 38px;
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius);
+  padding: 11px 12px;
+  background: color-mix(in srgb, var(--panel-solid) 84%, transparent);
+  box-shadow: var(--shadow-xs);
+}
+
+.tool-event-card.waiting {
+  border-color: color-mix(in srgb, var(--amber) 34%, var(--panel-border));
+}
+
+.tool-event-card.blocked,
+.tool-event-card.denied {
+  opacity: 0.82;
+}
+
+.tool-event-head {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.tool-event-head svg {
+  color: var(--muted);
+}
+
+.tool-event-head strong {
+  display: block;
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.tool-event-head span {
+  display: block;
+  margin-top: 1px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.tool-event-head em {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 2px 7px;
+  font-size: 10px;
+  font-style: normal;
+  text-transform: uppercase;
+}
+
+.tool-event-card p {
+  margin: 0;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+.tool-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.tool-meta-grid div {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 7px 8px;
+  background: color-mix(in srgb, var(--field) 54%, transparent);
+}
+
+.tool-meta-grid span,
+.tool-meta-grid strong {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tool-meta-grid span {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.tool-meta-grid strong {
+  margin-top: 3px;
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.tool-terminal-block,
+.tool-path-block {
+  display: grid;
+  gap: 7px;
+  border-radius: var(--radius);
+  padding: 9px 10px;
+}
+
+.tool-terminal-block {
+  background: #111827;
+  color: #dbe5ef;
+}
+
+.tool-terminal-block code,
+.tool-terminal-block pre {
+  margin: 0;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: "SF Mono", "Fira Code", monospace;
+  font-size: 11px;
+  line-height: 1.65;
+}
+
+.tool-terminal-block code {
+  color: #8de7dd;
+}
+
+.tool-terminal-block pre {
+  color: rgba(219, 229, 239, 0.82);
+}
+
+.tool-path-block {
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--field) 70%, transparent);
+}
+
+.tool-path-block strong {
+  color: var(--ink);
+  font-family: "SF Mono", "Fira Code", monospace;
+  font-size: 11px;
+  word-break: break-word;
+}
+
+.tool-path-block span {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.tool-notice {
+  padding: 6px 0 6px 38px;
+  color: var(--cyan);
+  font-size: 12px;
+  opacity: 0.8;
+}
+
+.approval-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 7px;
+}
+
+.approval-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-width: 0;
+  min-height: 30px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 0 10px;
+  color: var(--text);
+  background: var(--field);
+  font-size: 12px;
+  transition: all 160ms ease;
+}
+
+.approval-actions .button-primary {
+  color: color-mix(in srgb, var(--cyan) 72%, var(--ink));
+  border-color: color-mix(in srgb, var(--cyan) 30%, transparent);
+}
+
+.approval-actions .button-danger {
+  color: color-mix(in srgb, var(--orange) 78%, var(--text));
+  border-color: color-mix(in srgb, var(--orange) 24%, transparent);
+}
+
+.approval-actions button:first-child {
+  color: var(--cyan);
+  border-color: color-mix(in srgb, var(--cyan) 30%, transparent);
+}
+
+.approval-actions button:first-child:hover {
+  background: color-mix(in srgb, var(--cyan) 12%, transparent);
+  border-color: color-mix(in srgb, var(--cyan) 50%, transparent);
+}
+
+.approval-actions button:last-child:hover {
+  color: var(--ink);
+  border-color: color-mix(in srgb, var(--cyan) 26%, transparent);
+}
+
+/* ── desktop surface override for tool-panel ─────────────────────────── */
+.tool-panel {
+  border-color: var(--panel-border);
+  background: color-mix(in srgb, var(--panel-solid) 82%, transparent);
+}
+
+/* ── P91 minimal letter workspace: tool events ──────────────────────── */
+.tool-event-card {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0;
+  width: min(620px, calc(100% - 38px));
+  min-height: 36px;
+  margin: 0 0 6px 38px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel-solid);
+  box-shadow: none;
+  transition: border-color 160ms ease;
+}
+
+.tool-event-card.risk-high,
+.tool-event-card.risk-critical {
+  border-left: 3px solid var(--orange);
+}
+
+.tool-event-card.waiting {
+  border-left: 3px solid var(--amber);
+}
+
+.tool-event-card.risk-low,
+.tool-event-card.risk-medium {
+  border-left: 3px solid transparent;
+}
+
+.tool-event-card.complete {
+  border-left: 3px solid var(--cyan);
+  opacity: 0.82;
+}
+
+.tool-event-card.denied,
+.tool-event-card.blocked {
+  border-left: 3px solid var(--muted);
+  opacity: 0.65;
+}
+
+.tool-event-summary {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  border: 0;
+  border-radius: 7px;
+  padding: 6px 8px;
+  color: var(--text);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.tool-event-summary:hover {
+  background: var(--soft-hover);
+  color: var(--ink);
+}
+
+.tool-event-summary span {
+  overflow: hidden;
+  color: var(--ink);
+  font-family: "SF Mono", "Fira Code", monospace;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tool-event-summary em {
+  color: var(--muted);
+  font-size: 11px;
+  font-style: normal;
+  white-space: nowrap;
+}
+
+.tool-event-card.expanded .tool-event-summary svg:last-child {
+  transform: rotate(180deg);
+}
+
+.approval-actions.compact {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
+}
+
+.approval-actions.compact button {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  min-height: 0;
+  border-radius: 8px;
+  padding: 0;
+}
+
+.tool-event-detail {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 8px;
+  padding: 2px 6px 6px;
+}
+
+.tool-event-detail p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.job-event-card {
+  display: grid;
+  gap: 4px;
+  width: min(620px, calc(100% - 38px));
+  margin: 0 0 6px 38px;
+  border: 1px solid var(--line);
+  border-left: 3px solid color-mix(in srgb, var(--cyan) 48%, var(--line));
+  border-radius: var(--radius);
+  padding: 6px 8px;
+  background: var(--panel-solid);
+}
+
+.job-event-card.failed,
+.job-event-card.cancelled {
+  border-left-color: var(--orange);
+  opacity: 0.76;
+}
+
+.job-event-card.complete {
+  opacity: 0.82;
+}
+
+.job-event-summary {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.job-event-card.queued .job-event-summary > svg,
+.job-event-card.running .job-event-summary > svg,
+.job-event-card.waiting_approval .job-event-summary > svg {
+  animation: ring-spin 1.1s linear infinite;
+}
+
+.job-event-summary span {
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.job-event-summary em {
+  color: var(--muted);
+  font-size: 11px;
+  font-style: normal;
+  white-space: nowrap;
+}
+
+.job-event-summary button {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  border: 0;
+  border-radius: 999px;
+  padding: 0;
+  color: var(--muted);
+  background: transparent;
+}
+
+.job-event-summary button:hover {
+  color: var(--ink);
+  background: color-mix(in srgb, var(--ink) 6%, transparent);
+}
+
+.job-event-detail {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.tool-meta-grid,
+.tool-event-head {
+  display: none;
+}
+
+.tool-terminal-block {
+  background: color-mix(in srgb, var(--field) 68%, var(--panel-solid));
+  color: var(--ink);
+}
+
+/* ── dark theme: tools ───────────────────────────────────────────────── */
+:root[data-theme="dark"] .tool-event-card {
+  background: var(--panel-solid);
+  border-color: var(--line);
+  box-shadow: none;
+}
+
+:root[data-theme="dark"] .tool-terminal-block {
+  background: color-mix(in srgb, var(--field) 76%, var(--panel-solid));
+  color: var(--ink);
+}

@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Archer">
+  <defs>
+    <filter id="soft-shadow" x="-35%" y="-35%" width="170%" height="170%">
+      <feDropShadow dx="0" dy="-12" stdDeviation="16" flood-color="#4dd9d4" flood-opacity=".20"/>
+      <feDropShadow dx="0" dy="18" stdDeviation="22" flood-color="#f5612a" flood-opacity=".18"/>
+      <feDropShadow dx="0" dy="0" stdDeviation="28" flood-color="#1e7be8" flood-opacity=".10"/>
+    </filter>
+    <radialGradient id="paper" cx="50%" cy="45%" r="72%">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset=".58" stop-color="#fdfbf7"/>
+      <stop offset="1" stop-color="#f6f2eb"/>
+    </radialGradient>
+    <radialGradient id="shine" cx="34%" cy="18%" r="58%">
+      <stop offset="0" stop-color="#ffffff" stop-opacity=".88"/>
+      <stop offset=".36" stop-color="#ffffff" stop-opacity=".32"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="inner-paper" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0" stop-color="#fdfbf7"/>
+      <stop offset="1" stop-color="#f6f2eb"/>
+    </linearGradient>
+    <linearGradient id="spectrum" x1="96" x2="416" y1="116" y2="396" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#5ee8e0"/>
+      <stop offset=".24" stop-color="#1e7be8"/>
+      <stop offset=".48" stop-color="#f5c842"/>
+      <stop offset=".70" stop-color="#f5612a"/>
+      <stop offset=".84" stop-color="#e8212a"/>
+      <stop offset="1" stop-color="#5ee8e0"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="512" height="512" fill="url(#paper)"/>
+  <g filter="url(#soft-shadow)">
+    <path d="M253 88C348 82 427 156 430 249C433 350 354 426 252 421C157 416 84 344 88 251C91 158 164 94 253 88Z" fill="none" stroke="url(#spectrum)" stroke-width="82" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M256 88C342 82 425 153 431 244C438 348 356 426 252 421C157 416 84 344 88 251C91 158 164 94 256 88ZM256 172C211 169 174 205 171 251C168 303 208 341 257 341C309 341 344 302 341 253C338 207 302 175 256 172Z" fill="url(#shine)" fill-rule="evenodd"/>
+    <path d="M256 172C211 169 174 205 171 251C168 303 208 341 257 341C309 341 344 302 341 253C338 207 302 175 256 172Z" fill="url(#inner-paper)"/>
+  </g>
+</svg>

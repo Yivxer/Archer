@@ -1,0 +1,10 @@
+node_modules/
+out/
+release/
+dist/
+.DS_Store
+*.log
+
+# Generated icon intermediates. Keep archer-icon.svg and archer-icon.icns.
+resources/*.iconset/
+resources/archer-icon-1024.png

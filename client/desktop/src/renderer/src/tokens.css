@@ -1,0 +1,28 @@
+/* ── Archer Design Tokens ───────────────────────────────
+   Source of truth: web/public/assets/index.css
+   When updating, keep all three platforms in sync.
+   ──────────────────────────────────────────────────── */
+
+:root {
+  /* Brand palette (shared across all platforms) */
+  --cyan: #4dd9d4;
+  --blue: #1e7be8;
+  --amber: #f5c842;
+  --orange: #f5612a;
+  --red: #e8212a;
+
+  /* Light theme surface */
+  --bg-1: #f8f5ef;
+  --bg-2: #f3eee6;
+
+  /* Typography */
+  --brand-font: "Comfortaa", "Avenir Next", "Trebuchet MS", sans-serif;
+  --brand-script-font: "Snell Roundhand", "Bradley Hand", "Marker Felt", "Segoe Print", cursive;
+  --body-font: "Archer WenKai", "LXGW WenKai", "LXGW WenKai Screen", "霞鹭文楷",
+    "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", system-ui, sans-serif;
+}
+
+:root[data-theme="dark"] {
+  --bg-1: #0d1219;
+  --bg-2: #0a0f14;
+}

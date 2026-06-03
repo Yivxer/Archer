@@ -1,0 +1,51 @@
+@import "tailwindcss";
+@import "./tokens.css";
+@import "./styles/base.css";
+@import "./styles/sidebar.css";
+@import "./styles/workspace.css";
+@import "./styles/chat.css";
+@import "./styles/composer.css";
+@import "./styles/tools.css";
+@import "./styles/pages.css";
+
+:root {
+  /* Brand colors, bg-1, bg-2, font stacks → tokens.css */
+  --bg-1: #ffffff;
+  --bg-2: #ffffff;
+  --ink: #252a32;
+  --text: #3e4650;
+  --muted: #8f98a3;
+  --faint: #c7cdd4;
+  --line: rgba(15, 23, 42, 0.045);
+  --border-medium: rgba(15, 23, 42, 0.075);
+  --panel: #ffffff;
+  --panel-solid: #ffffff;
+  --field: rgba(255, 255, 255, 0.96);
+  --shadow: 0 18px 48px rgba(44, 54, 67, 0.08);
+  --shadow-xs: 0 2px 8px rgba(15, 23, 42, 0.06);
+  --sidebar: #ffffff;
+  --panel-border: rgba(36, 49, 58, 0.10);
+  --soft-hover: rgba(36, 49, 58, 0.045);
+  --quiet-glow: 0 18px 54px rgba(48, 80, 118, 0.075);
+  --radius: 10px;
+  --radius-window: 10px;
+  --radius-panel: 10px;
+  --radius-composer: 10px;
+}
+
+:root[data-theme="dark"] {
+  --bg-1: #0d1219;
+  --bg-2: #0a0f14;
+  --ink: #d0dde8;
+  --text: #8a9dac;
+  --muted: #687b89;
+  --line: rgba(77, 217, 212, 0.12);
+  --panel: rgba(18, 30, 50, 0.62);
+  --panel-solid: #101b2b;
+  --field: rgba(15, 25, 42, 0.82);
+  --shadow: 0 30px 90px rgba(0, 0, 0, 0.5);
+  --sidebar: rgba(10, 18, 32, 0.62);
+  --panel-border: rgba(77, 217, 212, 0.12);
+  --soft-hover: rgba(77, 217, 212, 0.065);
+  --quiet-glow: 0 24px 70px rgba(0, 0, 0, 0.28);
+}

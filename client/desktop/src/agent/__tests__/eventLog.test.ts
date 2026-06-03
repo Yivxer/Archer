@@ -1,0 +1,98 @@
+import { describe, expect, it } from 'vitest'
+import type { AgentEvent } from '../contracts'
+import { createEventLog, createPersistentEventLog, type EventLogStorage } from '../eventLog'
+
+function event(id: string, type: AgentEvent['type']): AgentEvent {
+  if (type === 'text.delta') {
+    return { type, id, sessionId: 's1', createdAt: id, text: id }
+  }
+  return {
+    type: 'runtime.error',
+    id,
+    sessionId: 's1',
+    createdAt: id,
+    scope: 'adapter',
+    message: id,
+    recoverable: true,
+  }
+}
+
+describe('event log', () => {
+  it('appends events in order', () => {
+    const log = createEventLog()
+    log.append(event('1', 'text.delta'))
+    log.append(event('2', 'text.delta'))
+    expect(log.all().map((item) => item.id)).toEqual(['1', '2'])
+  })
+
+  it('deduplicates repeated event ids', () => {
+    const log = createEventLog()
+    log.append(event('1', 'text.delta'))
+    log.append(event('1', 'text.delta'))
+    expect(log.all()).toHaveLength(1)
+  })
+
+  it('filters events by session', () => {
+    const log = createEventLog()
+    log.append(event('1', 'text.delta'))
+    log.append({ ...event('2', 'text.delta'), sessionId: 's2' })
+    expect(log.forSession('s1')).toHaveLength(1)
+  })
+
+  it('persists events to storage and reloads them', () => {
+    const storage = memoryStorage()
+    const log = createPersistentEventLog(storage, 'events')
+    log.append(event('1', 'text.delta'))
+
+    const reloaded = createPersistentEventLog(storage, 'events')
+
+    expect(reloaded.all().map((item) => item.id)).toEqual(['1'])
+  })
+
+  it('ignores malformed persisted events', () => {
+    const storage = memoryStorage()
+    storage.setItem('events', JSON.stringify([
+      event('1', 'text.delta'),
+      { type: 'unknown', id: 'bad' },
+    ]))
+
+    const log = createPersistentEventLog(storage, 'events')
+
+    expect(log.all().map((item) => item.id)).toEqual(['1'])
+  })
+
+  it('clears persisted events', () => {
+    const storage = memoryStorage()
+    const log = createPersistentEventLog(storage, 'events')
+    log.append(event('1', 'text.delta'))
+    log.clear()
+
+    expect(storage.getItem('events')).toBeNull()
+    expect(log.all()).toHaveLength(0)
+  })
+
+  it('clears one session without removing other sessions', () => {
+    const log = createEventLog()
+    log.append(event('1', 'text.delta'))
+    log.append({ ...event('2', 'text.delta'), sessionId: 's2' })
+
+    log.clearSession('s1')
+
+    expect(log.all().map((item) => item.id)).toEqual(['2'])
+  })
+})
+
+function memoryStorage(): EventLogStorage {
+  const values = new Map<string, string>()
+  return {
+    getItem(key) {
+      return values.get(key) ?? null
+    },
+    setItem(key, value) {
+      values.set(key, value)
+    },
+    removeItem(key) {
+      values.delete(key)
+    },
+  }
+}

@@ -1,0 +1,126 @@
+/* ═══════════════════════════════════════════════════════════════════════
+   workspace.css — All .workspace* and topbar rules, dark & responsive
+   ═══════════════════════════════════════════════════════════════════════ */
+
+.workspace {
+  position: relative;
+  z-index: 1;
+  flex: 1 1 0;
+  min-width: 0;
+  border: 1px solid rgba(15, 23, 42, 0.065);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.90), rgba(252, 252, 250, 0.86));
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(20px);
+}
+
+.topbar-conn-live {
+  color: var(--cyan);
+  filter: drop-shadow(0 0 4px color-mix(in srgb, var(--cyan) 60%, transparent));
+}
+
+.workspace {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
+  border-radius: var(--radius-panel);
+  overflow: hidden;
+}
+
+.topbar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  min-height: 46px;
+  padding: 7px 12px;
+  border-bottom: 0;
+  -webkit-app-region: drag;
+}
+
+.topbar h1 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+}
+
+.topbar-left,
+.topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  -webkit-app-region: no-drag;
+}
+
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+  -webkit-app-region: no-drag;
+}
+
+
+.topbar {
+  min-height: 44px;
+  padding-left: 92px;
+  padding-right: 14px;
+  border-bottom: 0;
+}
+
+.topbar-left {
+  position: absolute;
+  left: 58px;
+  top: 4px;
+  gap: 8px;
+}
+
+.has-sidebar .topbar-left {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.topbar-right {
+  min-width: 1px;
+}
+
+.topbar-conn-live {
+  filter: none;
+}
+
+.topbar-tool {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: 8px;
+  color: color-mix(in srgb, var(--ink) 72%, var(--muted));
+  background: transparent;
+  transition: background 140ms ease, color 140ms ease, transform 140ms ease;
+}
+
+.topbar-tool:hover {
+  color: var(--ink);
+  background: color-mix(in srgb, var(--ink) 5%, transparent);
+}
+
+.topbar-tool:active {
+  transform: translateY(1px);
+}
+
+/* ── P91 minimal letter workspace: workspace ──────────────────────── */
+.workspace {
+  grid-template-rows: minmax(0, 1fr);
+  background: #ffffff;
+}
+
+/* ── dark theme: workspace ─────────────────────────────────────────── */
+:root[data-theme="dark"] .workspace {
+  background: var(--bg-1);
+}

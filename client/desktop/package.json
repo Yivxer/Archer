@@ -1,0 +1,57 @@
+{
+  "name": "archer-desktop",
+  "version": "1.0.26",
+  "description": "Archer Desktop static prototype",
+  "private": true,
+  "main": "out/main/index.js",
+  "type": "module",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "api": "cd ../.. && .venv/bin/python terminal/archer_api.py --port 8765 --token ${ARCHER_DESKTOP_TOKEN:?Set ARCHER_DESKTOP_TOKEN first}",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "build": "tsc --noEmit && electron-vite build",
+    "build:mac": "npm run build && electron-builder --mac dmg"
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "^5.1.0",
+    "lucide-react": "^0.554.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.1.17",
+    "@types/node": "^25.0.0",
+    "@types/react": "^19.2.7",
+    "@types/react-dom": "^19.2.3",
+    "electron": "^39.2.6",
+    "electron-builder": "^26.0.12",
+    "electron-vite": "^4.0.0",
+    "tailwindcss": "^4.1.17",
+    "typescript": "^5.9.3",
+    "vite": "^7.2.4",
+    "vitest": "^4.1.8"
+  },
+  "build": {
+    "appId": "com.yivxer.archer",
+    "productName": "Archer",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "out/**",
+      "resources/**",
+      "package.json"
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "target": [
+        "dmg"
+      ],
+      "icon": "resources/archer-icon.icns"
+    }
+  }
+}
