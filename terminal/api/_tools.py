@@ -305,8 +305,25 @@ def _has_explicit_file_write_intent(query: str) -> bool:
     ))
 
 
+def _is_plain_content_request(query: str) -> bool:
+    lowered = query.lower()
+    return any(term in lowered for term in (
+        "帮我生成一篇", "生成一篇", "帮我写一篇", "写一篇", "按照这个逻辑",
+        "帮我分析文章", "分析文章", "改写", "润色", "扩写", "缩写",
+        "写成文章", "整理成文章", "生成文章",
+    ))
+
+
 def _filter_api_skills_for_intent(query: str, selected: dict) -> dict:
     """Keep tools unavailable unless the user explicitly asked for that side effect."""
+    if (
+        _is_plain_content_request(query)
+        and not _has_explicit_web_search_intent(query)
+        and not _has_explicit_file_write_intent(query)
+        and not (_wants_hugo_deploy(query) or _wants_hugo_creation(query))
+    ):
+        return {}
+
     filtered = dict(selected)
     if "hugo_blog" in filtered and not (_wants_hugo_deploy(query) or _wants_hugo_creation(query)):
         filtered.pop("hugo_blog", None)

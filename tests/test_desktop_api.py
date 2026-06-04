@@ -528,7 +528,18 @@ class TestApiSkillRouting:
 
         selected_seen = []
         monkeypatch.setattr(tools, "_select_api_skills", lambda _query: {
+            "code_edit": object(),
+            "code_search": object(),
+            "file_search": object(),
+            "frontend_dev": object(),
             "hugo_blog": object(),
+            "humanizer": object(),
+            "image_analysis": object(),
+            "image_generator": object(),
+            "image_ocr": object(),
+            "shell": object(),
+            "summarize": object(),
+            "video_script": object(),
             "web_search": object(),
             "file_ops": object(),
         })
@@ -557,6 +568,19 @@ class TestApiSkillRouting:
         assert "file_ops" not in tool_names
         assert selected_seen == [set()]
         assert any(event.get("text") == "这是一篇正文。" for event in events)
+
+    def test_plain_article_real_router_filters_tool_noise(self):
+        from terminal.api import _tools as tools
+
+        query = (
+            "如果要我用一句话总结的话，那就是我越来越觉得，所有不是为了解决问题而只是发泄情绪的愤怒都是无能的狂怒；"
+            "你按照这个逻辑，帮我生成一篇大概500字的文章"
+        )
+        selected = tools._select_api_skills(query)
+        filtered = tools._filter_api_skills_for_intent(query, selected)
+
+        assert selected
+        assert filtered == {}
 
     def test_hugo_deploy_chat_stops_after_approval_card(self, monkeypatch):
         from terminal.api import _tools as tools
