@@ -523,6 +523,41 @@ class TestApiSkillRouting:
 
         assert events == []
 
+    def test_plain_article_chat_does_not_use_side_effect_tools(self, monkeypatch):
+        from terminal.api import _tools as tools
+
+        selected_seen = []
+        monkeypatch.setattr(tools, "_select_api_skills", lambda _query: {
+            "hugo_blog": object(),
+            "web_search": object(),
+            "file_ops": object(),
+        })
+
+        def fake_tool_loop(messages, selected, _query):
+            selected_seen.append(set(selected))
+            return messages, []
+
+        monkeypatch.setattr(tools, "_run_desktop_tool_loop", fake_tool_loop)
+        monkeypatch.setattr("core.llm.stream_chat", lambda _messages: iter(["这是一篇正文。"]))
+
+        events = list(tools._iter_chat_chunks(
+            [{"role": "user", "content": "按照这个逻辑，帮我生成一篇大概500字的文章"}],
+            memory_mode="off",
+            obsidian_mode="off",
+            file_refs=[],
+        ))
+
+        tool_names = [
+            event.get("toolEvent", {}).get("name")
+            for event in events
+            if isinstance(event, dict) and "toolEvent" in event
+        ]
+        assert "hugo_blog" not in tool_names
+        assert "web_search" not in tool_names
+        assert "file_ops" not in tool_names
+        assert selected_seen == [set()]
+        assert any(event.get("text") == "这是一篇正文。" for event in events)
+
     def test_hugo_deploy_chat_stops_after_approval_card(self, monkeypatch):
         from terminal.api import _tools as tools
 

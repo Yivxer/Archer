@@ -287,6 +287,38 @@ def _select_api_skills(query: str, all_skills: dict | None = None) -> dict:
     return select_skills(query, skills)
 
 
+def _has_explicit_web_search_intent(query: str) -> bool:
+    lowered = query.lower()
+    return bool(re.search(r"https?://", query)) or any(term in lowered for term in (
+        "搜索", "搜一下", "查一下", "查找", "联网", "上网", "网上", "网页",
+        "最新", "新闻", "资料", "调研", "检索", "search", "google",
+    ))
+
+
+def _has_explicit_file_write_intent(query: str) -> bool:
+    lowered = query.lower()
+    has_path = bool(re.search(r"(?:^|\s)(?:~|/Users/|\.{1,2}/)[^\s]+|\b[\w.-]+\.(?:md|txt|json|py|ts|tsx|js|css|html)\b", query))
+    return has_path or any(term in lowered for term in (
+        "保存到", "写入文件", "写到文件", "创建文件", "新建文件", "生成文件",
+        "另存", "保存为", "放到", "写到路径", "修改文件", "编辑文件",
+        "覆盖文件", "追加到", "append to", "save to", "write file",
+    ))
+
+
+def _filter_api_skills_for_intent(query: str, selected: dict) -> dict:
+    """Keep tools unavailable unless the user explicitly asked for that side effect."""
+    filtered = dict(selected)
+    if "hugo_blog" in filtered and not (_wants_hugo_deploy(query) or _wants_hugo_creation(query)):
+        filtered.pop("hugo_blog", None)
+    if not _has_explicit_web_search_intent(query):
+        filtered.pop("web_search", None)
+        if not re.search(r"https?://", query):
+            filtered.pop("web_fetch", None)
+    if not _has_explicit_file_write_intent(query):
+        filtered.pop("file_ops", None)
+    return filtered
+
+
 def _tool_event_from_request(
     request: dict, *, summary: str, detail_prefix: str = "",
 ) -> dict:
@@ -856,11 +888,9 @@ _API_TOOL_EVENT_BUILDERS = {
 
 
 def _iter_api_tool_events(query: str):
-    selected = _select_api_skills(query)
+    selected = _filter_api_skills_for_intent(query, _select_api_skills(query))
     for skill_name, builder in _API_TOOL_EVENT_BUILDERS.items():
         if skill_name in selected:
-            if skill_name == "hugo_blog" and not (_wants_hugo_deploy(query) or _wants_hugo_creation(query)):
-                continue
             yield from builder(query)
 
 
@@ -1279,7 +1309,7 @@ def _iter_chat_chunks(
             )
 
     # ── Web Search 自动预检：当 skill_router 命中 web_search 时执行搜索并注入上下文 ──
-    _pre_selected = _select_api_skills(query)
+    _pre_selected = _filter_api_skills_for_intent(query, _select_api_skills(query))
     if "web_search" in _pre_selected:
         yield _tool_event(
             "web-search", "web_search", "running", "low",
@@ -1352,7 +1382,7 @@ def _iter_chat_chunks(
         return
 
     # ── Desktop Tool Loop：让 LLM 通过 function calling 自主调用未被专用 builder 覆盖的技能 ──
-    _all_selected = _select_api_skills(query)
+    _all_selected = _filter_api_skills_for_intent(query, _select_api_skills(query))
     enriched_messages, tool_loop_events = _run_desktop_tool_loop(
         enriched_messages, _all_selected, query,
     )
@@ -1394,7 +1424,7 @@ def _iter_chat_chunks(
 
     # ── 通用技能宣告：告诉 LLM 所有被 skill_router 选中但无专用 event builder 的技能 ──
     _AUTO_EXECUTED_SKILLS = {"web_search", "web_fetch"}
-    selected_skills = _select_api_skills(query)
+    selected_skills = _filter_api_skills_for_intent(query, _select_api_skills(query))
     for skill_name in sorted(selected_skills):
         if skill_name in _API_TOOL_EVENT_BUILDERS or skill_name in _AUTO_EXECUTED_SKILLS:
             continue  # 已有专用 builder 或已自动执行注入上下文
