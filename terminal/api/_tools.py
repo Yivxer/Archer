@@ -647,6 +647,35 @@ def _iter_github_events(query: str):
     )
 
 
+_HUGO_BLOG_TARGET_TERMS = (
+    "博客", "博文", "枫弋札记", "hugo", "yivxer-blog", "iver.yivxer.com",
+    "网站", "站点", "posts/", "content/posts",
+)
+_HUGO_DEPLOY_TERMS = ("部署", "上线", "发布", "上传", "推送", "同步到服务器", "deploy", "publish", "upload", "rsync")
+_HUGO_CREATE_TERMS = ("写到博客", "发到博客", "发布到博客", "上传到博客", "新建博客", "博客文章", "博客草稿", "博文")
+_HUGO_CAPABILITY_TERMS = ("能不能", "可以吗", "还能不能", "是否", "吗", "?")
+
+
+def _has_hugo_blog_target(query: str) -> bool:
+    lowered = query.lower()
+    return any(term in lowered for term in _HUGO_BLOG_TARGET_TERMS)
+
+
+def _wants_hugo_deploy(query: str) -> bool:
+    lowered = query.lower()
+    wants_deploy = any(term in lowered for term in _HUGO_DEPLOY_TERMS)
+    if not wants_deploy:
+        return False
+    if _has_hugo_blog_target(query):
+        return True
+    return any(term in lowered for term in ("部署", "上线", "同步到服务器", "rsync"))
+
+
+def _wants_hugo_creation(query: str) -> bool:
+    lowered = query.lower()
+    return _has_hugo_blog_target(query) and any(term in lowered for term in _HUGO_CREATE_TERMS)
+
+
 def _iter_hugo_blog_events(query: str):
     """预检测博客发布/创建意图，告知 LLM 其拥有博客管理能力。
 
@@ -655,12 +684,12 @@ def _iter_hugo_blog_events(query: str):
     在 AI 回复完成后创建 hugo_blog(action=new) 确认卡。
     """
     lowered = query.lower()
-    deploy_terms = ("部署", "上线", "发布", "上传", "推送", "同步到服务器", "deploy", "publish", "upload", "rsync")
-    creation_terms = ("写", "新建", "创建", "草稿", "文章", "博文")
-    question_terms = ("能不能", "可以吗", "还能不能", "是否", "吗", "?")
-    wants_deploy = any(term in lowered for term in deploy_terms)
-    wants_creation = any(term in lowered for term in creation_terms)
-    asks_capability = any(term in lowered for term in question_terms)
+    wants_deploy = _wants_hugo_deploy(query)
+    wants_creation = _wants_hugo_creation(query)
+    asks_capability = any(term in lowered for term in _HUGO_CAPABILITY_TERMS)
+
+    if not wants_deploy and not wants_creation:
+        return
 
     if wants_deploy and not wants_creation and not asks_capability:
         draft_event_id = f"hugo-blog-deploy-{uuid4().hex[:8]}"
@@ -830,6 +859,8 @@ def _iter_api_tool_events(query: str):
     selected = _select_api_skills(query)
     for skill_name, builder in _API_TOOL_EVENT_BUILDERS.items():
         if skill_name in selected:
+            if skill_name == "hugo_blog" and not (_wants_hugo_deploy(query) or _wants_hugo_creation(query)):
+                continue
             yield from builder(query)
 
 

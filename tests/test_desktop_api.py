@@ -514,6 +514,15 @@ class TestApiSkillRouting:
         assert tool_event["draft"]["skillName"] == "hugo_blog"
         assert tool_event["draft"]["args"] == {"action": "deploy"}
 
+    def test_plain_article_request_does_not_trigger_hugo_blog(self, monkeypatch):
+        monkeypatch.setattr("archer_api._select_api_skills", lambda _query: {"hugo_blog": object()})
+
+        events = list(_iter_api_tool_events(
+            "如果要我用一句话总结的话，那就是我越来越觉得；你按照这个逻辑，帮我生成一篇大概500字的文章"
+        ))
+
+        assert events == []
+
     def test_hugo_deploy_chat_stops_after_approval_card(self, monkeypatch):
         from terminal.api import _tools as tools
 
