@@ -37,7 +37,8 @@ def _make_db() -> Path:
             enabled      INTEGER DEFAULT 1,
             last_run_at  TEXT,
             next_run_at  TEXT    NOT NULL,
-            created_at   TEXT    NOT NULL
+            created_at   TEXT    NOT NULL,
+            catchup      TEXT    DEFAULT 'latest'
         )
     """)
     conn.commit()

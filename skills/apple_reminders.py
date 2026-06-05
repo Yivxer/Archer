@@ -1,4 +1,5 @@
 import subprocess
+import re
 
 SKILL = {
     "name": "apple_reminders",
@@ -49,14 +50,24 @@ def _osascript(script: str) -> tuple[str, str]:
     except Exception as e:
         return "", str(e)
 
+def _as_applescript_string(value: str) -> str:
+    escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{escaped}"'
+
+def _clean_text(value: str, limit: int = 200) -> str:
+    return value.strip().replace("\x00", "")[:limit]
+
 def run(args: dict) -> str:
     action    = args.get("action", "")
-    list_name = args.get("list_name", "提醒事项")
+    list_name = _clean_text(args.get("list_name", "提醒事项"), limit=80)
+    if not list_name:
+        list_name = "提醒事项"
+    list_lit = _as_applescript_string(list_name)
 
     if action == "list":
         script = f'''
 tell application "Reminders"
-    set reminderList to list "{list_name}"
+    set reminderList to list {list_lit}
     set incomplete to (reminders of reminderList whose completed is false)
     set output to ""
     set i to 1
@@ -72,16 +83,19 @@ end tell'''
         return f"📋 {list_name}：\n\n{out.strip()}" if out.strip() else f"{list_name} 暂无待办。"
 
     if action == "add":
-        title = args.get("title", "").strip()
+        title = _clean_text(args.get("title", ""), limit=300)
         if not title:
             return "错误：请提供提醒标题（title）"
         due_date = args.get("due_date", "").strip()
-        due_line = f'\n    set due date of newReminder to date "{due_date}"' if due_date else ""
+        if due_date and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", due_date):
+            return "错误：due_date 格式必须是 YYYY-MM-DD"
+        title_lit = _as_applescript_string(title)
+        due_line = f"\n    set due date of newReminder to date {_as_applescript_string(due_date)}" if due_date else ""
         script = f'''
 tell application "Reminders"
-    set reminderList to list "{list_name}"
+    set reminderList to list {list_lit}
     set newReminder to make new reminder at end of reminderList
-    set name of newReminder to "{title}"{due_line}
+    set name of newReminder to {title_lit}{due_line}
 end tell
 return "ok"'''
         out, err = _osascript(script)

@@ -1,8 +1,9 @@
 import json
 from datetime import datetime
 from pathlib import Path
+from core.paths import sessions_dir
 
-SESSIONS_DIR = Path(__file__).parent.parent / "memory" / "sessions"
+SESSIONS_DIR = sessions_dir(Path(__file__).parent.parent / "memory" / "sessions")
 
 class Session:
     def __init__(self):

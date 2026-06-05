@@ -10,8 +10,9 @@ Artifact Storage (Step 1/4)
 import uuid
 from datetime import datetime
 from pathlib import Path
+from core.paths import artifacts_dir
 
-ARTIFACTS_DIR = Path(__file__).parent.parent / ".artifacts"
+ARTIFACTS_DIR = artifacts_dir(Path(__file__).parent.parent / ".artifacts")
 
 # 合法的 artifact 类型
 ARTIFACT_TYPES = ("tool_results", "reflections", "summaries")

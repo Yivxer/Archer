@@ -38,7 +38,11 @@ def schema() -> dict:
                     },
                     "max_chars": {
                         "type": "integer",
-                        "description": "读取时最大字符数，默认 6000",
+                        "description": "读取时最大字符数，默认 6000。大文件建议先用 shell grep -n 定位行号，再用 start_line 定点读取",
+                    },
+                    "start_line": {
+                        "type": "integer",
+                        "description": "从第几行开始读取（从 1 计数）。配合 shell grep -n 找到目标行号后使用，避免反复读大文件头部",
                     },
                 },
                 "required": ["action", "path"],
@@ -60,9 +64,18 @@ def run(args: dict) -> str:
             return f"{path} 是目录，请改用 action=list 列出内容。"
         try:
             text = path.read_text(encoding=enc, errors="ignore")
+            total_chars = len(text)
+            start_line = int(args.get("start_line", 0))
+            if start_line > 1:
+                lines = text.split("\n")
+                total_lines = len(lines)
+                text = "\n".join(lines[start_line - 1:])
+                prefix = f"（从第 {start_line} 行开始，原文共 {total_lines} 行）\n"
+            else:
+                prefix = ""
             if len(text) > max_ch:
-                return text[:max_ch] + f"\n\n…（已截断，原文共 {len(text)} 字符，可用 max_chars 调整限制）"
-            return text
+                return prefix + text[:max_ch] + f"\n\n…（已截断，原文共 {total_chars} 字符。提示：用 shell grep -n 定位行号后，再用 start_line 参数跳到目标位置）"
+            return prefix + text
         except Exception as e:
             return f"读取失败：{e}"
 

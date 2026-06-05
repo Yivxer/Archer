@@ -15,7 +15,7 @@ import core.artifacts as art_mod
 from core.doctor import (
     Level, apply_fixes, run_checks,
     _check_api, _check_config, _check_memory, _check_pending,
-    _check_soul, _check_obsidian, _check_skills, _check_artifacts,
+    _check_api_dns, _check_soul, _check_obsidian, _check_skills, _check_artifacts,
 )
 
 
@@ -33,16 +33,22 @@ def _minimal_cfg(tmp: str) -> dict:
 
 
 def _init_db(db: Path):
-    """建立最小测试数据库（全部 7 张表）。"""
+    """建立最小测试数据库。"""
     conn = sqlite3.connect(db)
     tables = [
-        "CREATE TABLE IF NOT EXISTS memories (id INTEGER PRIMARY KEY, content TEXT, tags TEXT DEFAULT '', type TEXT DEFAULT 'insight', importance INTEGER DEFAULT 3, status TEXT DEFAULT 'active', source TEXT DEFAULT '', created_at TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL DEFAULT '', archived_at TEXT, scope TEXT DEFAULT 'user', confidence REAL DEFAULT 0.8, last_used_at TEXT, valid_until TEXT)",
-        "CREATE TABLE IF NOT EXISTS pending_memories (id INTEGER PRIMARY KEY, content TEXT, type TEXT, importance INTEGER, tags TEXT, source TEXT, confidence REAL, created_at TEXT)",
+        "CREATE TABLE IF NOT EXISTS memories (id INTEGER PRIMARY KEY, content TEXT, tags TEXT DEFAULT '', type TEXT DEFAULT 'insight', importance INTEGER DEFAULT 3, depth INTEGER DEFAULT 3, status TEXT DEFAULT 'active', source TEXT DEFAULT '', created_at TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL DEFAULT '', archived_at TEXT, scope TEXT DEFAULT 'user', confidence REAL DEFAULT 0.8, last_used_at TEXT, valid_until TEXT, session_id TEXT)",
+        "CREATE TABLE IF NOT EXISTS pending_memories (id INTEGER PRIMARY KEY, content TEXT, type TEXT, importance INTEGER, depth INTEGER DEFAULT 3, tags TEXT, source TEXT, confidence REAL, created_at TEXT, status TEXT DEFAULT 'pending')",
         "CREATE TABLE IF NOT EXISTS themes (id INTEGER PRIMARY KEY, name TEXT, category TEXT, description TEXT, occurrence_count INTEGER DEFAULT 1, last_seen_at TEXT)",
         "CREATE TABLE IF NOT EXISTS memory_links (id INTEGER PRIMARY KEY, memory_id INTEGER, theme_id INTEGER, strength REAL)",
         "CREATE TABLE IF NOT EXISTS projects (id INTEGER PRIMARY KEY, name TEXT, description TEXT, status TEXT DEFAULT 'active', current_phase TEXT, goal TEXT, created_at TEXT, updated_at TEXT)",
-        "CREATE TABLE IF NOT EXISTS project_events (id INTEGER PRIMARY KEY, project_id INTEGER, event_type TEXT, content TEXT, source_session_id TEXT, created_at TEXT)",
-        "CREATE TABLE IF NOT EXISTS soul_proposals (id INTEGER PRIMARY KEY, content TEXT, source TEXT, status TEXT DEFAULT 'pending', created_at TEXT)",
+        "CREATE TABLE IF NOT EXISTS project_events (id INTEGER PRIMARY KEY, project_id INTEGER, event_type TEXT, content TEXT, source_session_id TEXT, created_at TEXT, session_id TEXT)",
+        "CREATE TABLE IF NOT EXISTS soul_proposals (id INTEGER PRIMARY KEY, content TEXT, source TEXT, status TEXT DEFAULT 'pending', created_at TEXT, reviewed_at TEXT, session_id TEXT)",
+        "CREATE TABLE IF NOT EXISTS scheduled_tasks (id INTEGER PRIMARY KEY, skill_name TEXT, label TEXT, interval_h INTEGER, args_json TEXT, enabled INTEGER, last_run_at TEXT, next_run_at TEXT, created_at TEXT)",
+        "CREATE TABLE IF NOT EXISTS self_critiques (id INTEGER PRIMARY KEY, created_at TEXT, session_id TEXT, source TEXT, title TEXT, observation TEXT, hypothesis TEXT, evidence_json TEXT, severity INTEGER, confidence REAL, suggested_direction TEXT, scope TEXT, status TEXT, user_notes TEXT, dismissed_reason TEXT)",
+        "CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(content, tags, content='memories', content_rowid='id', tokenize='trigram')",
+        "CREATE TRIGGER IF NOT EXISTS memories_ai AFTER INSERT ON memories BEGIN INSERT INTO memories_fts(rowid, content, tags) VALUES (new.id, new.content, new.tags); END",
+        "CREATE TRIGGER IF NOT EXISTS memories_ad AFTER DELETE ON memories BEGIN INSERT INTO memories_fts(memories_fts, rowid, content, tags) VALUES ('delete', old.id, old.content, old.tags); END",
+        "CREATE TRIGGER IF NOT EXISTS memories_au AFTER UPDATE ON memories BEGIN INSERT INTO memories_fts(memories_fts, rowid, content, tags) VALUES ('delete', old.id, old.content, old.tags); INSERT INTO memories_fts(rowid, content, tags) VALUES (new.id, new.content, new.tags); END",
     ]
     for ddl in tables:
         conn.execute(ddl)
@@ -83,6 +89,30 @@ def test_api_placeholder_key():
     assert r.level == Level.WARN
 
 
+def test_api_dns_ok(monkeypatch):
+    monkeypatch.setattr(
+        "core.doctor.socket.getaddrinfo",
+        lambda host, port, type=None: [(None, None, None, None, ("1.2.3.4", port))],
+    )
+    cfg = {"api": {"base_url": "https://api.test/v1"}}
+    r = _check_api_dns(cfg)
+    assert r.level == Level.OK
+    assert "api.test" in r.message
+
+
+def test_api_dns_failure(monkeypatch):
+    import socket
+
+    def fail(*_args, **_kwargs):
+        raise socket.gaierror(8, "nodename nor servname provided, or not known")
+
+    monkeypatch.setattr("core.doctor.socket.getaddrinfo", fail)
+    cfg = {"api": {"base_url": "https://api.test/v1"}}
+    r = _check_api_dns(cfg)
+    assert r.level == Level.ERROR
+    assert "DNS" in r.message
+
+
 # ── memory / schema checks ────────────────────────────────────────────────────
 
 def test_memory_ok():
@@ -109,6 +139,23 @@ def test_memory_missing_table():
         schema_r = next(r for r in results if r.name == "schema")
         assert schema_r.level == Level.WARN
         assert "pending_memories" in schema_r.message
+
+
+def test_memory_missing_column():
+    with tempfile.TemporaryDirectory() as tmp:
+        db = Path(tmp) / "archer.db"
+        _init_db(db)
+        conn = sqlite3.connect(db)
+        conn.execute("CREATE TABLE memories_new AS SELECT id, content FROM memories")
+        conn.execute("DROP TABLE memories")
+        conn.execute("ALTER TABLE memories_new RENAME TO memories")
+        conn.commit()
+        conn.close()
+        cfg = {"api": {}, "memory": {"db_path": str(db)}}
+        results = _check_memory(cfg)
+        schema_r = next(r for r in results if r.name == "schema")
+        assert schema_r.level == Level.WARN
+        assert "缺少关键列" in schema_r.message
 
 
 # ── pending checks ────────────────────────────────────────────────────────────
@@ -233,6 +280,7 @@ def test_run_checks_returns_list():
         assert len(results) >= 8
         names = {r.name for r in results}
         assert "config" in names
+        assert "api_dns" in names
         assert "schema" in names
         assert "soul" in names
         assert "skills" in names

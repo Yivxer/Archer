@@ -1,11 +1,13 @@
+import os
 import tomllib
 from pathlib import Path
-from openai import OpenAI
+from openai import APIConnectionError, APITimeoutError, OpenAI
 from openai.types.chat import ChatCompletionMessage
 from typing import Generator
 
 _cfg:    dict | None = None
 _client: OpenAI | None = None
+_client_key: tuple[str, str] | None = None
 
 # 最近一次 API 调用的 token 用量
 _last_usage: dict[str, int] = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
@@ -14,12 +16,52 @@ _session_tokens: int = 0
 
 # 配置热加载
 _CONFIG_PATH = Path(__file__).parent.parent / "archer.toml"
+_ENV_PATH = Path(__file__).parent.parent / ".env"
 _config_mtime: float = 0.0
 _config_reloaded: bool = False
 
 
+def _read_dotenv(path: Path = _ENV_PATH) -> dict[str, str]:
+    """Read a tiny KEY=VALUE .env file without adding a runtime dependency."""
+    values: dict[str, str] = {}
+    if not path.exists():
+        return values
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        values[key.strip()] = value.strip().strip('"').strip("'")
+    return values
+
+
+def _apply_env_overrides(cfg: dict) -> dict:
+    env_file = _read_dotenv()
+    api = cfg.setdefault("api", {})
+
+    api_key = os.environ.get("ARCHER_API_KEY") or env_file.get("ARCHER_API_KEY")
+    base_url = os.environ.get("ARCHER_BASE_URL") or env_file.get("ARCHER_BASE_URL")
+    model = os.environ.get("ARCHER_MODEL") or env_file.get("ARCHER_MODEL")
+
+    if api_key:
+        api["api_key"] = api_key
+    if base_url:
+        api["base_url"] = base_url
+    if model:
+        api["model"] = model
+    return cfg
+
+
+def _api_timeout(cfg: dict) -> float:
+    return float(cfg.get("api", {}).get("timeout_s", 45))
+
+
+def _api_max_retries(cfg: dict) -> int:
+    return int(cfg.get("api", {}).get("max_retries", 1))
+
+
 def _load_config() -> dict:
-    global _cfg, _config_mtime, _config_reloaded
+    global _cfg, _config_mtime, _config_reloaded, _client, _client_key
     try:
         mtime = _CONFIG_PATH.stat().st_mtime
     except FileNotFoundError:
@@ -29,9 +71,12 @@ def _load_config() -> dict:
         return _cfg
     if _cfg is None or mtime > _config_mtime:
         with open(_CONFIG_PATH, "rb") as f:
-            _cfg = tomllib.load(f)
+            _cfg = _apply_env_overrides(tomllib.load(f))
         _config_reloaded = (_config_mtime > 0)  # 初次加载不算"重载"
         _config_mtime = mtime
+        if _config_reloaded:
+            _client = None
+            _client_key = None
     else:
         _config_reloaded = False
     return _cfg
@@ -46,14 +91,30 @@ def pop_config_reloaded() -> bool:
 
 
 def _get_client() -> tuple[OpenAI, dict]:
-    global _client
+    global _client, _client_key
     cfg = _load_config()
-    if _client is None:
+    api_key = cfg["api"]["api_key"]
+    base_url = cfg["api"]["base_url"]
+    key = (api_key, base_url)
+    if _client is None or _client_key != key:
         _client = OpenAI(
-            api_key=cfg["api"]["api_key"],
-            base_url=cfg["api"]["base_url"],
+            api_key=api_key,
+            base_url=base_url,
+            timeout=_api_timeout(cfg),
+            max_retries=_api_max_retries(cfg),
         )
+        _client_key = key
     return _client, cfg
+
+
+def _connection_hint(base_url: str, err: Exception) -> RuntimeError:
+    cause = getattr(err, "__cause__", None)
+    cause_text = str(cause or err)
+    return RuntimeError(
+        "无法连接 LLM API。"
+        f"base_url={base_url}；底层错误：{cause_text}。"
+        "如果刚断开 VPN，优先检查系统 DNS；国内使用建议配置可直连的 OpenAI 兼容端点。"
+    )
 
 
 def stream_chat(
@@ -66,6 +127,7 @@ def stream_chat(
     global _last_usage, _session_tokens
     client, cfg = _get_client()
     m = model or cfg["api"]["model"]
+    base_url = cfg["api"]["base_url"]
 
     try:
         response = client.chat.completions.create(
@@ -81,6 +143,8 @@ def stream_chat(
             messages=messages,
             stream=True,
         )
+    except (APIConnectionError, APITimeoutError) as e:
+        raise _connection_hint(base_url, e) from e
 
     call_usage: dict[str, int] | None = None
 
@@ -117,13 +181,16 @@ def call_with_tools(messages: list[dict], tools: list[dict], model: str = "") ->
     global _session_tokens
     client, cfg = _get_client()
     m = model or cfg["api"]["model"]
-    response = client.chat.completions.create(
-        model=m,
-        messages=messages,
-        tools=tools,
-        tool_choice="auto",
-        stream=False,
-    )
+    try:
+        response = client.chat.completions.create(
+            model=m,
+            messages=messages,
+            tools=tools,
+            tool_choice="auto",
+            stream=False,
+        )
+    except (APIConnectionError, APITimeoutError) as e:
+        raise _connection_hint(cfg["api"]["base_url"], e) from e
     if getattr(response, "usage", None) and response.usage.total_tokens:
         _session_tokens += response.usage.total_tokens
     return response.choices[0].message

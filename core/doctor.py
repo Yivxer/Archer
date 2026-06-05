@@ -8,11 +8,13 @@ P2-C: /doctor 自检系统
 from __future__ import annotations
 
 import sqlite3
+import socket
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
 from typing import Callable
+from urllib.parse import urlparse
 
 import core.artifacts as _artifacts
 
@@ -37,6 +39,35 @@ class CheckResult:
 _EXPECTED_TABLES = {
     "memories", "pending_memories", "themes",
     "memory_links", "projects", "project_events", "soul_proposals",
+    "scheduled_tasks", "self_critiques",
+}
+
+_EXPECTED_VIRTUAL_TABLES = {"memories_fts"}
+
+_EXPECTED_TRIGGERS = {"memories_ai", "memories_ad", "memories_au"}
+
+_EXPECTED_COLUMNS = {
+    "memories": {
+        "id", "content", "tags", "type", "importance", "status", "source",
+        "created_at", "updated_at", "archived_at", "scope", "confidence",
+        "last_used_at", "valid_until", "session_id", "depth",
+    },
+    "pending_memories": {
+        "id", "content", "type", "importance", "tags", "source",
+        "confidence", "created_at", "depth", "status",
+    },
+    "project_events": {"id", "project_id", "event_type", "content", "created_at", "session_id"},
+    "soul_proposals": {"id", "content", "source", "status", "created_at", "reviewed_at", "session_id"},
+    "scheduled_tasks": {
+        "id", "skill_name", "label", "interval_h", "args_json",
+        "enabled", "last_run_at", "next_run_at", "created_at",
+    },
+    "self_critiques": {
+        "id", "created_at", "session_id", "source", "title", "observation",
+        "hypothesis", "evidence_json", "severity", "confidence",
+        "suggested_direction", "scope", "status", "user_notes",
+        "dismissed_reason",
+    },
 }
 
 # ── 高风险技能列表 ──────────────────────────────────────────────────────────────
@@ -69,6 +100,33 @@ def _check_api(cfg: dict) -> CheckResult:
     return CheckResult(Level.OK, "api", f"base_url = {base_url}，model = {model}")
 
 
+def _check_api_dns(cfg: dict) -> CheckResult:
+    base_url = cfg.get("api", {}).get("base_url", "")
+    if not base_url:
+        return CheckResult(Level.WARN, "api_dns", "api.base_url 未配置，跳过 DNS 检查")
+
+    host = urlparse(base_url).hostname
+    if not host:
+        return CheckResult(Level.ERROR, "api_dns", f"无法从 base_url 解析域名：{base_url}")
+
+    try:
+        infos = socket.getaddrinfo(host, 443, type=socket.SOCK_STREAM)
+    except socket.gaierror as e:
+        return CheckResult(
+            Level.ERROR,
+            "api_dns",
+            f"DNS 无法解析 {host}：{e}。如果刚断开 VPN，请先刷新/重设系统 DNS；国内用户建议使用可直连的 API 端点。",
+        )
+    except OSError as e:
+        return CheckResult(Level.WARN, "api_dns", f"DNS 检查异常：{e}")
+
+    addrs = sorted({info[4][0] for info in infos if info and info[4]})
+    shown = ", ".join(addrs[:3])
+    if len(addrs) > 3:
+        shown += "…"
+    return CheckResult(Level.OK, "api_dns", f"{host} 可解析：{shown}")
+
+
 def _check_memory(cfg: dict) -> list[CheckResult]:
     results = []
     db_path_str = cfg.get("memory", {}).get("db_path", "")
@@ -85,13 +143,35 @@ def _check_memory(cfg: dict) -> list[CheckResult]:
         conn.execute("PRAGMA journal_mode=WAL")
 
         # 表完整性检查
-        existing = {
+        existing_tables = {
             row[0]
             for row in conn.execute(
                 "SELECT name FROM sqlite_master WHERE type='table'"
             )
         }
-        missing_tables = _EXPECTED_TABLES - existing
+        existing_virtual = {
+            row[0]
+            for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND sql LIKE 'CREATE VIRTUAL TABLE%'"
+            )
+        }
+        existing_triggers = {
+            row[0]
+            for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='trigger'"
+            )
+        }
+        missing_tables = _EXPECTED_TABLES - existing_tables
+        missing_virtual = _EXPECTED_VIRTUAL_TABLES - existing_virtual
+        missing_triggers = _EXPECTED_TRIGGERS - existing_triggers
+
+        missing_columns: list[str] = []
+        for table, columns in _EXPECTED_COLUMNS.items():
+            if table not in existing_tables:
+                continue
+            actual = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+            for col in sorted(columns - actual):
+                missing_columns.append(f"{table}.{col}")
         conn.close()
 
         if missing_tables:
@@ -99,10 +179,26 @@ def _check_memory(cfg: dict) -> list[CheckResult]:
                 Level.WARN, "schema",
                 f"缺少表：{', '.join(sorted(missing_tables))}（可能需要重新运行 init_db）",
             ))
+        elif missing_virtual:
+            results.append(CheckResult(
+                Level.WARN, "schema",
+                f"缺少虚拟表：{', '.join(sorted(missing_virtual))}（全文检索可能不可用）",
+            ))
+        elif missing_columns:
+            results.append(CheckResult(
+                Level.WARN, "schema",
+                f"缺少关键列：{', '.join(missing_columns[:8])}"
+                + ("…" if len(missing_columns) > 8 else ""),
+            ))
+        elif missing_triggers:
+            results.append(CheckResult(
+                Level.WARN, "schema",
+                f"缺少触发器：{', '.join(sorted(missing_triggers))}（FTS 索引可能不同步）",
+            ))
         else:
             results.append(CheckResult(
                 Level.OK, "schema",
-                f"archer.db 可读写，{len(existing)} 张表，结构完整",
+                f"archer.db 可读写，{len(existing_tables)} 张表，结构完整",
             ))
     except Exception as e:
         results.append(CheckResult(Level.ERROR, "memory", f"数据库异常：{e}"))
@@ -249,6 +345,7 @@ def run_checks(cfg: dict, skills: dict) -> list[CheckResult]:
     results: list[CheckResult] = []
     results.append(_check_config(cfg))
     results.append(_check_api(cfg))
+    results.append(_check_api_dns(cfg))
     results.extend(_check_memory(cfg))
     results.append(_check_pending(cfg))
     results.append(_check_soul(cfg))

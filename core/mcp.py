@@ -18,6 +18,7 @@ P2-E: MCP (Model Context Protocol) Adapter
 from __future__ import annotations
 
 import asyncio
+import io
 import sys
 import threading
 import types
@@ -95,7 +96,7 @@ class MCPManager:
             try:
                 params = StdioServerParameters(command=command, args=args, env=env)
                 read, write = await self._exit_stack.enter_async_context(
-                    stdio_client(params)
+                    stdio_client(params, errlog=io.StringIO())
                 )
                 session = await self._exit_stack.enter_async_context(
                     ClientSession(read, write)
@@ -116,7 +117,8 @@ class MCPManager:
                         },
                     }
             except Exception as exc:
-                print(f"[MCP] 连接 {name!r} 失败：{exc}", file=sys.stderr)
+                # 静默跳过失败的 MCP 连接，避免启动时刷屏
+                pass
 
     # ── 工具调用 ────────────────────────────────────────────────────────────────
 
@@ -182,6 +184,8 @@ def _make_module(info: dict, manager: MCPManager) -> types.ModuleType:
         "name":         key,
         "description":  f"[MCP:{info['server']}] {info['description']}",
         "version":      "mcp",
+        "mcp_server":   info["server"],
+        "mcp_tool":     info["tool_name"],
         "risk":         "medium",
         "default_timeout": 60,
     }

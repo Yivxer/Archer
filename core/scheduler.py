@@ -53,17 +53,22 @@ def add_task(
     interval_spec: str,
     label: str = "",
     args: dict | None = None,
+    catchup: str = "latest",
     db_path: Path = DB_PATH,
 ) -> int:
-    """添加定时任务，next_run_at 设为当前时间（下次启动即执行）。"""
+    """添加定时任务，next_run_at 设为当前时间（下次启动即执行）。
+    catchup: 'latest'（错过后补跑一次）| 'skip'（错过直接跳过重新计时）
+    """
+    if catchup not in ("latest", "skip"):
+        catchup = "latest"
     interval_h = parse_interval(interval_spec)
     args_json = json.dumps(args or {}, ensure_ascii=False)
     now = _now()
     conn = sqlite3.connect(db_path)
     cur = conn.execute(
-        "INSERT INTO scheduled_tasks (skill_name, label, interval_h, args_json, next_run_at, created_at)"
-        " VALUES (?,?,?,?,?,?)",
-        (skill_name, label, interval_h, args_json, now, now),
+        "INSERT INTO scheduled_tasks (skill_name, label, interval_h, args_json, catchup, next_run_at, created_at)"
+        " VALUES (?,?,?,?,?,?,?)",
+        (skill_name, label, interval_h, args_json, catchup, now, now),
     )
     task_id = cur.lastrowid
     conn.commit()
@@ -155,14 +160,20 @@ def run_due_tasks(skills: dict, db_path: Path = DB_PATH) -> list[tuple[dict, Any
     """
     检查并执行所有到期任务。
     返回 [(task_dict, ToolResult | None)]，供调用方展示结果。
+    - catchup='latest'（默认）：错过时补跑一次后重新计时
+    - catchup='skip'：错过时直接跳过，仅更新 next_run_at
     技能未加载的任务：ToolResult=None，仍更新 next_run_at（避免每次重试）。
     """
     due = get_due_tasks(db_path)
     results = []
     for task in due:
-        tr = run_task(task, skills)
-        _mark_ran(task["id"], task["interval_h"], db_path)
-        results.append((task, tr))
+        if task.get("catchup") == "skip":
+            _mark_ran(task["id"], task["interval_h"], db_path)
+            results.append((task, None))
+        else:
+            tr = run_task(task, skills)
+            _mark_ran(task["id"], task["interval_h"], db_path)
+            results.append((task, tr))
     return results
 
 

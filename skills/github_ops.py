@@ -1,4 +1,5 @@
 import subprocess
+import shlex
 
 SKILL = {
     "name": "github_ops",
@@ -48,10 +49,10 @@ def schema() -> dict:
         },
     }
 
-def _gh(cmd: str) -> str:
+def _gh(args: list[str]) -> str:
     try:
         r = subprocess.run(
-            f"gh {cmd}", shell=True, capture_output=True, text=True, timeout=20
+            ["gh", *args], capture_output=True, text=True, timeout=20
         )
         return (r.stdout + r.stderr).strip() or "(无输出)"
     except subprocess.TimeoutExpired:
@@ -62,24 +63,29 @@ def _gh(cmd: str) -> str:
 def run(args: dict) -> str:
     action = args.get("action", "")
     repo   = args.get("repo", "")
-    rf     = f" -R {repo}" if repo else ""
+    repo_args = ["-R", repo] if repo else []
 
     match action:
-        case "list_repos":   return _gh("repo list --limit 20")
-        case "list_issues":  return _gh(f"issue list{rf} --limit 20")
-        case "list_prs":     return _gh(f"pr list{rf} --limit 20")
-        case "view_repo":    return _gh(f"repo view{rf}")
+        case "list_repos":   return _gh(["repo", "list", "--limit", "20"])
+        case "list_issues":  return _gh(["issue", "list", *repo_args, "--limit", "20"])
+        case "list_prs":     return _gh(["pr", "list", *repo_args, "--limit", "20"])
+        case "view_repo":    return _gh(["repo", "view", *repo_args])
         case "create_issue":
             title = args.get("title", "").strip()
             if not title:
                 return "错误：需要提供 title"
             body  = args.get("body", "")
-            cmd   = f'issue create{rf} --title "{title}"'
+            cmd = ["issue", "create", *repo_args, "--title", title]
             if body:
-                cmd += f' --body "{body}"'
+                cmd += ["--body", body]
             return _gh(cmd)
         case "run":
             cmd = args.get("command", "").strip()
-            return _gh(cmd) if cmd else "错误：需要提供 command"
+            if not cmd:
+                return "错误：需要提供 command"
+            try:
+                return _gh(shlex.split(cmd))
+            except ValueError as e:
+                return f"错误：无法解析 command：{e}"
         case _:
             return f"未知操作：{action}"

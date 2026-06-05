@@ -1,4 +1,5 @@
 import subprocess
+import re
 from datetime import datetime
 from pathlib import Path
 
@@ -42,16 +43,19 @@ def run(args: dict) -> str:
 
     if not filename:
         filename = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = re.sub(r"[^A-Za-z0-9._-]+", "_", filename).strip("._")
+    if not filename:
+        filename = datetime.now().strftime("%Y%m%d_%H%M%S")
     save_path = SAVE_DIR / f"{filename}.png"
 
     match mode:
-        case "fullscreen": cmd = f'screencapture -x "{save_path}"'
-        case "window":     cmd = f'screencapture -W "{save_path}"'
-        case "timed":      cmd = f'screencapture -T 5 "{save_path}"'
-        case _:            cmd = f'screencapture -x "{save_path}"'
+        case "fullscreen": cmd = ["screencapture", "-x", str(save_path)]
+        case "window":     cmd = ["screencapture", "-W", str(save_path)]
+        case "timed":      cmd = ["screencapture", "-T", "5", str(save_path)]
+        case _:            cmd = ["screencapture", "-x", str(save_path)]
 
     try:
-        subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=30)
+        subprocess.run(cmd, capture_output=True, text=True, timeout=30)
         if save_path.exists():
             size_kb = save_path.stat().st_size // 1024
             return f"截图已保存：{save_path}\n大小：{size_kb} KB"
