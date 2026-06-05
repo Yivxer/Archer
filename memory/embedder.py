@@ -39,7 +39,10 @@ def _get_model():
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             from sentence_transformers import SentenceTransformer
-            _model = SentenceTransformer(_MODEL_NAME, show_progress_bar=False)
+            try:
+                _model = SentenceTransformer(_MODEL_NAME, show_progress_bar=False)
+            except TypeError:
+                _model = SentenceTransformer(_MODEL_NAME)
     return _model
 
 
@@ -57,9 +60,15 @@ def encode_batch(texts: list[str]) -> list[list[float]]:
     if not texts:
         return []
     model = _get_model()
-    vecs = model.encode(
-        [t.strip() for t in texts],
-        normalize_embeddings=True,
-        show_progress_bar=False,
-    )
+    try:
+        vecs = model.encode(
+            [t.strip() for t in texts],
+            normalize_embeddings=True,
+            show_progress_bar=False,
+        )
+    except TypeError:
+        vecs = model.encode(
+            [t.strip() for t in texts],
+            normalize_embeddings=True,
+        )
     return [list(v) for v in vecs]

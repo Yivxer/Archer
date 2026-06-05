@@ -1,4 +1,5 @@
-from datetime import datetime
+from datetime import datetime, timedelta
+from memory.a4 import select_context_memories, should_create_reflection_anchor
 from memory.store import search, recent, high_importance, update_last_used, get_by_ids
 
 _LIGHT_INPUTS = {
@@ -25,32 +26,86 @@ def _is_valid_memory(m: dict) -> bool:
     return True
 
 
-def for_context(user_input: str = "", limit: int = 5) -> tuple[list, list]:
+def _infer_intent(user_input: str) -> str | None:
+    """轻量推断意图；调用方传入 intent 时以调用方为准。"""
+    try:
+        from core.context import classify_query_intent
+        return classify_query_intent(user_input).get("intent")
+    except Exception:
+        return None
+
+
+def _infer_trigger(user_input: str, intent: str | None) -> str | None:
+    if should_create_reflection_anchor(user_input):
+        return "reflection_anchor"
+    if intent == "emotional":
+        return "emotion_pattern"
+    return None
+
+
+def for_context(user_input: str = "", limit: int = 5, intent: str | None = None) -> tuple[list, list]:
     """
-    双路记忆检索：
-    - 第一路：importance >= 4 的核心记忆，始终注入（最多 3 条）
-    - 第二路：与当前输入相关的记忆（FTS 搜索 → fallback 最近）
-    检索后过滤 reflection 类型和已过期记忆，并更新 last_used_at。
+    A4 记忆检索：
+    - 保持旧接口兼容：调用方不传 intent 时自动轻量推断。
+    - 每轮最多注入 limit 条，默认 5；A4 链路可传 7。
+    - core 与 related 合并后按 A4 策略排序，再拆回 core / related。
+    - 检索后过滤 reflection 类型和已过期记忆，并更新 last_used_at。
     """
     if _should_skip_memory(user_input):
         return [], []
 
-    core = [m for m in high_importance(min_importance=4, limit=2) if _is_valid_memory(m)]
+    intent = intent or _infer_intent(user_input)
+    trigger = _infer_trigger(user_input, intent)
+    total_limit = max(1, limit)
+
+    core_raw = [m for m in high_importance(min_importance=4, limit=2) if _is_valid_memory(m)]
 
     if user_input and len(user_input.strip()) >= 2:
-        related_raw = _hybrid_search(user_input.strip(), limit=limit)
+        related_raw = _hybrid_search(user_input.strip(), limit=total_limit)
     else:
-        related_raw = recent(limit)
+        related_raw = recent(total_limit)
 
     # 去重 + 过滤
-    core_ids = {m["id"] for m in core}
-    related = [m for m in related_raw if m["id"] not in core_ids and _is_valid_memory(m)]
+    seen: set[int] = set()
+    combined: list[dict] = []
+    for m in core_raw + related_raw:
+        mid = m["id"]
+        if mid in seen or not _is_valid_memory(m):
+            continue
+        seen.add(mid)
+        combined.append(m)
+
+    selected = select_context_memories(
+        combined,
+        intent=intent,
+        trigger=trigger,
+        limit=total_limit,
+    )
+    selected_ids = {m["id"] for m in selected}
+    core_ids = {m["id"] for m in core_raw}
+    core = [m for m in selected if m["id"] in core_ids]
+    related = [m for m in selected if m["id"] not in core_ids]
 
     # 更新 last_used_at
     for m in core + related:
         update_last_used(m["id"])
 
     return core, related
+
+
+def _recency_tier(created_at: str | None) -> int:
+    """0=近3天 1=近7天 2=更早。用于在保留语义排序的同时小幅提升近期记忆。"""
+    if not created_at:
+        return 2
+    try:
+        age = datetime.now() - datetime.fromisoformat(created_at)
+        if age <= timedelta(days=3):
+            return 0
+        if age <= timedelta(days=7):
+            return 1
+    except Exception:
+        pass
+    return 2
 
 
 def _hybrid_search(query: str, limit: int) -> list[dict]:
@@ -90,10 +145,38 @@ def _hybrid_search(query: str, limit: int) -> list[dict]:
             if m["id"] not in seen:
                 combined.append(m)
 
+        # recency boost：按 (tier, 原始位置) 稳定排序，近期记忆前移
+        combined = [m for _, m in sorted(
+            enumerate(combined),
+            key=lambda t: (_recency_tier(t[1].get("created_at")), t[0])
+        )]
         return combined[:limit]
 
     except Exception:
         return fts_mems
+
+
+def _time_ago(created_at: str | None) -> str:
+    if not created_at:
+        return ""
+    try:
+        from datetime import datetime
+        age = datetime.now() - datetime.fromisoformat(created_at)
+        days = age.days
+        if days == 0:
+            return ""  # 今天的不标
+        elif days == 1:
+            return " (昨天)"
+        elif days < 7:
+            return f" ({days}天前)"
+        elif days < 30:
+            return f" ({days // 7}周前)"
+        elif days < 180:
+            return f" ({days // 30}月前)"
+        else:
+            return f" ({days // 30}月前)"
+    except Exception:
+        return ""
 
 
 def format_for_prompt(core: list, related: list) -> str:
@@ -114,6 +197,7 @@ def format_for_prompt(core: list, related: list) -> str:
             line = f"- [{stars}] {m['content']}"
             if m.get("tags"):
                 line += f"  #{m['tags'].replace(',', ' #')}"
+            line += _time_ago(m.get("created_at"))
             lines.append(line)
         parts.append("\n".join(lines))
 
@@ -124,6 +208,7 @@ def format_for_prompt(core: list, related: list) -> str:
             line = f"- [{stars}] {m['content']}"
             if m.get("tags"):
                 line += f"  #{m['tags'].replace(',', ' #')}"
+            line += _time_ago(m.get("created_at"))
             lines.append(line)
         parts.append("\n".join(lines))
 

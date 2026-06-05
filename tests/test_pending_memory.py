@@ -34,6 +34,17 @@ def test_add_and_list_pending():
         assert pends[0]["source"] == "auto"
 
 
+def test_pending_memory_carries_clamped_depth():
+    with tempfile.TemporaryDirectory() as tmp:
+        s = _setup_db(tmp)
+        s.add_pending("深层候选", type="reflection_anchor", depth=9)
+        s.add_pending("浅层候选", type="fact", depth=0)
+
+        pends = s.list_pending()
+        assert pends[0]["depth"] == 5
+        assert pends[1]["depth"] == 1
+
+
 def test_count_pending():
     with tempfile.TemporaryDirectory() as tmp:
         s = _setup_db(tmp)
@@ -108,6 +119,24 @@ def test_accept_nonexistent_returns_empty():
         assert ids == []
 
 
+def test_update_pending_content():
+    with tempfile.TemporaryDirectory() as tmp:
+        s = _setup_db(tmp)
+        pid = s.add_pending("旧内容")
+        assert s.update_pending(pid, "新内容") is True
+        pends = s.list_pending()
+        assert pends[0]["content"] == "新内容"
+
+
+def test_update_pending_empty_rejected():
+    with tempfile.TemporaryDirectory() as tmp:
+        s = _setup_db(tmp)
+        pid = s.add_pending("保留内容")
+        assert s.update_pending(pid, "   ") is False
+        pends = s.list_pending()
+        assert pends[0]["content"] == "保留内容"
+
+
 def test_reject_nonexistent_returns_zero():
     with tempfile.TemporaryDirectory() as tmp:
         s = _setup_db(tmp)
@@ -151,6 +180,8 @@ if __name__ == "__main__":
         test_reject_single_pending,
         test_reject_all_pending,
         test_accept_nonexistent_returns_empty,
+        test_update_pending_content,
+        test_update_pending_empty_rejected,
         test_reject_nonexistent_returns_zero,
         test_pending_survives_reimport,
     ]

@@ -20,14 +20,14 @@ def _setup_tmp_db(tmp: str):
 # ── schema presence ────────────────────────────────────────────────────────────
 
 def test_new_columns_exist():
-    """memories 表包含 scope/confidence/last_used_at/valid_until 列。"""
+    """memories 表包含 scope/confidence/last_used_at/valid_until/depth 列。"""
     import sqlite3
     with tempfile.TemporaryDirectory() as tmp:
         store = _setup_tmp_db(tmp)
         conn = sqlite3.connect(store.DB_PATH)
         cols = {row[1] for row in conn.execute("PRAGMA table_info(memories)")}
         conn.close()
-    for col in ("scope", "confidence", "last_used_at", "valid_until"):
+    for col in ("scope", "confidence", "last_used_at", "valid_until", "depth"):
         assert col in cols, f"缺少列: {col}"
 
 
@@ -60,6 +60,15 @@ def test_save_default_confidence():
         rows = store.list_all(10)
         m = next(r for r in rows if r["id"] == mid)
         assert abs(m["confidence"] - 0.8) < 1e-9
+
+
+def test_save_carries_clamped_depth():
+    with tempfile.TemporaryDirectory() as tmp:
+        store = _setup_tmp_db(tmp)
+        mid = store.save("深层价值记忆", type="value", depth=9)
+        rows = store.list_all(10)
+        m = next(r for r in rows if r["id"] == mid)
+        assert m["depth"] == 5
 
 
 def test_save_with_valid_until():
@@ -106,6 +115,17 @@ def test_accept_pending_carries_confidence():
         row = conn.execute("SELECT confidence FROM memories WHERE id = ?", (mids[0],)).fetchone()
         conn.close()
         assert abs(row[0] - 0.75) < 1e-9
+
+
+def test_accept_pending_carries_depth():
+    with tempfile.TemporaryDirectory() as tmp:
+        store = _setup_tmp_db(tmp)
+        pid = store.add_pending("确认后深度", type="reflection_anchor", depth=5)
+        mids = store.accept_pending(pid)
+        assert len(mids) == 1
+        rows = store.list_all(10)
+        m = next(r for r in rows if r["id"] == mids[0])
+        assert m["depth"] == 5
 
 
 # ── retrieve: filter reflection + expired ─────────────────────────────────────
