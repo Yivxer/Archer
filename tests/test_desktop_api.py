@@ -92,11 +92,11 @@ def test_background_job_runs_after_create(tmp_path, monkeypatch):
 
     _reset_background_jobs(routes, tmp_path / "background_jobs.json")
 
-    def fake_chat(payload):
-        assert payload["messages"][0]["content"] == "执行后台分析"
+    def fake_chat_with_tools(prompt, job_id):
+        assert prompt == "执行后台分析"
         return {"role": "assistant", "text": "后台结果"}
 
-    monkeypatch.setattr(routes, "_chat", fake_chat)
+    monkeypatch.setattr(routes, "_run_job_chat_with_tools", fake_chat_with_tools)
 
     status, created = routes.payload_post("/jobs", {
         "title": "后台分析",
@@ -192,12 +192,12 @@ def test_background_job_cancel_running_job_is_not_overwritten(tmp_path, monkeypa
     started = threading.Event()
     release = threading.Event()
 
-    def fake_chat(payload):
+    def fake_chat_with_tools(prompt, job_id):
         started.set()
         release.wait(timeout=1)
         return {"role": "assistant", "text": "不应覆盖取消状态"}
 
-    monkeypatch.setattr(routes, "_chat", fake_chat)
+    monkeypatch.setattr(routes, "_run_job_chat_with_tools", fake_chat_with_tools)
     _, created = routes.payload_post("/jobs", {
         "title": "运行中任务",
         "kind": "analysis",
@@ -237,10 +237,10 @@ def test_background_job_retry_failed_job(tmp_path, monkeypatch):
     with routes.BACKGROUND_JOB_LOCK:
         routes._persist_jobs_locked()
 
-    def fake_chat(payload):
+    def fake_chat_with_tools(prompt, job_id):
         return {"role": "assistant", "text": "重试成功"}
 
-    monkeypatch.setattr(routes, "_chat", fake_chat)
+    monkeypatch.setattr(routes, "_run_job_chat_with_tools", fake_chat_with_tools)
     status, payload = routes.payload_post("/jobs/job-failed/retry", {})
 
     detail_payload = {}
@@ -256,6 +256,114 @@ def test_background_job_retry_failed_job(tmp_path, monkeypatch):
     assert detail_payload["job"]["result"] == "重试成功"
 
 
+def test_background_job_uses_tool_loop_enrichment(tmp_path, monkeypatch):
+    """背景任务应该使用工具循环来 enrich 消息上下文。"""
+    import time
+    from terminal.api import _routes as routes
+
+    _reset_background_jobs(routes, tmp_path / "background_jobs.json")
+
+    # Mock stream_chat to capture enriched messages
+    captured_messages = []
+
+    def fake_stream_chat(messages):
+        captured_messages.extend(messages)
+        return iter(["工具循环结果"])
+
+    monkeypatch.setattr("core.llm.stream_chat", fake_stream_chat)
+
+    # Mock memory retrieval to return empty (避免依赖真实数据库)
+    monkeypatch.setattr(
+        "memory.retrieve.for_context",
+        lambda query, limit=5, intent="": ([], []),
+    )
+    monkeypatch.setattr(
+        "memory.retrieve.format_for_prompt",
+        lambda core, related: "",
+    )
+
+    # Mock skill selection to avoid web search triggering
+    monkeypatch.setattr(
+        "terminal.api._tools._select_api_skills",
+        lambda query: set(),
+    )
+
+    _, created = routes.payload_post("/jobs", {
+        "title": "工具循环测试",
+        "kind": "analysis",
+        "prompt": "帮我搜索最新的 Python 3.14 发布说明",
+    })
+    job_id = created["job"]["id"]
+
+    # Wait for job completion
+    detail_payload = {}
+    for _ in range(50):
+        _, detail_payload = routes.payload_get(f"/jobs/{job_id}")
+        if detail_payload["job"]["status"] in ("complete", "failed"):
+            break
+        time.sleep(0.01)
+
+    assert detail_payload["job"]["status"] == "complete"
+    assert detail_payload["job"]["result"] == "工具循环结果"
+    # Verify enriched messages: user message was preserved
+    user_messages = [m for m in captured_messages if m.get("role") == "user"]
+    assert len(user_messages) >= 1
+    assert user_messages[0]["content"] == "帮我搜索最新的 Python 3.14 发布说明"
+
+
+def test_background_job_tool_summary_in_result(tmp_path, monkeypatch):
+    """背景任务结果中应包含工具执行摘要（当有工具被执行时）。"""
+    import time
+    from terminal.api import _routes as routes
+
+    _reset_background_jobs(routes, tmp_path / "background_jobs.json")
+
+    # Make web_search appear as selected, but provide a mock result
+    def fake_select(_query):
+        return {"web_search"}
+
+    monkeypatch.setattr("terminal.api._tools._select_api_skills", fake_select)
+    monkeypatch.setattr(
+        "memory.retrieve.for_context",
+        lambda query, limit=5, intent="": ([], []),
+    )
+    monkeypatch.setattr(
+        "memory.retrieve.format_for_prompt",
+        lambda core, related: "",
+    )
+
+    # Mock web search to return a result
+    monkeypatch.setattr(
+        "skills.web_search.run",
+        lambda args: "1. Python 3.14 Release Notes — docs.python.org\n2. What's New in Python 3.14",
+    )
+
+    # Mock LLM
+    monkeypatch.setattr(
+        "core.llm.stream_chat",
+        lambda messages: iter(["Python 3.14 引入了新的错误消息和改进的泛型语法。"]),
+    )
+
+    _, created = routes.payload_post("/jobs", {
+        "title": "工具摘要测试",
+        "kind": "analysis",
+        "prompt": "Python 3.14 有什么新特性？",
+    })
+    job_id = created["job"]["id"]
+
+    detail_payload = {}
+    for _ in range(50):
+        _, detail_payload = routes.payload_get(f"/jobs/{job_id}")
+        if detail_payload["job"]["status"] in ("complete", "failed"):
+            break
+        time.sleep(0.01)
+
+    assert detail_payload["job"]["status"] == "complete"
+    # 结果应包含工具执行摘要标记
+    assert "后台任务自动执行了以下工具" in detail_payload["job"]["result"]
+    assert "[web_search]" in detail_payload["job"]["result"]
+
+
 def test_background_job_timeout_marks_failed(tmp_path, monkeypatch):
     import threading
     import time
@@ -264,11 +372,11 @@ def test_background_job_timeout_marks_failed(tmp_path, monkeypatch):
     _reset_background_jobs(routes, tmp_path / "background_jobs.json")
     release = threading.Event()
 
-    def slow_chat(payload):
+    def slow_chat_with_tools(prompt, job_id):
         release.wait(timeout=2)
         return {"role": "assistant", "text": "太晚了"}
 
-    monkeypatch.setattr(routes, "_chat", slow_chat)
+    monkeypatch.setattr(routes, "_run_job_chat_with_tools", slow_chat_with_tools)
 
     _, created = routes.payload_post("/jobs", {
         "title": "超时任务",

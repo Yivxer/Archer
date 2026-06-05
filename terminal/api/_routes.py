@@ -232,6 +232,7 @@ def _create_job(payload: dict) -> dict:
     if not title or not prompt:
         raise ValueError("title and prompt are required")
     timeout_seconds = _clean_job_timeout(payload.get("timeoutSeconds"))
+    parent_job_id = str(payload.get("parentJobId", "")).strip() or None
 
     job_id = f"job-{uuid4().hex[:8]}"
     created_at = datetime.now().isoformat()
@@ -246,10 +247,21 @@ def _create_job(payload: dict) -> dict:
         "updatedAt": created_at,
         "timeoutSeconds": timeout_seconds,
     }
+
     with BACKGROUND_JOB_LOCK:
         _load_jobs_locked()
+
+        # Link to parent if specified
+        if parent_job_id and parent_job_id in BACKGROUND_JOBS:
+            parent = BACKGROUND_JOBS[parent_job_id]
+            job["parentJobId"] = parent_job_id
+            child_ids: list = parent.setdefault("childJobIds", [])
+            child_ids.append(job_id)
+            parent["updatedAt"] = created_at
+
         BACKGROUND_JOBS[job_id] = job
         _persist_jobs_locked()
+
     response_job = dict(job)
     if payload.get("autoStart", True) is not False:
         _start_job(job_id)
@@ -268,7 +280,25 @@ def _job_detail(job_id: str) -> dict | None:
     with BACKGROUND_JOB_LOCK:
         _load_jobs_locked()
         job = BACKGROUND_JOBS.get(job_id)
-        return dict(job) if job else None
+        if not job:
+            return None
+        result = dict(job)
+        # Include child job summaries
+        child_ids = result.get("childJobIds") or []
+        if child_ids:
+            children = []
+            for cid in child_ids:
+                child = BACKGROUND_JOBS.get(cid)
+                if child:
+                    children.append({
+                        "id": child.get("id"),
+                        "title": child.get("title"),
+                        "status": child.get("status"),
+                        "createdAt": child.get("createdAt"),
+                    })
+            if children:
+                result["children"] = children
+        return result
 
 
 def _update_job(job_id: str, **updates: object) -> None:
@@ -282,6 +312,88 @@ def _update_job(job_id: str, **updates: object) -> None:
         _persist_jobs_locked()
 
 
+def _run_job_chat_with_tools(prompt: str, job_id: str) -> dict:
+    """Execute a background job with tool-loop enrichment.
+
+    Auto-executes low-risk tools (memory, obsidian, web search, web fetch)
+    to enrich the context before the LLM call. Reports tool results in the
+    response alongside the LLM answer.
+
+    Medium+ risk tools (shell, github, file_ops, obsidian_write, hugo_blog)
+    are skipped — they require user approval which isn't available in background.
+    """
+    from core.context import classify_query_intent, boundary_response
+    from core.llm import stream_chat
+    from terminal.api._tools import _select_api_skills, _filter_api_skills_for_intent
+
+    config = _load_config()
+    intent_info = classify_query_intent(prompt)
+    boundary = boundary_response(prompt, config)
+    if boundary:
+        return {"role": "assistant", "text": boundary}
+
+    tool_parts: list[str] = []
+    enriched_messages: list[dict] = [{"role": "user", "content": prompt}]
+    system_context: list[str] = []
+
+    # ── 1. Memory retrieval (conservative mode, limit 5) ──
+    try:
+        from memory.retrieve import for_context, format_for_prompt
+        core, related = for_context(prompt, limit=5, intent=intent_info.get("intent", ""))
+        mem_ctx = format_for_prompt(core, related)
+        if mem_ctx:
+            system_context.append(
+                "以下是 Archer 本地记忆检索结果。只在明显相关时使用。\n\n" + mem_ctx
+            )
+            tool_parts.append(f"[memory] 检索到 {len(core)}+{len(related)} 条相关记忆")
+    except Exception as exc:
+        tool_parts.append(f"[memory] 检索失败: {exc}")
+
+    # ── 2. Web search (if skill router detects search intent) ──
+    selected_skills = _filter_api_skills_for_intent(prompt, _select_api_skills(prompt))
+    if "web_search" in selected_skills:
+        try:
+            from skills.web_search import run as web_search_run
+            result = web_search_run({"query": prompt[:200], "max_results": 5})
+            if result and not str(result).startswith("未找到"):
+                system_context.append(f"互联网搜索结果（{prompt[:80]}）：\n{result}")
+                tool_parts.append("[web_search] 搜索完成")
+        except Exception as exc:
+            tool_parts.append(f"[web_search] 失败: {exc}")
+
+    if "web_fetch" in selected_skills:
+        url_match = __import__("re").search(r'https?://[^\s）+）"]+', prompt)
+        if url_match:
+            target_url = url_match.group(0).rstrip('.。，,;；')
+            try:
+                from skills.web_fetch import run as web_fetch_run
+                fetch = web_fetch_run({"url": target_url, "max_chars": 4000})
+                if fetch:
+                    system_context.append(f"网页内容（{target_url}）：\n{fetch}")
+                    tool_parts.append(f"[web_fetch] {target_url}")
+            except Exception as exc:
+                tool_parts.append(f"[web_fetch] 失败: {exc}")
+
+    # ── 3. Assemble enriched messages ──
+    if system_context:
+        enriched_messages = [
+            {"role": "system", "content": "\n\n".join(system_context)},
+            *enriched_messages,
+        ]
+
+    # ── 4. LLM call ──
+    chunks: list[str] = []
+    for chunk in stream_chat(enriched_messages):
+        chunks.append(chunk)
+    text = "".join(chunks)
+
+    # ── 5. Append tool summary to response ──
+    if tool_parts:
+        text += "\n\n---\n*后台任务自动执行了以下工具：*\n" + "\n".join(f"- {p}" for p in tool_parts)
+
+    return {"role": "assistant", "text": text}
+
+
 def _run_job(job_id: str) -> None:
     with BACKGROUND_JOB_LOCK:
         job = dict(BACKGROUND_JOBS.get(job_id) or {})
@@ -292,14 +404,8 @@ def _run_job(job_id: str) -> None:
 
     def _execute_chat() -> None:
         try:
-            response = _chat({
-                "messages": [
-                    {
-                        "role": "user",
-                        "content": str(job.get("prompt", "")),
-                    }
-                ]
-            })
+            prompt = str(job.get("prompt", ""))
+            response = _run_job_chat_with_tools(prompt, job_id)
             result_holder["ok"] = True
             result_holder["text"] = str(response.get("text", "")).strip()
         except Exception as exc:
@@ -377,6 +483,161 @@ def _retry_job(job_id: str) -> dict:
         response_job = dict(job)
     _start_job(job_id)
     return {"ok": True, "job": response_job, "message": "job retry queued"}
+
+
+def _approve_job_tool(job_id: str, payload: dict) -> dict:
+    """Approve or deny a pending tool request for a waiting_approval job.
+
+    When approved: execute the tool, update job result with tool output,
+    and set status back to running so the job thread can continue.
+    When denied: set job status to failed with an appropriate error.
+    """
+    event_id = str(payload.get("eventId", "")).strip()
+    decision = str(payload.get("decision", "")).strip()
+    if not event_id:
+        return {"ok": False, "error": "eventId is required", "id": job_id}
+    if decision not in ("approved", "denied"):
+        return {"ok": False, "error": "decision must be approved or denied", "id": job_id}
+
+    with BACKGROUND_JOB_LOCK:
+        _load_jobs_locked()
+        job = BACKGROUND_JOBS.get(job_id)
+        if not job:
+            return {"ok": False, "error": "job_not_found", "id": job_id}
+        if job.get("status") != "waiting_approval":
+            return {"ok": True, "job": dict(job), "message": f"job status is {job.get('status')}, not waiting_approval"}
+
+        pending_tool = job.get("pendingTool")
+        if not pending_tool or pending_tool.get("eventId") != event_id:
+            return {"ok": False, "error": "pending tool not found or eventId mismatch", "id": job_id}
+
+        if decision == "denied":
+            job["status"] = "failed"
+            job["result"] = ""
+            job["error"] = f"tool {pending_tool.get('displayName', 'unknown')} denied by user"
+            job.pop("pendingTool", None)
+            job["updatedAt"] = datetime.now().isoformat()
+            _persist_jobs_locked()
+            return {"ok": True, "job": dict(job), "message": "tool denied, job marked failed"}
+
+        # Approved: execute the tool
+        tool_name = str(pending_tool.get("toolName", ""))
+        draft = pending_tool.get("draft") or {}
+        try:
+            if tool_name == "shell.execute":
+                from terminal.api._tools import _execute_shell_command
+                output = _execute_shell_command(draft)
+                job["result"] = f"[shell] {output[:500]}"
+            elif tool_name == "obsidian_write":
+                from terminal.api._tools import _append_obsidian_draft
+                target = _append_obsidian_draft(draft)
+                job["result"] = f"[obsidian_write] 已写入: {target}"
+            elif tool_name == "github":
+                from terminal.api._tools import _execute_github_operation
+                output = _execute_github_operation(draft)
+                job["result"] = f"[github] {output[:500]}"
+            elif tool_name == "hugo_blog":
+                # For hugo_blog, execute deploy action
+                action = str((draft.get("args") or {}).get("action", ""))
+                if action == "deploy":
+                    from skills.hugo_blog import run as hugo_blog_run
+                    output = hugo_blog_run(draft.get("args") or {})
+                    job["result"] = f"[hugo_blog] {str(output)[:500]}"
+                else:
+                    job["result"] = f"[hugo_blog] action={action} approved, check tool output"
+            elif tool_name == "file_ops":
+                # file_ops: write or create file
+                from skills.file_ops import run as file_ops_run
+                output = file_ops_run(draft.get("args") or {})
+                job["result"] = f"[file_ops] {str(output)[:500]}"
+            else:
+                job["result"] = f"[{tool_name}] tool approved (no auto-executor for this tool type)"
+            job["status"] = "complete"
+        except Exception as exc:
+            job["status"] = "failed"
+            job["result"] = ""
+            job["error"] = f"tool execution failed: {exc}"
+
+        job.pop("pendingTool", None)
+        job["updatedAt"] = datetime.now().isoformat()
+        _persist_jobs_locked()
+        return {"ok": True, "job": dict(job), "message": "tool executed" if decision == "approved" else "tool denied"}
+
+
+def _pause_job_for_approval(job_id: str, tool_event: dict) -> None:
+    """Pause a running job and set it to waiting_approval with the pending tool context."""
+    with BACKGROUND_JOB_LOCK:
+        _load_jobs_locked()
+        job = BACKGROUND_JOBS.get(job_id)
+        if not job:
+            return
+        job["status"] = "waiting_approval"
+        job["pendingTool"] = {
+            "eventId": str(tool_event.get("id", "")),
+            "toolName": str(tool_event.get("name", "")),
+            "displayName": str(tool_event.get("draft", {}).get("displayName", tool_event.get("name", ""))),
+            "risk": str(tool_event.get("risk", "medium")),
+            "summary": str(tool_event.get("summary", "")),
+            "detail": str(tool_event.get("detail", "")),
+            "draft": tool_event.get("draft") or {},
+            "createdAt": datetime.now().isoformat(),
+        }
+        job["updatedAt"] = datetime.now().isoformat()
+        _persist_jobs_locked()
+
+
+def _spawn_child_jobs(job_id: str, payload: dict) -> dict:
+    """Spawn child jobs linked to a parent job.
+
+    Accepts a list of child job specs: { children: [{title, kind, prompt, autoStart?, timeoutSeconds?}, ...] }
+    Each child is created and linked to the parent via parentJobId.
+    """
+    children_specs = payload.get("children")
+    if not children_specs or not isinstance(children_specs, list):
+        return {"ok": False, "error": "children must be a non-empty list", "id": job_id}
+
+    with BACKGROUND_JOB_LOCK:
+        _load_jobs_locked()
+        parent = BACKGROUND_JOBS.get(job_id)
+        if not parent:
+            return {"ok": False, "error": "parent job not found", "id": job_id}
+
+        child_jobs = []
+        for spec in children_specs[:20]:
+            if not isinstance(spec, dict):
+                continue
+            title = str(spec.get("title", "")).strip()
+            prompt = str(spec.get("prompt", "")).strip()
+            if not title or not prompt:
+                continue
+            kind = str(spec.get("kind", "")).strip() or "analysis"
+            timeout_seconds = _clean_job_timeout(spec.get("timeoutSeconds"))
+            from uuid import uuid4
+            child_id = f"job-{uuid4().hex[:8]}"
+            created_at = datetime.now().isoformat()
+            child = {
+                "id": child_id,
+                "title": f"[子] {title}",
+                "kind": kind,
+                "prompt": prompt,
+                "status": "queued",
+                "result": "",
+                "createdAt": created_at,
+                "updatedAt": created_at,
+                "timeoutSeconds": timeout_seconds,
+                "parentJobId": job_id,
+            }
+            BACKGROUND_JOBS[child_id] = child
+            child_ids: list = parent.setdefault("childJobIds", [])
+            child_ids.append(child_id)
+            child_jobs.append(dict(child))
+            if spec.get("autoStart", True) is not False:
+                _start_job(child_id)
+
+        parent["updatedAt"] = datetime.now().isoformat()
+        _persist_jobs_locked()
+
+    return {"ok": True, "id": job_id, "spawned": len(child_jobs), "children": child_jobs}
 
 
 # ---------------------------------------------------------------------------
@@ -1062,6 +1323,14 @@ def payload_post(path: str, payload: dict) -> tuple[int, dict | list]:
     job_retry = re.fullmatch(r"/jobs/([^/]+)/retry", path)
     if job_retry:
         result = _retry_job(job_retry.group(1))
+        return (200 if result.get("ok") else 404), result
+    job_approve = re.fullmatch(r"/jobs/([^/]+)/approve", path)
+    if job_approve:
+        result = _approve_job_tool(job_approve.group(1), payload)
+        return (200 if result.get("ok") else 404), result
+    job_spawn = re.fullmatch(r"/jobs/([^/]+)/spawn", path)
+    if job_spawn:
+        result = _spawn_child_jobs(job_spawn.group(1), payload)
         return (200 if result.get("ok") else 404), result
     if path == "/chat":
         return 200, _chat(payload)
