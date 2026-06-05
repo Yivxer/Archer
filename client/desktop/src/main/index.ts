@@ -4,6 +4,7 @@ import { spawn } from 'node:child_process'
 import type { ChildProcess } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { randomBytes } from 'node:crypto'
+import { probeExistingApi } from './apiProcess'
 
 const isDev = !app.isPackaged
 
@@ -33,7 +34,7 @@ function getOrCreateDesktopApiToken(): string {
   }
 }
 
-function startApiProcess() {
+async function startApiProcess() {
   if (!existsSync(PYTHON_BIN) || !existsSync(API_SCRIPT)) {
     console.log('[archer_api] Python or script not found, skipping auto-start')
     return
@@ -41,6 +42,11 @@ function startApiProcess() {
   if (apiProcess) return
 
   desktopApiToken = desktopApiToken || getOrCreateDesktopApiToken()
+
+  if (await probeExistingApi()) {
+    console.log('[archer_api] Existing API detected on 127.0.0.1:8765, reusing it')
+    return
+  }
 
   apiProcess = spawn(PYTHON_BIN, [API_SCRIPT, '--token', desktopApiToken], {
     cwd: ARCHER_ROOT,
@@ -159,10 +165,10 @@ ipcMain.handle('archer:get-api-token', async () => {
   return desktopApiToken
 })
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   app.setName('Archer Desktop')
   desktopApiToken = getOrCreateDesktopApiToken()
-  startApiProcess()
+  await startApiProcess()
   createWindow()
 
   app.on('activate', () => {

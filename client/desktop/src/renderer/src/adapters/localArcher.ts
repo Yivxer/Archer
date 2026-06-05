@@ -77,6 +77,19 @@ function parseError(response: Response, body?: unknown): ApiError {
   return { type: 'unknown', message: 'Unknown error', status }
 }
 
+async function refreshTokenFromMainProcess(): Promise<string | null> {
+  try {
+    const freshToken = await window.archerDesktop?.getApiToken?.()
+    if (freshToken && freshToken !== getDesktopApiToken()) {
+      saveDesktopApiToken(freshToken)
+      return freshToken
+    }
+    return null
+  } catch {
+    return null
+  }
+}
+
 async function apiFetch(path: string, init: RequestInit = {}, auth = true): Promise<Response> {
   const headers = new Headers(init.headers)
   if (auth) {
@@ -84,7 +97,18 @@ async function apiFetch(path: string, init: RequestInit = {}, auth = true): Prom
     if (token) headers.set('Authorization', `Bearer ${token}`)
   }
   try {
-    return await fetch(`${BASE_URL}${path}`, { ...init, headers })
+    const response = await fetch(`${BASE_URL}${path}`, { ...init, headers })
+
+    // Token mismatch auto-recovery: if 401, try re-fetching token from Electron main process
+    if (auth && response.status === 401) {
+      const freshToken = await refreshTokenFromMainProcess()
+      if (freshToken) {
+        headers.set('Authorization', `Bearer ${freshToken}`)
+        return fetch(`${BASE_URL}${path}`, { ...init, headers })
+      }
+    }
+
+    return response
   } catch (error) {
     throw new Error(error instanceof Error ? `[network] ${error.message}` : '[network] Local API is unreachable')
   }
@@ -292,6 +316,49 @@ export async function cancelBackgroundJob(jobId: string): Promise<BackgroundJobA
 
 export async function retryBackgroundJob(jobId: string): Promise<BackgroundJobActionResult> {
   return postJson<BackgroundJobActionResult>(`/jobs/${encodeURIComponent(jobId)}/retry`, {})
+}
+
+export async function approveJobTool(
+  jobId: string,
+  eventId: string,
+  decision: 'approved' | 'denied'
+): Promise<BackgroundJobActionResult> {
+  return postJson<BackgroundJobActionResult>(`/jobs/${encodeURIComponent(jobId)}/approve`, { eventId, decision })
+}
+
+export type SpawnChildSpec = {
+  title: string
+  kind?: string
+  prompt: string
+  autoStart?: boolean
+  timeoutSeconds?: number
+}
+
+export type SpawnChildrenResult = {
+  ok: boolean
+  id: string
+  spawned: number
+  children: BackgroundJob[]
+}
+
+export async function spawnChildJobs(
+  jobId: string,
+  children: SpawnChildSpec[]
+): Promise<SpawnChildrenResult> {
+  return postJson<SpawnChildrenResult>(`/jobs/${encodeURIComponent(jobId)}/spawn`, { children })
+}
+
+export async function approveJobToolEvent(
+  sessionId: string,
+  jobId: string,
+  eventId: string,
+  decision: 'approved' | 'denied'
+): Promise<{ result: BackgroundJobActionResult; event: AgentEvent }> {
+  const result = await approveJobTool(jobId, eventId, decision)
+  return {
+    result,
+    event: jobSnapshotToAgentEvent(sessionId, result.job),
+  }
 }
 
 export async function cancelBackgroundJobEvent(
