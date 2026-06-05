@@ -17,6 +17,30 @@ Archer 有三层系统，用于塑造它如何理解你、如何在对话中出�
 
 Archer 永远不会自动覆写这个文件。变更通过 `/soul list` 提议，只有你才能接受。
 
+### SOUL_PROFILE.json — 结构化灵魂摘要
+
+SOUL_PROFILE 是给 prompt 使用的紧凑结构化摘要，不替代 SOUL.md，也不承载完整叙事。
+
+字段包括：
+- core_values
+- recurring_fears
+- creative_identity
+- life_themes
+- emotional_patterns
+- relationship_patterns
+- aesthetic_preferences
+- project_mythology
+- language_style
+- important_questions
+- current_life_stage
+
+注入策略：
+- 优先注入 1 条 current_life_stage
+- 再按当前意图选择 1-2 条匹配的长期特质
+- 单轮最多 7 条
+- 空档案不注入
+- 不每轮塞入完整 Soul Profile
+
 ### COVENANT.md — 硬性边界
 
 根契约定义了 Archer 无论如何都会或不会做的事情。
@@ -57,6 +81,8 @@ Archer 不会每轮都注入三个层次——对简单问题来说那会浪费 
 | `reflection`（回顾、模式分析） | **是** | 是 |
 
 COVENANT 和 PRESENCE 摘要每轮都会注入（它们很短）。运行时安全规则始终优先注入，位于所有内容之前。
+
+如果配置了 `persona.soul_profile_path`，Archer 会额外读取 SOUL_PROFILE.json，并按意图注入少量结构化摘要；它不会替代 SOUL.md，也不会把完整档案每轮塞进上下文。
 
 ---
 

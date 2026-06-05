@@ -1,0 +1,59 @@
+classDiagram
+    class SoulExportJSON {
+        +string version
+        +string exportedAt
+        +SoulAnswers soulAnswers
+        +InitialAnswer[] initialAnswers
+        +DeepAnswer[] deepAnswers
+    }
+
+    class SoulAnswers {
+        +string "1"
+        +string "2"
+        +string "3"
+    }
+
+    class InitialAnswer {
+        +string q
+        +string a
+    }
+
+    class DeepAnswer {
+        +string id
+        +string q
+        +string a
+    }
+
+    class PendingMemoriesRow {
+        +int id
+        +string content
+        +string type
+        +int importance
+        +string tags
+        +string source
+        +float confidence
+        +string status
+        +string created_at
+    }
+
+    class MemoryItem {
+        +int id
+        +MemoryStatus status
+        +string type
+        +string content
+        +string confidence
+        +string source
+    }
+
+    class SoulImportResult {
+        +boolean ok
+        +int imported
+        +int[] pendingIds
+        +string message
+    }
+
+    SoulExportJSON --> SoulAnswers
+    SoulExportJSON --> InitialAnswer
+    SoulExportJSON --> DeepAnswer
+    PendingMemoriesRow <|-- MemoryItem : mapped in API
+    SoulImportResult <-- localArcher : return type

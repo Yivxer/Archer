@@ -1,9 +1,21 @@
 # 初衍 Archer
 
-> 本地优先的个人终端 AI 智能体。  
+> 本地优先的个人 AI 智能体。
 > 支持长期记忆、灵魂档案、技能插件与安全边界。
 
-Archer 是一个运行在 macOS 终端中的个人 AI 智能体。  
+## 三端入口
+
+| 端 | 适合场景 | 启动方式 |
+|----|---------|---------|
+| 🌐 **网页** | 试用、Soul 建档 | 访问在线地址，开箱即用 |
+| 💻 **桌面客户端** | 日常对话、本地文件、记忆审阅 | `./install-client.sh` 安装 |
+| ⌨️ **终端** | 完整控制、技能调用、自动化 | `python terminal/archer.py` |
+
+三端共享同一核心（长期记忆、Soul、技能系统），数据通过本地 API 同步。
+
+---
+
+Archer 是一个运行在本地终端中的个人 AI 智能体。
 它不是一次性问答工具，而是围绕**长期记忆、人格档案和技能系统**构建的本地 AI 伙伴——它记得你上次说了什么，知道你现在在做什么，并且在边界之内帮你思考和执行。
 
 ---
@@ -119,7 +131,7 @@ archer
 或直接用 Python：
 
 ```bash
-python archer.py
+python terminal/archer.py
 ```
 
 启动后输入任何内容开始对话，用 `/help` 查看所有命令。
@@ -193,6 +205,12 @@ archer.toml   SOUL.md   MEMORY.md   COVENANT.md   PRESENCE.md
 .env   *.db   sessions/   .artifacts/
 ```
 
+提交前可运行：
+
+```bash
+python3 scripts/check_private_boundary.py --check
+```
+
 详见 [docs/privacy.md](docs/privacy.md)。
 
 ---
@@ -260,8 +278,25 @@ def run(args: dict) -> str:
 
 ---
 
+## 桌面客户端
+
+从项目根目录一键构建并安装 macOS 客户端：
+
+```bash
+./install-client.sh
+```
+
+只构建安装包不安装：
+
+```bash
+./install-client.sh --build-only
+```
+
+---
+
 ## 文档
 
+- [docs/structure.md](docs/structure.md) — 当前三端结构说明
 - [docs/install.md](docs/install.md) — 详细安装说明
 - [docs/quickstart.md](docs/quickstart.md) — 第一次使用指引
 - [docs/commands.md](docs/commands.md) — 完整命令手册
@@ -270,7 +305,6 @@ def run(args: dict) -> str:
 - [docs/security.md](docs/security.md) — 安全模型
 - [docs/privacy.md](docs/privacy.md) — 隐私说明
 
-英文文档见 [README.en.md](README.en.md)。
 
 ---
 

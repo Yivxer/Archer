@@ -88,7 +88,7 @@ ok "Dependencies installed"
 # ── 5. Install `archer` shell command ─────────────────────────────────────────
 WRAPPER="/usr/local/bin/archer"
 WRAPPER_CONTENT="#!/usr/bin/env bash
-exec \"$VENV_DIR/bin/python\" \"$PROJECT_DIR/archer.py\" \"\$@\""
+exec \"$VENV_DIR/bin/python\" \"$PROJECT_DIR/terminal/archer.py\" \"\$@\""
 
 if [ -f "$WRAPPER" ]; then
     warn "$(which archer 2>/dev/null || echo $WRAPPER) already exists"
@@ -98,7 +98,7 @@ if [ -f "$WRAPPER" ]; then
         sudo chmod +x "$WRAPPER"
         ok "Updated $WRAPPER"
     else
-        warn "Skipped — run archer with: $VENV_DIR/bin/python $PROJECT_DIR/archer.py"
+        warn "Skipped — run archer with: $VENV_DIR/bin/python $PROJECT_DIR/terminal/archer.py"
     fi
 else
     echo "$WRAPPER_CONTENT" | sudo tee "$WRAPPER" > /dev/null

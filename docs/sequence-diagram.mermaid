@@ -1,0 +1,11 @@
+sequenceDiagram
+    participant User
+    participant Browser as Web Browser
+    participant LS as localStorage
+
+    User->>Browser: 点击"导出 Soul JSON"
+    Browser->>LS: loadSoulState()
+    LS-->>Browser: {soulAnswers, initialAnswers, deepAnswers}
+    Browser->>Browser: 构建 SoulExportJSON 对象
+    Browser->>Browser: new Blob([JSON.stringify(data)])
+    Browser->>User: 下载 archer-soul.json

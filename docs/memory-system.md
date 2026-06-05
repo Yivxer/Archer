@@ -19,6 +19,8 @@ Archer 使用 SQLite 和可选的向量检索，跨会话维护长期记忆。
 
 ## 记忆类型
 
+### 旧类型（兼容保留）
+
 | 类型 | 用途 | 衰减规则 |
 |------|------|----------|
 | `identity` | 你是谁——价值观、个性 | 永不衰减 |
@@ -30,6 +32,33 @@ Archer 使用 SQLite 和可选的向量检索，跨会话维护长期记忆。
 | `risk` | 标记的潜在问题 | 60 天未使用后衰减 |
 | `context` | 临时情境上下文 | 30 天未使用后衰减 |
 | `reflection` | 会话复盘摘要 | 30 天未使用后衰减 |
+
+### A4 灵魂伴生体类型（2026-05-24 最小内核）
+
+| 类型 | 用途 |
+|------|------|
+| `fact` | 稳定事实 |
+| `emotion_pattern` | 反复出现的情绪模式 |
+| `value` | 价值判断、长期原则 |
+| `value_conflict` | 价值冲突、内在拉扯 |
+| `life_theme` | 人生主题、长期母题 |
+| `self_narrative` | 自我叙事方式 |
+| `project_mythology` | 项目神话、项目在生命叙事中的意义 |
+| `relationship_pattern` | 关系模式 |
+| `creative_identity` | 创作身份、自我表达身份 |
+| `growth_marker` | 成长标记、阶段性变化 |
+| `reflection_anchor` | 有分量、值得下次复盘优先提取的一句话 |
+
+A4 先通过 `memory/a4.py` 提供轻量策略层，不直接改数据库 schema。
+`depth` 暂作为 metadata 概念承载：1=事实，2=偏好/习惯，3=模式，4=价值/叙事，5=精神母题。
+
+A4 检索链路已接入 `memory.retrieve.for_context()`：
+- 调用方可传入 `intent`
+- 未传入时会轻量推断
+- 关键句会触发 `reflection_anchor`
+- 情绪意图会触发 `emotion_pattern`
+- core + related 合并后统一排序截断
+- 默认保持旧上限，A4 场景可传入 7 条上限
 
 **衰减**指超过阈值且未被使用时，重要性评分降低 1（下限为 1）。身份类和决策类记忆免于衰减。
 
@@ -57,6 +86,8 @@ valid_until  TEXT     -- 过期日期（可选）
 last_used_at TEXT     -- 上次检索时间戳（用于衰减）
 session_id   TEXT     -- 创建此记忆的会话
 status       TEXT     -- 'active' 或 'archived'
+
+# A4 暂不新增 schema 字段；depth / type_family 由 memory.a4.normalize_memory_candidate() 放入 metadata 概念层。
 ```
 
 ## 记忆健康检查
