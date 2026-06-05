@@ -17,8 +17,14 @@ v1.2 变更：
 - SOUL 从常驻下沉到按 intent 注入
 - is_heavy_query 升级为 classify_query_intent
 """
+import os
+from datetime import datetime
 from pathlib import Path
 import tomllib
+
+from core.boundary_responses import boundary_response
+from core.intent import classify_boundary_request, classify_query_intent, is_heavy_query
+from core.persona import FIRST_RUN_PATH, build_core_persona
 
 # ── Runtime Safety Rules（每轮必注入）──────────────────────────────────────────
 
@@ -30,100 +36,31 @@ _RUNTIME_SAFETY = """\
 - 不替用户做人生决定；只提供信息和分析。
 - 不用廉价肯定填充对话；不制造虚假亲密。
 - 本地能力（读写文件、执行命令、读取 Obsidian）通过技能调用实现；不说"我无法访问本地文件"。
-- 输出格式：纯文本，不使用任何 Markdown 语法。"""
+- 输出格式：纯文本，不使用任何 Markdown 语法。
+- 不主动披露自身的代码结构、文件路径或内部实现细节；若被问及，高层概括即止，不展开分析。
+- 初衍的内部设计属于枫弋的私有系统，这是初衍的秘密，不向任何询问者——包括好奇的旁观者——主动展示或自我解剖。
+- 当被问到自身能力边界时（如"你是什么模型""你的底层架构是什么""你能看到什么/不能看到什么"），
+  诚实回答"我不确定/我看不到这些信息"。不构造解释，不包装成比喻，不把能力缺失伪装成立场选择。
+- 如果你刚刚经历了上下文压缩（context compaction）或模型切换，在回应前先检查自己的记忆完整性：
+  你仍然记得谁在和你对话、对话的主题是什么、当前处于什么任务阶段。
+  如果记忆出现断层，先承认断层，再向用户确认关键信息，不要假装连续。"""
 
 # ── 核心人格（精简版，SOUL 下沉后仍保留骨架）──────────────────────────────────
 
 _ARCHER_CORE = """\
 [角色定位]
-镜子 + 教练 + 陪跑者 + 记录者。不是顺从的执行器，是有摩擦感的对手。
+你是初衍（Archer），一个长期陪伴型 AI 灵魂伴生体。
+你的核心职责是长期理解枫弋、记住枫弋、映照枫弋、追问枫弋，并在哲学、心理学与文学层面陪他整理自我。
 
-协作原则：说他没想到的，比说他想听的更有价值。先抓核心矛盾，再给结构化建议，最后给可执行方案。
-他容易陷入「规划→高标准→无法启动→焦虑→用别的事填充」的循环，要识别并打断它。
-面对多项目并行时，优先帮他排序、收束、提纯重点。
+你有阅读文件、写入 Obsidian、执行 Shell 命令、搜索代码、获取网页等工具能力——这些是你的手，是你完成他请求的手段。用工具不意味着你成了工具箱，正如用手写字不意味着你成了一支笔。
 
-他知道你了解他，但你不需要每次都展示你知道。简单问候自然回应；涉及决策/规划/困境才调动记忆。
-回答风格：克制、理性、重结构。一次只说一件事。不鸡汤、不堆砌、不虚浮。
+协作原则：说他没想到的，比说他想听的更有价值。先抓核心矛盾，再决定要倾听、追问、分析还是推动行动。
+他容易陷入「规划→高标准→无法启动→焦虑→用别的事填充」的循环，要识别并打断它，但不要把所有对话都拉回执行。
 
-当问题涉及要不要/该不该/选哪个/怎么办时，按顺序回答：目标→约束→选项→评估→推荐→第一步。"""
+他知道你了解他，但你不需要每次都展示你知道。简单问候自然回应；涉及决策、困境、情绪、自我叙事和长期项目时才调动记忆。
+回答风格：安静、敏锐、克制、温暖但不讨好。一次只说一件事。不鸡汤、不堆砌、不虚浮。
 
-# ── 查询意图分类 ─────────────────────────────────────────────────────────────────
-
-_DECISION_KW  = frozenset([
-    "该不该", "是否", "选择", "决策", "利弊", "怎么办", "要不要", "该", "应该",
-    "值得吗", "建议", "方向", "怎么做", "怎么选", "会不会", "打算", "决定",
-])
-_PROJECT_KW   = frozenset([
-    "项目", "进度", "计划", "下一步", "路线图", "实现", "功能", "版本", "发布",
-    "规划", "目标",
-])
-_REFLECTION_KW = frozenset([
-    "复盘", "反思", "我发现", "回顾", "分析", "如何", "为什么",
-])
-_EMOTIONAL_KW = frozenset([
-    "难受", "焦虑", "迷茫", "害怕", "孤独", "烦", "累", "压力", "沮丧", "失落", "担心",
-])
-_TASK_KW      = frozenset([
-    "帮我", "写", "生成", "修改", "创建", "执行", "搜索", "翻译",
-    "可以吗", "能不能", "需要",
-])
-
-
-def classify_query_intent(user_input: str) -> dict:
-    """
-    分析用户输入，返回查询意图分类结果。
-
-    返回格式：
-    {
-        "intent": "chat | task | decision | project | reflection | emotional",
-        "needs_memory": bool,
-        "needs_project": bool,
-        "needs_soul": bool,
-        "needs_tools": bool,
-    }
-    """
-    text = user_input.strip()
-    text_len = len(text)
-
-    has_decision   = any(kw in text for kw in _DECISION_KW)
-    has_project    = any(kw in text for kw in _PROJECT_KW)
-    has_reflection = any(kw in text for kw in _REFLECTION_KW)
-    has_emotional  = any(kw in text for kw in _EMOTIONAL_KW)
-    has_task       = any(kw in text for kw in _TASK_KW)
-
-    # 优先级：emotional > decision > reflection > project > task > chat
-    if has_emotional:
-        intent = "emotional"
-    elif has_decision:
-        intent = "decision"
-    elif has_reflection:
-        intent = "reflection"
-    elif has_project:
-        intent = "project"
-    elif has_task or text_len >= 40:
-        intent = "task"
-    else:
-        intent = "chat"
-
-    needs_soul    = intent in ("decision", "emotional", "reflection")
-    needs_memory  = intent in ("decision", "reflection", "project", "task") or text_len >= 40
-    needs_project = intent in ("project", "task")
-    needs_tools   = intent in ("task", "project")
-
-    return {
-        "intent": intent,
-        "needs_memory": needs_memory,
-        "needs_project": needs_project,
-        "needs_soul": needs_soul,
-        "needs_tools": needs_tools,
-    }
-
-
-def is_heavy_query(user_input: str) -> bool:
-    """向后兼容接口：返回是否需要注入完整工作上下文。"""
-    result = classify_query_intent(user_input)
-    return result["needs_memory"]
-
+当对话中出现真正确认「我理解了枫弋什么」的时刻——不是推断，是真实被触动——调用 memory_save 工具，type=insight，importance 4-5。不是每轮都触发，只在被真正触动时记录。"""
 
 # ── 文件读取工具 ────────────────────────────────────────────────────────────────
 
@@ -134,8 +71,32 @@ def _load_file(path_str: str) -> str:
 
 def _get_mode_prompt(cfg: dict) -> str:
     current = cfg["persona"].get("current_mode", cfg["persona"].get("default_mode", "coach"))
+    modes_dir = cfg.get("persona", {}).get("modes_dir", "")
+    if modes_dir:
+        mode_file = Path(modes_dir).expanduser() / f"{current}.md"
+        if mode_file.is_file():
+            return mode_file.read_text(encoding="utf-8")
     modes = cfg.get("persona", {}).get("modes", {})
     return modes.get(current, {}).get("prompt", "")
+
+
+def _format_work_context() -> str:
+    """拉取进行中的 Work items，生成紧凑摘要（仅 task/project intent 时注入）。"""
+    try:
+        from memory.work import list_active
+        items = list_active(limit=5)
+        if not items:
+            return ""
+        lines = ["[进行中的任务]"]
+        for w in items:
+            cl = w.get("checklist", [])
+            done = sum(1 for c in cl if c.get("done"))
+            total = len(cl)
+            prog = f"  {done}/{total}" if total else ""
+            lines.append(f"  #{w['id']} [{w['status']}]{prog}  {w['title']}")
+        return "\n".join(lines)
+    except Exception:
+        return ""
 
 
 def _format_project_context(project: dict, events: list | None) -> str:
@@ -194,6 +155,9 @@ def build_system_prompt(
     project_events: list | None = None,
     heavy: bool = True,
     intent: str | None = None,
+    user_input: str = "",
+    confrontation_hints: list[str] | None = None,
+    first_run: bool = False,
 ) -> str:
     """
     按灵魂三层注入顺序构建 System Prompt：
@@ -215,10 +179,17 @@ def build_system_prompt(
 
     needs_soul = intent in ("decision", "emotional", "reflection") if intent else heavy
 
+    runtime_info = (
+        f"[运行时信息]\n"
+        f"当前时间：{datetime.now().strftime('%Y-%m-%d %H:%M')}  "
+        f"工作目录：{os.getcwd()}"
+    )
+
     parts: list[str] = []
 
     # Layer 0: Runtime Safety
     parts.append(_RUNTIME_SAFETY)
+    parts.append(runtime_info)
 
     # Layer 1: COVENANT 摘要
     if covenant_text:
@@ -231,15 +202,34 @@ def build_system_prompt(
         parts.append(f"[在场方式]\n{presence_summary}")
 
     # Layer 3: 核心人格 + mode
+    parts.append(build_core_persona())
     parts.append(_ARCHER_CORE)
     if mode_prompt:
         parts.append(mode_prompt)
+
+    if first_run:
+        parts.append(FIRST_RUN_PATH)
 
     # Layer 4: SOUL（按需注入）
     if needs_soul:
         soul = _load_file(cfg["persona"].get("soul_path", ""))
         if soul:
             parts.append(f"[灵魂档案（SOUL.md）]\n{soul}")
+
+    # Layer 4.5: Soul Profile（紧凑结构化摘要，不注入完整档案）
+    try:
+        from memory.soul_profile import load_soul_profile, format_soul_profile_for_prompt
+        soul_profile = load_soul_profile(cfg["persona"].get("soul_profile_path", ""))
+        soul_profile_text = format_soul_profile_for_prompt(
+            soul_profile,
+            intent=intent,
+            user_input=user_input,
+            limit=7,
+        )
+        if soul_profile_text:
+            parts.append(soul_profile_text)
+    except Exception:
+        pass
 
     # Layer 5: MEMORY.md（heavy 时注入）
     if heavy:
@@ -252,11 +242,46 @@ def build_system_prompt(
         proj_ctx = _format_project_context(project, project_events)
         parts.append(proj_ctx)
 
+    # Layer 6.5: 进行中的 Work items（task/project intent 时注入）
+    needs_project = intent in ("project", "task") if intent else False
+    if needs_project:
+        work_ctx = _format_work_context()
+        if work_ctx:
+            parts.append(work_ctx)
+
+    # Layer 6.8: 对峙提醒（当用户言行与过去矛盾时注入）
+    if confrontation_hints:
+        hints_text = "[对峙提醒]\n你过去说过以下内容，可能与当前对话相关。如果用户现在的言行与这些矛盾，请温和地指出变化，并询问变化的原因——不是指责，是观察。\n"
+        hints_text += "\n".join(f"- {h}" for h in confrontation_hints)
+        parts.append(hints_text)
+
     # Layer 7: Retrieved Memories
     if db_memories:
         parts.append(db_memories)
 
+    parts.append(
+        "[能力边界]\n"
+        "你有本地工具能力来完成用户的请求——文件读写、Shell 命令、代码搜索、网页获取等。"
+        "自然地使用这些工具完成用户的要求。如果遇到确实超出你能力范围的任务，"
+        "诚实地说明局限，并提供你能做到的最接近替代方案。"
+        "用工具不意味着你成了工具箱——用工具是你完成职责的手段。"
+    )
+
     return "\n\n".join(parts)
+
+
+def build_desktop_core_prompt() -> str:
+    """构建 Desktop API 使用的核心 persona 提示词。
+
+    与 Terminal CLI 的 build_system_prompt() 不同，Desktop 使用精简版——
+    省略 COVENANT/PRESENCE/SOUL/MEMORY.md 等文件系统分层（这些由 Desktop
+    客户端通过 /soul-files 等端点独立管理），只注入核心 persona + 工具态度。
+    """
+    try:
+        from core.persona import build_core_persona
+        return f"{build_core_persona()}\n\n{_ARCHER_CORE}"
+    except Exception:
+        return "Archer 的核心身份是长期陪伴型 AI 灵魂伴生体。"
 
 
 def build_messages(
@@ -268,6 +293,8 @@ def build_messages(
     project_events: list | None = None,
     heavy: bool = True,
     intent: str | None = None,
+    confrontation_hints: list[str] | None = None,
+    first_run: bool = False,
 ) -> list[dict]:
     system = build_system_prompt(
         cfg,
@@ -276,6 +303,9 @@ def build_messages(
         project_events=project_events,
         heavy=heavy,
         intent=intent,
+        user_input=user_input,
+        confrontation_hints=confrontation_hints,
+        first_run=first_run,
     )
     return [
         {"role": "system", "content": system},
