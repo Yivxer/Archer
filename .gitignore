@@ -28,6 +28,8 @@ PRESENCE.md
 *.db
 *.db-shm
 *.db-wal
+learned_routes.json
+memory/background_jobs.json
 
 # Session & artifact storage
 sessions/
@@ -51,8 +53,17 @@ history/
 .vscode/
 *.swp
 *.swo
+*.bak
+*.orig
+*.backup
 
 # ── Test cache ────────────────────────────────────────────────────────────────
 .pytest_cache/
 .coverage
 htmlcov/
+
+# Client build output
+node_modules/
+client/desktop/node_modules/
+client/desktop/out/
+client/desktop/release/

@@ -11,6 +11,7 @@ export { createInitialRuntimeState, reduceRuntimeEvent } from './runtimeStore'
 export type { RuntimeState } from './runtimeStore'
 export { routeTaskForRuntime } from './taskRouter'
 export type { RuntimeTaskRoute, RuntimeTaskRouteInput } from './taskRouter'
+export type { Skill, SkillArgs, SkillDef, SkillRegistry, SkillResult } from './skills/types'
 export type {
   AgentEvent,
   AgentEventBase,
