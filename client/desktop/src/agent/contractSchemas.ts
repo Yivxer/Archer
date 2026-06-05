@@ -32,6 +32,7 @@ export const toolRequestEventSchema = base.extend({
   detail: z.string(),
   requiresApproval: z.boolean(),
   blocked: z.boolean(),
+  draft: z.record(z.string(), z.unknown()).optional(),
 })
 
 export const toolResultEventSchema = base.extend({

@@ -132,6 +132,32 @@ export type BackgroundJob = {
   updatedAt: string
   timeoutSeconds?: number
   error?: string
+  /** Pending tool approval context when status is 'waiting_approval' */
+  pendingTool?: BackgroundJobPendingTool
+  /** Parent job ID when this is a child/sub-agent job */
+  parentJobId?: string
+  /** Child job IDs when this job has spawned sub-agents */
+  childJobIds?: string[]
+  /** Child job summaries (returned by GET /jobs/{id}) */
+  children?: BackgroundJobChildSummary[]
+}
+
+export type BackgroundJobPendingTool = {
+  eventId: string
+  toolName: string
+  displayName: string
+  risk: RiskLevel
+  summary: string
+  detail: string
+  draft?: Record<string, unknown>
+  createdAt: string
+}
+
+export type BackgroundJobChildSummary = {
+  id: string
+  title: string
+  status: BackgroundJobStatus
+  createdAt: string
 }
 
 export type BackgroundJobCreateResult = {

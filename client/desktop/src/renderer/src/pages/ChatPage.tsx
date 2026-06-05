@@ -1,9 +1,9 @@
 import React from 'react'
 import { ArrowUp, Check, ChevronDown, Copy, CornerDownLeft, Edit3, FileText, Github, Loader2, Paperclip, RotateCcw, Send, Terminal, X } from 'lucide-react'
-import { appendLocalSession, cancelBackgroundJobEvent, createBackgroundJobEvent, pollBackgroundJobEvents, retryBackgroundJobEvent, saveLocalSession, streamLocalChat, submitToolApprovalEvent } from '../adapters/localArcher'
+import { appendLocalSession, approveJobToolEvent, cancelBackgroundJobEvent, createBackgroundJobEvent, fetchBackgroundJob, pollBackgroundJobEvents, retryBackgroundJobEvent, saveLocalSession, streamLocalChat, submitToolApprovalEvent } from '../adapters/localArcher'
 import type { ArcherAdapter, ChatMessage, FileRef, MemoryContextMode, ObsidianContextMode, SessionDetail, ToolEvent } from '../types'
 import { ArcherRing, MarkdownMessage, ThinkingDots } from '../components/common'
-import { createInitialRuntimeState, createPersistentEventLog, reduceRuntimeEvent, routeTaskForRuntime } from '../../../agent'
+import { createInitialRuntimeState, createPersistentEventLog, reduceRuntimeEvent, routeTaskForRuntime, jobSnapshotToAgentEvent } from '../../../agent'
 import type { AgentEvent, EventLog, JobEvent } from '../../../agent'
 
 const CHAT_STARTERS = [
@@ -47,7 +47,6 @@ export function ChatPage({
   const [isBackgrounding, setIsBackgrounding] = React.useState(false)
   const [chatError, setChatError] = React.useState('')
   const [saveState, setSaveState] = React.useState('')
-  const [toolDecisions, setToolDecisions] = React.useState<Record<string, 'approved' | 'denied'>>({})
   const [toolEvents, setToolEvents] = React.useState<ToolEvent[]>(data.chat.toolEvents)
   const [toolNotice, setToolNotice] = React.useState('')
   const [fileRefs, setFileRefs] = React.useState<FileRef[]>([])
@@ -73,7 +72,6 @@ export function ChatPage({
     setIsBackgrounding(false)
     setChatError('')
     setSaveState('')
-    setToolDecisions({})
     setToolEvents(activeSession ? [] : data.chat.toolEvents)
     setToolNotice('')
     setFileRefs([])
@@ -86,6 +84,29 @@ export function ChatPage({
     backgroundJobAbortRef.current?.abort()
     backgroundJobAbortRef.current = null
   }, [activeSession?.id])
+
+  // After restore from eventLog, detect stale jobs (active-status jobs persisted before app restart)
+  // and sync their real status from the backend API
+  React.useEffect(() => {
+    const activeJobs = Object.values(runtimeState.jobs).filter(
+      (j) => j.status === 'queued' || j.status === 'running' || j.status === 'waiting_approval'
+    )
+    if (activeJobs.length === 0 || data.status.adapter !== 'local') return
+
+    for (const job of activeJobs) {
+      fetchBackgroundJob(job.jobId)
+        .then((realJob) => {
+          const event = jobSnapshotToAgentEvent(runtimeSessionId, realJob)
+          // Only update if status actually changed (avoids re-render noise)
+          if (realJob.status !== job.status) {
+            recordAgentEvent(event)
+          }
+        })
+        .catch(() => {
+          // API may be restarting; stale job stays as-is, user can retry manually
+        })
+    }
+  }, []) // Run once on mount after initial state restore
 
   React.useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -131,7 +152,6 @@ export function ChatPage({
         setDraft('')
         setDraftCollapsed(false)
         setToolEvents([])
-        setToolDecisions({})
         eventLogRef.current?.clear()
         setRuntimeState(createInitialRuntimeState(runtimeSessionId))
         backgroundJobAbortRef.current?.abort()
@@ -146,7 +166,6 @@ export function ChatPage({
         setDraft('')
         setDraftCollapsed(false)
         setToolEvents([])
-        setToolDecisions({})
         setChatError('')
         setSaveState('')
         setToolNotice('')
@@ -195,7 +214,6 @@ export function ChatPage({
     setFileRefs([])
     setChatError('')
     setSaveState('')
-    setToolDecisions({})
     setToolEvents([])
     setToolNotice('')
     eventLogRef.current?.clearSession(runtimeSessionId)
@@ -324,7 +342,6 @@ export function ChatPage({
     setFileRefs([])
     setChatError('')
     setSaveState('')
-    setToolDecisions({})
     setToolEvents([])
     setToolNotice('')
     eventLogRef.current?.clearSession(runtimeSessionId)
@@ -426,12 +443,26 @@ export function ChatPage({
     }
   }
 
+  async function decideJobTool(job: JobEvent, decision: 'approved' | 'denied') {
+    if (data.status.adapter !== 'local') return
+    setToolNotice('')
+    try {
+      const { result, event } = await approveJobToolEvent(runtimeSessionId, job.jobId, job.jobId + '-tool', decision)
+      recordAgentEvent(event)
+      setToolNotice(decision === 'approved' ? '工具已执行' : '工具已拒绝')
+    } catch (error) {
+      setToolNotice(error instanceof Error ? error.message : '审批失败')
+    }
+  }
+
   async function decideTool(eventId: string, decision: 'approved' | 'denied') {
-    setToolDecisions((current) => ({ ...current, [eventId]: decision }))
     setToolNotice('')
     if (data.status.adapter !== 'local') return
     try {
       const { result, event: approvalEvent } = await submitToolApprovalEvent(runtimeSessionId, eventId, decision)
+      // Runtime state is the single source of truth for approval decisions.
+      // recordAgentEvent persists the approval.result and updates runtimeState.toolResults,
+      // which the UI reads to determine decision state for each tool card.
       recordAgentEvent(approvalEvent)
       setToolEvents((current) =>
         current.map((event) => {
@@ -590,7 +621,6 @@ export function ChatPage({
     setFileRefs([])
     setChatError('')
     setSaveState('')
-    setToolDecisions({})
     setToolEvents([])
     setToolNotice('')
     eventLogRef.current?.clearSession(runtimeSessionId)
@@ -852,6 +882,7 @@ export function ChatPage({
             job={job}
             onCancel={() => void cancelRuntimeJob(job)}
             onRetry={() => void retryRuntimeJob(job)}
+            onApprove={(decision) => void decideJobTool(job, decision)}
           />
         ))}
 
@@ -860,7 +891,9 @@ export function ChatPage({
           const lowInterest = ['obsidian_search', 'obsidian_read', 'memory.retrieve', 'memory-retrieve', 'file.reference', 'hugo_blog']
           return !lowInterest.includes(event.name) || event.requiresApproval
         }).map((event) => {
-          const decision = toolDecisions[event.id]
+          // Derive decision from runtimeState.toolResults (single source of truth for approvals)
+          const toolResult = runtimeState.toolResults[event.id]
+          const decision = toolResult?.decision
           return (
             <ToolEventCard
               key={event.id}
@@ -870,6 +903,23 @@ export function ChatPage({
             />
           )
         })}
+
+        {/* Pending approvals from runtime state — ensures approval cards survive page refresh / eventLog restore */}
+        {runtimeState.pendingApprovals
+          .filter((req) => !toolEvents.some((e) => e.id === req.id))
+          .map((req) => {
+            const toolResult = runtimeState.toolResults[req.id]
+            const decision = toolResult?.decision
+            const syntheticEvent = toolEventFromRuntimeRequest(req)
+            return (
+              <ToolEventCard
+                key={req.id}
+                event={syntheticEvent}
+                decision={decision}
+                onDecide={(nextDecision) => decideTool(req.id, nextDecision)}
+              />
+            )
+          })}
 
         {chatError && <div className="chat-error">{chatError}</div>}
         {toolNotice && <div className="tool-notice">{toolNotice}</div>}
@@ -890,28 +940,61 @@ function restoreRuntimeState(sessionId: string, eventLog: EventLog | null) {
     .reduce((current, event) => reduceRuntimeEvent(current, event), state)
 }
 
+/** Convert a runtime ToolRequestEvent to display-friendly ToolEvent for ToolEventCard rendering */
+function toolEventFromRuntimeRequest(req: import('../../../agent').ToolRequestEvent): ToolEvent {
+  return {
+    id: req.id,
+    name: req.toolName,
+    status: req.requiresApproval ? 'waiting' : (req.blocked ? 'blocked' : 'complete'),
+    risk: req.risk,
+    summary: req.summary,
+    detail: req.detail,
+    requiresApproval: req.requiresApproval,
+    draft: {
+      skillName: req.toolName,
+      displayName: req.displayName,
+      args: req.args,
+      blocked: req.blocked,
+      ...req.draft,
+    },
+  }
+}
+
 function JobEventCard({
   job,
   onCancel,
-  onRetry
+  onRetry,
+  onApprove
 }: {
   job: JobEvent
   onCancel: () => void
   onRetry: () => void
+  onApprove?: (decision: 'approved' | 'denied') => void
 }) {
   const isActive = job.status === 'queued' || job.status === 'running' || job.status === 'waiting_approval'
   const canRetry = job.status === 'failed' || job.status === 'cancelled'
+  const needsApproval = job.status === 'waiting_approval'
 
   return (
     <article className={`job-event-card ${job.status}`}>
       <div className="job-event-summary">
-        {isActive ? <Loader2 size={14} /> : <Check size={14} />}
+        {isActive && !needsApproval ? <Loader2 size={14} /> : needsApproval ? <Loader2 size={14} /> : <Check size={14} />}
         <span>{job.title || '后台任务'}</span>
         <em>{jobStatusLabel(job.status)}</em>
-        {isActive && (
+        {isActive && !needsApproval && (
           <button type="button" onClick={onCancel} title="取消后台任务" aria-label="取消后台任务">
             <X size={13} />
           </button>
+        )}
+        {needsApproval && onApprove && (
+          <>
+            <button type="button" className="button-primary-compact" onClick={() => onApprove('approved')} title="批准并执行" aria-label="批准">
+              <Check size={13} />
+            </button>
+            <button type="button" className="button-danger-compact" onClick={() => onApprove('denied')} title="拒绝" aria-label="拒绝">
+              <X size={13} />
+            </button>
+          </>
         )}
         {canRetry && (
           <button type="button" onClick={onRetry} title="重试后台任务" aria-label="重试后台任务">
@@ -922,6 +1005,11 @@ function JobEventCard({
       {job.detail && (
         <div className="job-event-detail">
           {job.detail.length > 180 ? `${job.detail.slice(0, 180).trim()}...` : job.detail}
+        </div>
+      )}
+      {needsApproval && job.detail && (
+        <div className="approval-actions compact">
+          <span className="approval-hint">此任务需要您确认后才能继续</span>
         </div>
       )}
     </article>

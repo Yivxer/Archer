@@ -48,11 +48,12 @@ export function pythonToolEventToAgentEvent(sessionId: string, event: PythonTool
     displayName: String(draft.displayName || event.name),
     risk: event.risk,
     status: mapToolStatus(event.status, requiresApproval),
-    args: draft.args || {},
+    args: (draft.args as Record<string, unknown>) || {},
     summary: event.summary,
     detail: event.detail,
     requiresApproval,
     blocked: Boolean(draft.blocked || event.status === 'blocked'),
+    draft,
   }
 }
 

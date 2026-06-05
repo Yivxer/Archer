@@ -30,6 +30,8 @@ export type ToolRequestEvent = AgentEventBase & {
   detail: string
   requiresApproval: boolean
   blocked: boolean
+  /** Rich display data from Python tool event draft (command, path, title, contentPreview, etc.) */
+  draft?: Record<string, unknown>
 }
 
 export type ToolResultEvent = AgentEventBase & {
