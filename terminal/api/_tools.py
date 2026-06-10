@@ -998,6 +998,12 @@ def _iter_chat_chunks(
             "memory-retrieve", "memory.retrieve", "complete", "low",
             "记忆上下文已关闭", "mode: off, injected: False",
         )
+    elif memory_mode == "conservative" and not intent_info.get("needs_memory"):
+        yield _tool_event(
+            "memory-retrieve", "memory.retrieve", "complete", "low",
+            "保守模式：本轮未触发记忆检索",
+            f"mode: {memory_mode}, intent: {intent}, needs_memory: False",
+        )
     else:
         limit = 10 if memory_mode == "full" else (7 if intent_info["needs_memory"] else 5)
         yield _tool_event(

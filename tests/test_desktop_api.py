@@ -657,7 +657,7 @@ class TestApiSkillRouting:
             return messages, []
 
         monkeypatch.setattr(tools, "_run_desktop_tool_loop", fake_tool_loop)
-        monkeypatch.setattr("core.llm.stream_chat", lambda _messages: iter(["这是一篇正文。"]))
+        monkeypatch.setattr("core.llm.stream_chat", lambda _messages, **kwargs: iter(["这是一篇正文。"]))
 
         events = list(tools._iter_chat_chunks(
             [{"role": "user", "content": "按照这个逻辑，帮我生成一篇大概500字的文章"}],
@@ -1143,7 +1143,7 @@ class TestFileReferences:
     def test_chat_stream_with_file_refs_yields_tool_event(self, tmp_path, monkeypatch):
         note = tmp_path / "note.txt"
         note.write_text("local context", encoding="utf-8")
-        monkeypatch.setattr("core.llm.stream_chat", lambda messages: iter(["ok"]))
+        monkeypatch.setattr("core.llm.stream_chat", lambda messages, **kwargs: iter(["ok"]))
 
         events = list(_iter_chat_chunks(
             [{"role": "user", "content": "use file"}],

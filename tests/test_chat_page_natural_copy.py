@@ -23,8 +23,9 @@ def test_chat_page_offers_lightweight_conversation_starters():
     assert "CHAT_STARTERS" in source
     assert "先听我说" in source
     assert "setDraft(starter.prompt)" in source
-    assert "先说一句就好" in source
-    assert "我在想。" in source
+    assert "有点卡住" in source
+    assert "轻轻复盘" in source
+    assert "继续那条线" in source
 
 
 def test_chat_styles_keep_conversation_chrome_quiet():
