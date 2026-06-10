@@ -13,7 +13,6 @@ export const CHAT_GREETINGS = [
 ] as const
 
 export function pickChatGreeting(seed?: number): string {
-  if (CHAT_GREETINGS.length === 0) return '想说点什么？'
   const index =
     seed === undefined
       ? Math.floor(Math.random() * CHAT_GREETINGS.length)
