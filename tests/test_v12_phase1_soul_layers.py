@@ -15,7 +15,13 @@ from pathlib import Path
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 
-from core.context import classify_query_intent, is_heavy_query, build_system_prompt
+from core.context import (
+    classify_query_intent,
+    is_heavy_query,
+    build_system_prompt,
+    classify_boundary_request,
+    boundary_response,
+)
 
 
 # ── classify_query_intent ──────────────────────────────────────────────────────
@@ -61,6 +67,22 @@ def test_emotional_priority_over_decision():
     assert r["intent"] == "emotional"
 
 
+def test_boundary_request_detects_code_image_video_search():
+    assert classify_boundary_request("帮我写代码实现这个功能") == "code"
+    assert classify_boundary_request("帮我生成图片") == "image"
+    assert classify_boundary_request("帮我剪视频") == "video"
+    assert classify_boundary_request("帮我做一次深度调研") == "search"
+
+
+def test_boundary_response_no_longer_short_circuits():
+    cfg = {
+        "boundaries": {"refuse_code_generation": True},
+        "external_tools": {"code_agent": "Codex"},
+    }
+    assert boundary_response("帮我写代码实现这个功能", cfg) is None
+    assert boundary_response("帮我写代码", {"boundaries": {"refuse_code_generation": False}}) is None
+
+
 # ── is_heavy_query 向后兼容 ────────────────────────────────────────────────────
 
 def test_decision_kw_is_heavy():
@@ -87,7 +109,8 @@ def _make_cfg(tmp_dir: str, **extra_paths) -> dict:
             "memory_path": extra_paths.get("memory_path", ""),
             "covenant_path": extra_paths.get("covenant_path", ""),
             "presence_path": extra_paths.get("presence_path", ""),
-            "default_mode": "coach",
+            "default_mode": extra_paths.get("default_mode", "coach"),
+            "modes_dir": extra_paths.get("modes_dir", ""),
             "modes": {},
         },
         "obsidian": {},
@@ -160,6 +183,23 @@ def test_soul_not_injected_in_task():
         cfg = _make_cfg(tmp, soul_path=str(soul))
         prompt = build_system_prompt(cfg, heavy=False, intent="task")
         assert "wTaskMarker000" not in prompt, "task 意图不应注入 SOUL 内容"
+
+
+def test_file_mode_prompt_is_injected():
+    with tempfile.TemporaryDirectory() as tmp:
+        modes_dir = Path(tmp) / "modes"
+        modes_dir.mkdir()
+        (modes_dir / "listener.md").write_text("[模式：倾听者 Listener]\n少说，慢一点。")
+        cfg = _make_cfg(tmp, default_mode="listener", modes_dir=str(modes_dir))
+        prompt = build_system_prompt(cfg, heavy=False, intent="chat")
+        assert "倾听者 Listener" in prompt
+
+
+def test_core_positioning_mentions_soul_companion():
+    cfg = _make_cfg("/tmp")
+    prompt = build_system_prompt(cfg, heavy=False, intent="chat")
+    assert "长期陪伴型 AI 灵魂伴生体" in prompt
+    assert "用工具不意味着你成了工具箱" in prompt
 
 
 if __name__ == "__main__":

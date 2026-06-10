@@ -16,7 +16,10 @@ from rich.panel import Panel
 from rich.table import Table
 
 from core.llm import stream_chat, load_config, get_last_usage, get_session_tokens, pop_config_reloaded
-from core.context import build_messages, is_heavy_query, classify_query_intent, boundary_response
+from core.context import (
+    build_messages, is_heavy_query, classify_query_intent,
+    augment_retrieval_query,
+)
 from core.session import Session
 from core.input import prompt as get_input
 from core.compressor import should_compress, compress
@@ -320,6 +323,7 @@ def run():
             console.print(f"[yellow]⏰ 定时任务「{label}」执行失败：{tr.summary}[/yellow]")
 
     turn_count = 0
+    last_stance = cfg["persona"].get("default_mode", "listener")
 
     while True:
         # ── 配置热加载 ─────────────────────────────────────────────────
@@ -341,9 +345,12 @@ def run():
                 console.print(f"[dim]压缩失败，跳过：{e}[/dim]")
 
         current_model = cfg["api"]["model"]
-        current_mode = cfg["persona"].get("current_mode", cfg["persona"].get("default_mode", "coach"))
+        mode_auto = cfg["persona"].get("mode_auto", True)
+        current_mode = last_stance if mode_auto else cfg["persona"].get("current_mode", cfg["persona"].get("default_mode", "coach"))
         modes = cfg.get("persona", {}).get("modes", {})
         mode_name = modes.get(current_mode, {}).get("name", current_mode)
+        if mode_auto:
+            mode_name = f"自动·{mode_name}"
 
         # 静默录入模式在状态栏显示特殊标识
         display_mode = "🎙 静默录入" if get_state().listen_mode else mode_name
@@ -411,31 +418,42 @@ def run():
             console.print(f"[dim]附件：{summary}[/dim]")
         user_content = build_user_content(user_text, refs)
 
-        boundary_text = boundary_response(user_text, cfg) if not refs else None
-        if boundary_text:
-            console.print(boundary_text, markup=False)
-            session.history.append({"role": "user", "content": user_content})
-            session.history.append({"role": "assistant", "content": boundary_text})
-            _last_response = boundary_text
-            turn_count += 1
-            continue
-
-        intent_info = classify_query_intent(user_text)
+        intent_info = classify_query_intent(
+            user_text, history=session.history, llm_fallback=True,
+        )
         heavy       = intent_info["needs_memory"]
         intent      = intent_info["intent"]
         memory_limit = 7 if heavy else cfg["memory"]["max_context_memories"]
-        core_mems, related_mems = for_context(user_text, limit=memory_limit, intent=intent)
+        retrieval_query = augment_retrieval_query(user_text, session.history)
+        core_mems, related_mems = for_context(retrieval_query, limit=memory_limit, intent=intent)
         mem_block = format_for_prompt(core_mems, related_mems)
         project     = get_project(get_state().active_project_id) if get_state().active_project_id else None
         proj_evts   = get_project_events(get_state().active_project_id, limit=3) if get_state().active_project_id else []
+        # 动态对话姿态：按当轮内容自动选 mode（用户 /mode 锁定时让位）
+        from core.stance import resolve_active_stance, available_modes
+        active_stance, stance_reason = resolve_active_stance(
+            cfg, user_text, intent,
+            available=available_modes(cfg), prev_stance=last_stance,
+        )
+        if cfg["persona"].get("mode_auto", True) and active_stance != last_stance:
+            console.print(f"[dim]· 姿态 → {active_stance}（{stance_reason}）[/dim]")
+        last_stance = active_stance
         # P6: 对峙检测
         from memory.narrative import confrontation_hook
+        from memory.emotion import infer_turn_emotion_hint
+        from core.thread import resolve_topic_thread
         confrontation_hints = confrontation_hook(user_text, session.history)
+        emotion_hint = infer_turn_emotion_hint(user_text, session.history)
+        thread_hint = resolve_topic_thread(user_text, session.history)
         messages    = build_messages(
             session.history, user_content, cfg,
             db_memories=mem_block, project=project,
             project_events=proj_evts, heavy=heavy,
             intent=intent, confrontation_hints=confrontation_hints or None,
+            mode_override=active_stance,
+            emotion_hint=emotion_hint,
+            thread_hint=thread_hint,
+            writing_query=user_text,
         )
 
         has_images = any(r["type"] == "image" for r in refs)
@@ -451,7 +469,11 @@ def run():
                     session.history, user_content, cfg,
                     db_memories=mem_block, project=project,
                     project_events=proj_evts, heavy=heavy,
-                    confrontation_hints=confrontation_hints or None,
+                    intent=intent, confrontation_hints=confrontation_hints or None,
+                    mode_override=active_stance,
+                    emotion_hint=emotion_hint,
+                    thread_hint=thread_hint,
+                    writing_query=user_text,
                 )
             else:
                 active_model = vision_model

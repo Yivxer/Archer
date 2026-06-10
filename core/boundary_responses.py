@@ -8,8 +8,6 @@ A2 目标：
 """
 from __future__ import annotations
 
-from core.intent import classify_boundary_request
-
 _OPENINGS = {
     "new": "这件事不太适合由我直接完成。",
     "familiar": "这件事不该由我直接硬上。",
@@ -51,28 +49,5 @@ def boundary_response(
     cfg: dict,
     relationship_depth: str | None = None,
 ) -> str | None:
-    """返回温和边界回应；非边界任务返回 None。"""
-    kind = classify_boundary_request(user_input)
-    if not kind:
-        return None
-
-    boundaries = cfg.get("boundaries", {})
-    tools = cfg.get("external_tools", {})
-    blocked = {
-        "code": boundaries.get("refuse_code_generation", False),
-        "image": boundaries.get("refuse_image_generation", False),
-        "video": boundaries.get("refuse_video_generation", False),
-        "search": boundaries.get("refuse_heavy_search", boundaries.get("refuse_heavy_engineering", False)),
-    }
-    if not blocked.get(kind, False):
-        return None
-
-    tool_name = {
-        "code": tools.get("code_agent", "Codex"),
-        "image": tools.get("image_model", "图像模型"),
-        "video": tools.get("video_model", "视频模型"),
-        "search": tools.get("search_tool", "搜索工具"),
-    }[kind]
-
-    depth = _normalize_depth(relationship_depth)
-    return _OPENINGS[depth] + _OFFERS[kind][depth].format(tool=tool_name)
+    """边界模板直出已关闭：一律交 LLM 按 system prompt 自然回应。"""
+    return None

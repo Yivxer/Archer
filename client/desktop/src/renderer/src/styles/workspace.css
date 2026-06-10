@@ -7,11 +7,10 @@
   z-index: 1;
   flex: 1 1 0;
   min-width: 0;
-  border: 1px solid rgba(15, 23, 42, 0.065);
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.90), rgba(252, 252, 250, 0.86));
-  box-shadow: var(--shadow);
-  backdrop-filter: blur(20px);
+  border: 0;
+  background: #ffffff;
+  box-shadow: none;
+  backdrop-filter: none;
 }
 
 .topbar-conn-live {
@@ -24,7 +23,7 @@
   grid-template-rows: auto minmax(0, 1fr);
   min-width: 0;
   min-height: 0;
-  border-radius: var(--radius-panel);
+  border-radius: 0;
   overflow: hidden;
 }
 

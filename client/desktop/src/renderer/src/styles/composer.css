@@ -60,6 +60,30 @@
   font-size: 12px;
 }
 
+.file-ref-chip.has-preview {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr) 22px;
+  align-items: center;
+  min-height: 58px;
+  max-width: min(100%, 320px);
+  border-radius: 10px;
+  padding: 6px;
+}
+
+.file-ref-chip img {
+  width: 72px;
+  height: 46px;
+  border-radius: 7px;
+  object-fit: cover;
+  background: color-mix(in srgb, var(--ink) 6%, transparent);
+}
+
+.file-ref-chip > span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
 .file-ref-chip strong {
   overflow: hidden;
   color: var(--ink);
@@ -314,8 +338,8 @@
 }
 
 .composer textarea {
-  min-height: 92px;
-  padding: 22px 104px 22px 22px;
+  min-height: 112px;
+  padding: 20px 22px 10px;
   font-size: 14px;
 }
 
@@ -376,17 +400,166 @@
   color: #9ca3af;
 }
 
-.composer-toolbar,
+.composer-notice {
+  margin: 0 12px 8px;
+  border-radius: 8px;
+  padding: 7px 10px;
+  color: color-mix(in srgb, var(--ink) 62%, var(--muted));
+  background: color-mix(in srgb, var(--cyan) 6%, transparent);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.composer-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 50px;
+  border-top: 1px solid color-mix(in srgb, var(--line) 58%, transparent);
+  padding: 7px 10px 10px;
+}
+
 .composer-left,
-.composer-right,
-.composer-tool-group {
-  display: none;
+.composer-right {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+
+.composer-left {
+  flex: 1 1 auto;
+}
+
+.composer-right {
+  flex: 0 0 auto;
+}
+
+.composer-menu-wrapper {
+  position: relative;
+  display: inline-flex;
+}
+
+.composer-tool-btn {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border: 0;
+  border-radius: 10px;
+  color: color-mix(in srgb, var(--ink) 58%, var(--muted));
+  background: transparent;
+  transition: background 140ms ease, color 140ms ease, transform 120ms ease;
+}
+
+.composer-tool-btn:hover,
+.composer-tool-btn.active {
+  color: var(--ink);
+  background: color-mix(in srgb, var(--cyan) 8%, transparent);
+}
+
+.composer-tool-btn:disabled {
+  cursor: default;
+  opacity: 0.42;
+}
+
+.composer-tool-btn:disabled:hover {
+  color: color-mix(in srgb, var(--ink) 58%, var(--muted));
+  background: transparent;
+}
+
+.composer-popover {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  z-index: 220;
+  min-width: 226px;
+  max-height: 320px;
+  border: 1px solid color-mix(in srgb, var(--panel-border) 86%, transparent);
+  border-radius: 10px;
+  padding: 5px;
+  background: var(--panel-solid);
+  box-shadow: 0 14px 38px rgba(15, 23, 42, 0.12);
+  animation: msg-in 140ms ease both;
+  overflow: auto;
+}
+
+.composer-popover button {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  min-height: 42px;
+  border: 0;
+  border-radius: 8px;
+  padding: 7px 9px;
+  color: var(--text);
+  background: transparent;
+  text-align: left;
+}
+
+.composer-popover button:hover,
+.composer-popover button.active {
+  color: var(--ink);
+  background: color-mix(in srgb, var(--cyan) 7%, transparent);
+}
+
+.composer-popover button > span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  margin-left: 0;
+}
+
+.composer-popover strong,
+.composer-popover em {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer-popover strong {
+  color: inherit;
+  font-size: 13px;
+  font-weight: 590;
+}
+
+.composer-popover em {
+  color: var(--muted);
+  font-size: 11px;
+  font-style: normal;
+}
+
+.choice-menu button {
+  grid-template-columns: minmax(0, 1fr) 18px;
+}
+
+.persona-menu {
+  min-width: 238px;
+}
+
+.screenshot-menu {
+  min-width: 270px;
+}
+
+.screenshot-menu button {
+  grid-template-columns: 24px minmax(0, 1fr);
+}
+
+.composer-menu-hint {
+  padding: 8px 10px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.composer-menu-hint.warning {
+  color: var(--orange);
 }
 
 .composer-send {
-  position: absolute;
-  right: 16px;
-  bottom: 18px;
   width: 32px;
   height: 32px;
   background: color-mix(in srgb, var(--ink) 16%, transparent);
@@ -431,15 +604,12 @@
 }
 
 .composer-background {
-  position: absolute;
-  right: 100px;
-  bottom: 18px;
   display: grid;
   width: 32px;
   height: 32px;
   place-items: center;
   border: 0;
-  border-radius: 999px;
+  border-radius: 10px;
   color: var(--muted);
   background: transparent;
 }
@@ -471,7 +641,8 @@
 /* ── dark theme: composer ────────────────────────────────────────────── */
 :root[data-theme="dark"] .composer,
 :root[data-theme="dark"] .attach-menu,
-:root[data-theme="dark"] .model-menu {
+:root[data-theme="dark"] .model-menu,
+:root[data-theme="dark"] .composer-popover {
   background: linear-gradient(180deg, rgba(15, 25, 42, 0.98), rgba(12, 21, 36, 0.94));
   border-color: rgba(77, 217, 212, 0.13);
   box-shadow: 0 16px 44px rgba(0, 0, 0, 0.34);
@@ -486,6 +657,10 @@
   background: var(--panel-solid);
   border-color: var(--line);
   box-shadow: none;
+}
+
+:root[data-theme="dark"] .composer-toolbar {
+  border-top-color: var(--line);
 }
 
 :root[data-theme="dark"] .draft-collapse-card {

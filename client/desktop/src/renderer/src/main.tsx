@@ -15,6 +15,7 @@ import {
   X,
 } from 'lucide-react'
 import { checkLocalApiHealth, getDesktopApiToken, loadLocalArcher, loadLocalSession } from './adapters/localArcher'
+import { connectionStatusLabel, modeLabelFromId, personaPresetFromMode } from './lib/conversationPersona'
 import { mockArcher } from './adapters/mockArcher'
 import { ArcherRing, EmptyDetail, ErrorBoundary, SearchBox } from './components/common'
 import { ChatPage } from './pages/ChatPage'
@@ -123,7 +124,22 @@ function App() {
   async function connectLocalApi() {
     setApiState('loading')
     try {
-      setData(await loadLocalArcher())
+      const ensured = await window.archerDesktop?.ensureApi?.()
+      if (ensured && !ensured.ok) {
+        if (ensured.reason === 'token_mismatch') {
+          setApiState(getDesktopApiToken() ? 'bad_token' : 'missing_token')
+          return
+        }
+        if (ensured.reason === 'missing_python') {
+          setApiState('error')
+          return
+        }
+        setApiState('api_offline')
+        return
+      }
+      const adapter = await loadLocalArcher()
+      setData(adapter)
+      setConversationMode(adapter.modes.current || 'auto')
       setApiState('connected')
     } catch (error) {
       setData((current) => (current.status.adapter === 'local' ? current : mockArcher))
@@ -332,7 +348,9 @@ function ProfilePanel({
   onNavigate: (route: Route) => void
 }) {
   const soulLoaded = Object.values(data.soulFiles).some((content) => content.trim().length > 0)
-  const statusText = apiStateLabel(apiState, data.status.adapter === 'local')
+  const statusText = connectionStatusLabel(apiState, data.status.adapter === 'local')
+  const modeText = modeLabelFromId(data.status.mode || data.modes.current, data.modes.modes)
+  const personaNote = personaPresetFromMode(data.modes.current).label
 
   return (
     <aside className="profile-panel">
@@ -369,7 +387,7 @@ function ProfilePanel({
 
       <div className="profile-status-grid">
         <div>
-          <span>本地 API</span>
+          <span>连接</span>
           <strong>{statusText}</strong>
         </div>
         <div>
@@ -377,8 +395,8 @@ function ProfilePanel({
           <strong>{data.status.model || '未读取'}</strong>
         </div>
         <div>
-          <span>模式</span>
-          <strong>{data.status.mode || '—'}</strong>
+          <span>姿态</span>
+          <strong>{modeText}{data.modes.current === 'auto' ? '' : ` · ${personaNote}`}</strong>
         </div>
         <div>
           <span>记忆</span>
@@ -393,7 +411,7 @@ function ProfilePanel({
         </button>
         <button type="button" onClick={() => onNavigate('Settings')}>
           <Settings size={14} />
-          本地连接
+          连接设置
         </button>
         <button type="button" onClick={() => onNavigate('Memory')}>
           <Brain size={14} />
@@ -405,21 +423,15 @@ function ProfilePanel({
 }
 
 function apiStateLabel(apiState: ApiConnectionState, isLocal = false): string {
-  if (isLocal || apiState === 'connected') return '已连接'
-  if (apiState === 'loading') return '连接中'
-  if (apiState === 'missing_token') return '缺少口令'
-  if (apiState === 'bad_token') return '口令不匹配'
-  if (apiState === 'api_offline') return '本地 API 未启动'
-  if (apiState === 'error') return '本地 API 未连接'
-  return '本地 API 未连接'
+  return connectionStatusLabel(apiState, isLocal)
 }
 
 function apiStateHelp(apiState: ApiConnectionState): string {
   if (apiState === 'missing_token') return '在设置中填入本地 API 的连接口令。'
   if (apiState === 'bad_token') return '口令与终端启动参数不一致。'
-  if (apiState === 'api_offline') return '需要启动本地 API 服务，再点重试。'
+  if (apiState === 'api_offline') return '点「重试」会自动从 ~/Projects/Archer 拉起大脑进程。'
   if (apiState === 'error') return '需要启动本地 API，或检查口令和模型配置。'
-  return '本地 API 未连接，显示的是示例数据。'
+  return '大脑未连接，当前为示例数据。'
 }
 
 function SessionsPage({

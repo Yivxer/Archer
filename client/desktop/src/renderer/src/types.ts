@@ -34,6 +34,7 @@ export type FileRef = {
   path: string
   name: string
   size?: number
+  previewDataUrl?: string
 }
 
 export type ToolProgress = {

@@ -105,9 +105,20 @@ def _handle_mode(parts: list[str], cfg: dict):
         console.print(f"[dim]编辑该文件后，用 /mode {mode_name} 切换[/dim]")
         return
 
+    # /mode auto —— 恢复每轮自动选择姿态
+    if len(parts) >= 2 and parts[1] == "auto":
+        cfg["persona"]["mode_auto"] = True
+        _persist_mode_auto(True)
+        console.print("[dim]已开启自动姿态：每轮按对话内容自动选择 mode。[/dim]")
+        return
+
     if len(parts) < 2 or parts[1] not in valid:
+        auto = cfg["persona"].get("mode_auto", True)
         current = cfg["persona"].get("current_mode", cfg["persona"].get("default_mode", "coach"))
-        console.print(f"  当前模式：[bold #c44e00]{current}[/]")
+        if auto:
+            console.print(f"  当前模式：[bold #c44e00]自动[/]  [dim]（基线 {cfg['persona'].get('default_mode', 'listener')}）[/dim]")
+        else:
+            console.print(f"  当前模式：[bold #c44e00]{current}[/]  [dim]（已锁定）[/dim]")
         mode_labels = []
         for k in valid:
             if k in modes:
@@ -116,14 +127,16 @@ def _handle_mode(parts: list[str], cfg: dict):
                 label = f"[cyan]{k}[/cyan]（文件）"
             mode_labels.append(label)
         console.print(f"  可用模式：{'  '.join(mode_labels)}")
-        console.print(f"  [dim]/mode create <名称>  新建模式文件[/dim]")
+        console.print(f"  [dim]/mode <名称>  锁定模式   ·   /mode auto  恢复自动   ·   /mode create <名称>  新建[/dim]")
         return
 
     mode = parts[1]
     cfg["persona"]["current_mode"] = mode
+    cfg["persona"]["mode_auto"] = False
     mode_name_label = modes[mode].get("name", mode) if mode in modes else mode
-    console.print(f"[dim]已切换至 {mode_name_label} 模式[/dim]")
+    console.print(f"[dim]已锁定至 {mode_name_label} 模式（/mode auto 可恢复自动）[/dim]")
     _persist_mode(mode)
+    _persist_mode_auto(False)
 
 def _handle_doctor(parts: list[str], cfg: dict, skills: dict):
     from core.doctor import run_checks, apply_fixes, Level
@@ -268,6 +281,17 @@ def _persist_mode(mode: str) -> None:
     new_line = f'current_mode = "{mode}"'
     if re.search(r'^current_mode\s*=', text, re.MULTILINE):
         text = re.sub(r'^current_mode\s*=.*$', new_line, text, flags=re.MULTILINE)
+    else:
+        text = re.sub(r'^(default_mode\s*=.*)$', rf'\1\n{new_line}', text, flags=re.MULTILINE)
+    _TOML_PATH.write_text(text, encoding="utf-8")
+
+
+def _persist_mode_auto(flag: bool) -> None:
+    """将 mode_auto 写入 archer.toml [persona] 段，控制是否每轮自动选姿态。"""
+    text = _TOML_PATH.read_text(encoding="utf-8")
+    new_line = f'mode_auto = {"true" if flag else "false"}'
+    if re.search(r'^mode_auto\s*=', text, re.MULTILINE):
+        text = re.sub(r'^mode_auto\s*=.*$', new_line, text, flags=re.MULTILINE)
     else:
         text = re.sub(r'^(default_mode\s*=.*)$', rf'\1\n{new_line}', text, flags=re.MULTILINE)
     _TOML_PATH.write_text(text, encoding="utf-8")

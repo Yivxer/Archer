@@ -1,6 +1,7 @@
 import React from 'react'
-import { ArrowUp, Check, ChevronDown, Copy, CornerDownLeft, Edit3, FileText, Github, Loader2, Paperclip, RotateCcw, Send, Terminal, X } from 'lucide-react'
-import { appendLocalSession, approveJobToolEvent, cancelBackgroundJobEvent, createBackgroundJobEvent, fetchBackgroundJob, pollBackgroundJobEvents, retryBackgroundJobEvent, saveLocalSession, streamLocalChat, submitToolApprovalEvent } from '../adapters/localArcher'
+import { ArrowUp, Check, ChevronDown, Copy, CornerDownLeft, Crop, Edit3, FileText, Github, Infinity, Loader2, Mic, Monitor, Paperclip, RotateCcw, Send, Terminal, UserRoundCog, X } from 'lucide-react'
+import { appendLocalSession, approveJobToolEvent, cancelBackgroundJobEvent, createBackgroundJobEvent, fetchBackgroundJob, pollBackgroundJobEvents, retryBackgroundJobEvent, saveLocalSession, streamLocalChat, submitToolApprovalEvent, switchLocalMode } from '../adapters/localArcher'
+import { PERSONA_PRESETS, personaIdFromMode } from '../lib/conversationPersona'
 import type { ArcherAdapter, ChatMessage, FileRef, MemoryContextMode, ObsidianContextMode, SessionDetail, ToolEvent } from '../types'
 import { ArcherRing, MarkdownMessage, ThinkingDots } from '../components/common'
 import { createInitialRuntimeState, createPersistentEventLog, reduceRuntimeEvent, routeTaskForRuntime, jobSnapshotToAgentEvent } from '../../../agent'
@@ -12,6 +13,12 @@ const CHAT_STARTERS = [
   { label: '轻轻复盘', prompt: '帮我轻轻复盘一下刚才这件事。' },
   { label: '继续那条线', prompt: '我们继续刚才那条线。' },
 ]
+
+const MODEL_OPTIONS = [
+  { id: 'auto', label: '自动模型', note: '当前由 Archer 自动选择' },
+]
+
+const PERSONA_OPTIONS = PERSONA_PRESETS
 
 export function ChatPage({
   data,
@@ -39,6 +46,7 @@ export function ChatPage({
   const [draftCollapsed, setDraftCollapsed] = React.useState(false)
   const [isTyping, setIsTyping] = React.useState(false)
   const bottomRef = React.useRef<HTMLDivElement>(null)
+  const composerRef = React.useRef<HTMLDivElement>(null)
   const draftTextareaRef = React.useRef<HTMLTextAreaElement>(null)
   const abortControllerRef = React.useRef<AbortController | null>(null)
   const backgroundJobAbortRef = React.useRef<AbortController | null>(null)
@@ -50,6 +58,15 @@ export function ChatPage({
   const [toolEvents, setToolEvents] = React.useState<ToolEvent[]>(data.chat.toolEvents)
   const [toolNotice, setToolNotice] = React.useState('')
   const [fileRefs, setFileRefs] = React.useState<FileRef[]>([])
+  const [activeComposerMenu, setActiveComposerMenu] = React.useState<'attach' | 'screenshot' | 'model' | 'persona' | null>(null)
+  const [captureSources, setCaptureSources] = React.useState<Array<{ id: string; name: string; kind: 'screen' | 'window'; thumbnailEmpty?: boolean; screenStatus?: string }>>([])
+  const [captureSourcesState, setCaptureSourcesState] = React.useState<'idle' | 'loading' | 'error'>('idle')
+  const [selectedModel, setSelectedModel] = React.useState('auto')
+  const [selectedPersona, setSelectedPersona] = React.useState('default')
+
+  React.useEffect(() => {
+    setSelectedPersona(personaIdFromMode(data.modes.current))
+  }, [data.modes.current])
   const [copiedMessageId, setCopiedMessageId] = React.useState<number | null>(null)
   const [collapsedMessages, setCollapsedMessages] = React.useState<Record<number, boolean>>({})
   const runtimeSessionId = activeSession?.id || 'desktop-session'
@@ -75,6 +92,7 @@ export function ChatPage({
     setToolEvents(activeSession ? [] : data.chat.toolEvents)
     setToolNotice('')
     setFileRefs([])
+    setActiveComposerMenu(null)
     setDraftCollapsed(false)
     setCopiedMessageId(null)
     setCollapsedMessages({})
@@ -111,6 +129,18 @@ export function ChatPage({
   React.useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, toolEvents, runtimeJobs.length, isTyping])
+
+  React.useEffect(() => {
+    if (!activeComposerMenu) return
+    function handlePointerDown(event: PointerEvent) {
+      const target = event.target
+      if (!(target instanceof Element)) return
+      if (target.closest('.composer-popover') || target.closest('.composer-tool-btn')) return
+      setActiveComposerMenu(null)
+    }
+    document.addEventListener('pointerdown', handlePointerDown)
+    return () => document.removeEventListener('pointerdown', handlePointerDown)
+  }, [activeComposerMenu])
 
   React.useEffect(() => {
     const textarea = draftTextareaRef.current
@@ -232,6 +262,10 @@ export function ChatPage({
     const controller = new AbortController()
     abortControllerRef.current = controller
     try {
+      const ensured = await window.archerDesktop?.ensureApi?.()
+      if (ensured && !ensured.ok && ensured.reason !== 'reused' && ensured.reason !== 'owned' && ensured.reason !== 'started') {
+        throw new Error('[network] 本地大脑进程未运行，请点侧栏「重试」')
+      }
       const assistantId = nextId + 1
       const requestMessages = nextMessages.map((message) => ({ role: message.role, content: message.text }))
       setMessages([...nextMessages, { id: assistantId, role: 'assistant', text: '' }])
@@ -295,8 +329,9 @@ export function ChatPage({
             text: [
               '本地聊天请求失败。',
               '',
-              '- 确认本地 API 正在运行',
-              '- 检查本地连接口令是否匹配',
+              '- 先点侧栏 **重试**（会自动拉起大脑进程）',
+              '- 仍失败：完全退出 Archer（⌘Q）再打开',
+              '- 检查设置里的连接口令是否与 `~/Projects/Archer` 内核一致',
               '- 检查 `archer.toml` 的模型配置是否可用'
             ].join('\n')
           }
@@ -532,6 +567,7 @@ export function ChatPage({
 
   async function pickLocalFiles() {
     setToolNotice('')
+    setActiveComposerMenu(null)
     if (!window.archerDesktop?.pickFiles) {
       setToolNotice('请在桌面客户端中引用本地文件。')
       return
@@ -552,6 +588,106 @@ export function ChatPage({
     } catch (error) {
       setToolNotice(error instanceof Error ? error.message : '选择文件失败')
     }
+  }
+
+  async function captureScreenshot() {
+    setToolNotice('')
+    setActiveComposerMenu(null)
+    if (!window.archerDesktop?.captureScreenshot) {
+      setToolNotice('请在桌面客户端中截图。')
+      return
+    }
+    try {
+      const captured = await window.archerDesktop.captureScreenshot()
+      if (!captured) return
+      setFileRefs((current) => {
+        if (current.some((item) => item.path === captured.path)) return current
+        return [...current, captured].slice(0, 5)
+      })
+      setToolNotice('截图已加入输入框')
+    } catch {
+      setToolNotice('截图已取消或未授权。')
+    }
+  }
+
+  async function captureWindowScreenshot() {
+    setToolNotice('')
+    setActiveComposerMenu(null)
+    if (!window.archerDesktop?.captureWindowScreenshot) {
+      setToolNotice('请在桌面客户端中截取窗口。')
+      return
+    }
+    try {
+      const captured = await window.archerDesktop.captureWindowScreenshot()
+      if (!captured) return
+      setFileRefs((current) => {
+        if (current.some((item) => item.path === captured.path)) return current
+        return [...current, captured].slice(0, 5)
+      })
+      setToolNotice('窗口截图已加入输入框')
+    } catch {
+      setToolNotice('窗口截图已取消或未授权。')
+    }
+  }
+
+  async function openScreenshotMenu() {
+    setToolNotice('')
+    if (activeComposerMenu === 'screenshot') {
+      setActiveComposerMenu(null)
+      return
+    }
+    setActiveComposerMenu('screenshot')
+  }
+
+  async function loadCaptureSources() {
+    setToolNotice('')
+    if (!window.archerDesktop?.listCaptureSources) return
+    setCaptureSourcesState('loading')
+    try {
+      const sources = await window.archerDesktop.listCaptureSources()
+      setCaptureSources(sources)
+      if (sources.some((source) => source.screenStatus && source.screenStatus !== 'granted')) {
+        setToolNotice(`当前 Electron 屏幕权限状态：${sources[0]?.screenStatus}。可先使用“窗口截图”。`)
+      }
+      setCaptureSourcesState('idle')
+    } catch {
+      setCaptureSources([])
+      setCaptureSourcesState('error')
+    }
+  }
+
+  async function captureDesktopSource(sourceId: string) {
+    setToolNotice('')
+    setActiveComposerMenu(null)
+    if (!window.archerDesktop?.captureSource) {
+      setToolNotice('请在桌面客户端中截取窗口。')
+      return
+    }
+    try {
+      const captured = await window.archerDesktop.captureSource(sourceId)
+      if (!captured) {
+        setToolNotice('没有获取到这个窗口画面，请检查屏幕录制权限。')
+        return
+      }
+      setFileRefs((current) => {
+        if (current.some((item) => item.path === captured.path)) return current
+        return [...current, captured].slice(0, 5)
+      })
+      setToolNotice('屏幕画面已加入输入框')
+    } catch (error) {
+      const message = error instanceof Error ? error.message : ''
+      if (message.includes('screen:')) {
+        setToolNotice(`Electron 屏幕权限未通过（${message.replace(/^.*screen:/, '')}），请先用“窗口截图”或重新授权 Archer。`)
+      } else {
+        setToolNotice('无法截取这个窗口，请先试“窗口截图”，或检查屏幕录制权限。')
+      }
+    }
+  }
+
+  function startSystemDictationHint() {
+    setActiveComposerMenu(null)
+    draftTextareaRef.current?.focus()
+    setToolNotice(window.archerDesktop?.platform === 'darwin' ? '已聚焦输入框。可按 Fn 两下或使用系统听写开始语音输入。' : '已聚焦输入框，可使用系统语音输入。')
   }
 
   function removeFileRef(path: string) {
@@ -698,14 +834,20 @@ export function ChatPage({
         : '继续说…'
 
   const composerEl = (
-    <div className="composer">
+    <div className="composer" ref={composerRef}>
       {fileRefs.length > 0 && (
         <div className="file-ref-row" aria-label="已引用文件">
           {fileRefs.map((file) => (
-            <span className="file-ref-chip" key={file.path} title={file.path}>
-              <FileText size={13} />
-              <strong>{file.name}</strong>
-              <em>{formatFileSize(file.size)}</em>
+            <span className={`file-ref-chip${file.previewDataUrl ? ' has-preview' : ''}`} key={file.path} title={file.path}>
+              {file.previewDataUrl ? (
+                <img src={file.previewDataUrl} alt="" />
+              ) : (
+                <FileText size={13} />
+              )}
+              <span>
+                <strong>{file.name}</strong>
+                <em>{formatFileSize(file.size)}</em>
+              </span>
               <button type="button" onClick={() => removeFileRef(file.path)} aria-label={`移除 ${file.name}`}>
                 <X size={12} />
               </button>
@@ -740,35 +882,207 @@ export function ChatPage({
         rows={2}
         autoFocus={isHome}
       />
-      <button
-        className="composer-attach"
-        type="button"
-        onClick={pickLocalFiles}
-        disabled={isSending}
-        title="添加文件或图片"
-        aria-label="添加文件或图片"
-      >
-        <Paperclip size={15} />
-      </button>
-      <button
-        className={`composer-background${isBackgrounding ? ' active' : ''}`}
-        type="button"
-        onClick={() => void sendBackgroundJob()}
-        disabled={isSending || isBackgrounding || data.status.adapter !== 'local' || !draft.trim()}
-        title="后台执行"
-        aria-label="后台执行"
-      >
-        {isBackgrounding ? <Loader2 size={15} /> : <CornerDownLeft size={15} />}
-      </button>
-      <button
-        className={`send-btn composer-send${draft.trim() ? ' active' : ''}${isSending ? ' stopping' : ''}`}
-        type="button"
-        onClick={isSending ? stopSending : sendMessage}
-        disabled={!isSending && !draft.trim()}
-        title={isSending ? '停止并撤回本轮' : '发送'}
-      >
-        {isSending ? <X size={15} /> : <ArrowUp size={15} />}
-      </button>
+      {toolNotice && <div className="composer-notice">{toolNotice}</div>}
+      <div className="composer-toolbar" aria-label="输入工具栏">
+        <div className="composer-left">
+          <div className="composer-menu-wrapper">
+            <button
+              className={`composer-tool-btn${activeComposerMenu === 'attach' ? ' active' : ''}`}
+              type="button"
+              onClick={() => setActiveComposerMenu((current) => (current === 'attach' ? null : 'attach'))}
+              disabled={isSending}
+              title="添加附件"
+              aria-label="添加附件"
+            >
+              <Paperclip size={17} />
+            </button>
+            {activeComposerMenu === 'attach' && (
+              <div className="composer-popover attach-menu">
+                <button type="button" onClick={pickLocalFiles}>
+                  <FileText size={15} />
+                  <span>
+                    <strong>文件</strong>
+                    <em>文档、图片、视频</em>
+                  </span>
+                </button>
+                <button type="button" onClick={pickLocalFiles}>
+                  <Paperclip size={15} />
+                  <span>
+                    <strong>照片或视频</strong>
+                    <em>从本地选择</em>
+                  </span>
+                </button>
+              </div>
+            )}
+          </div>
+          <div className="composer-menu-wrapper">
+            <button
+              className={`composer-tool-btn${activeComposerMenu === 'screenshot' ? ' active' : ''}`}
+              type="button"
+              onClick={() => void openScreenshotMenu()}
+              disabled={isSending}
+              title="截图"
+              aria-label="截图"
+            >
+              <Crop size={17} />
+            </button>
+            {activeComposerMenu === 'screenshot' && (
+              <div className="composer-popover choice-menu screenshot-menu">
+                <button type="button" onClick={() => void captureWindowScreenshot()}>
+                  <Monitor size={15} />
+                  <span>
+                    <strong>窗口截图</strong>
+                    <em>点击 Chrome、备忘录等窗口</em>
+                  </span>
+                </button>
+                <button type="button" onClick={() => void captureScreenshot()}>
+                  <Crop size={15} />
+                  <span>
+                    <strong>框选截图</strong>
+                    <em>截取任意区域</em>
+                  </span>
+                </button>
+                <button type="button" onClick={() => void loadCaptureSources()}>
+                  <Monitor size={15} />
+                  <span>
+                    <strong>读取窗口列表</strong>
+                    <em>需要屏幕录制权限</em>
+                  </span>
+                </button>
+                {captureSourcesState === 'loading' && (
+                  <div className="composer-menu-hint">正在读取屏幕和窗口…</div>
+                )}
+                {captureSourcesState === 'error' && (
+                  <div className="composer-menu-hint warning">无法读取窗口，请检查屏幕录制权限。</div>
+                )}
+                {captureSources.map((source) => (
+                  <button type="button" key={source.id} onClick={() => void captureDesktopSource(source.id)}>
+                    <Monitor size={15} />
+                    <span>
+                      <strong>{source.name}</strong>
+                      <em>
+                        {source.kind === 'screen' ? '屏幕' : '窗口'}
+                        {source.thumbnailEmpty ? ' · 预览不可用' : ''}
+                      </em>
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          <button
+            className="composer-tool-btn"
+            type="button"
+            onClick={startSystemDictationHint}
+            disabled={isSending}
+            title="语音输入"
+            aria-label="语音输入"
+          >
+            <Mic size={17} />
+          </button>
+          <div className="composer-menu-wrapper">
+            <button
+              className={`composer-tool-btn${activeComposerMenu === 'model' ? ' active' : ''}`}
+              type="button"
+              onClick={() => setActiveComposerMenu((current) => (current === 'model' ? null : 'model'))}
+              title="模型选择"
+              aria-label="模型选择"
+            >
+              <Infinity size={18} />
+            </button>
+            {activeComposerMenu === 'model' && (
+              <div className="composer-popover choice-menu">
+                {MODEL_OPTIONS.map((option) => (
+                  <button
+                    className={selectedModel === option.id ? 'active' : ''}
+                    type="button"
+                    key={option.id}
+                    onClick={() => {
+                      setSelectedModel(option.id)
+                      setActiveComposerMenu(null)
+                      setToolNotice(`${option.label} 已启用`)
+                    }}
+                  >
+                    <span>
+                      <strong>{option.label}</strong>
+                      <em>{option.note}</em>
+                    </span>
+                    {selectedModel === option.id && <Check size={14} />}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          <div className="composer-menu-wrapper">
+            <button
+              className={`composer-tool-btn${activeComposerMenu === 'persona' || selectedPersona !== 'default' ? ' active' : ''}`}
+              type="button"
+              onClick={() => setActiveComposerMenu((current) => (current === 'persona' ? null : 'persona'))}
+              title="人格模型"
+              aria-label="人格模型"
+            >
+              <UserRoundCog size={17} />
+            </button>
+            {activeComposerMenu === 'persona' && (
+              <div className="composer-popover choice-menu persona-menu">
+                {PERSONA_OPTIONS.map((option) => (
+                  <button
+                    className={selectedPersona === option.id ? 'active' : ''}
+                    type="button"
+                    key={option.id}
+                    onClick={() => {
+                      void (async () => {
+                        setActiveComposerMenu(null)
+                        if (data.status.adapter === 'local') {
+                          try {
+                            const result = await switchLocalMode(option.mode)
+                            setSelectedPersona(option.id)
+                            setToolNotice(`已切换到 ${result.label}`)
+                            await onRefresh?.()
+                            return
+                          } catch (error) {
+                            setToolNotice(error instanceof Error ? error.message : '模式切换失败')
+                            return
+                          }
+                        }
+                        setSelectedPersona(option.id)
+                        setToolNotice(`${option.label} 已选择（连接本地后可写入模式）`)
+                      })()
+                    }}
+                  >
+                    <span>
+                      <strong>{option.label}</strong>
+                      <em>{option.note}</em>
+                    </span>
+                    {selectedPersona === option.id && <Check size={14} />}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+        <div className="composer-right">
+          <button
+            className={`composer-background${isBackgrounding ? ' active' : ''}`}
+            type="button"
+            onClick={() => void sendBackgroundJob()}
+            disabled={isSending || isBackgrounding || data.status.adapter !== 'local' || !draft.trim()}
+            title="后台执行"
+            aria-label="后台执行"
+          >
+            {isBackgrounding ? <Loader2 size={15} /> : <CornerDownLeft size={15} />}
+          </button>
+          <button
+            className={`send-btn composer-send${draft.trim() ? ' active' : ''}${isSending ? ' stopping' : ''}`}
+            type="button"
+            onClick={isSending ? stopSending : sendMessage}
+            disabled={!isSending && !draft.trim()}
+            title={isSending ? '停止并撤回本轮' : '发送'}
+          >
+            {isSending ? <X size={15} /> : <ArrowUp size={15} />}
+          </button>
+        </div>
+      </div>
     </div>
   )
 
@@ -922,7 +1236,6 @@ export function ChatPage({
           })}
 
         {chatError && <div className="chat-error">{chatError}</div>}
-        {toolNotice && <div className="tool-notice">{toolNotice}</div>}
         <div ref={bottomRef} />
       </div>
 

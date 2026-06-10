@@ -182,6 +182,78 @@ def emotion_summary(days: int = 30) -> str:
     return "  ".join(lines) if lines else "暂无情绪数据"
 
 
+# 当轮情绪信号词（规则版，零 LLM；想法 6）
+_TURN_EMOTION_SIGNALS: dict[str, tuple[str, ...]] = {
+    "焦虑": ("焦虑", "担心", "害怕", "慌", "不安", "纠结", "压力大"),
+    "疲惫": ("累", "疲惫", "困", "撑不住", "没劲", "好累"),
+    "沮丧": ("难受", "沮丧", "失落", "烦", "委屈", "孤独", "心烦"),
+    "兴奋": ("兴奋", "激动", "开心", "太好了", "爽"),
+    "平静": ("平静", "还好", "没事", "挺好的"),
+    "专注": ("专注", "投入", "在做", "埋头"),
+}
+
+
+def _texts_for_turn_read(user_text: str, history: list[dict] | None) -> list[str]:
+    out = [(user_text or "").strip()]
+    if not history:
+        return [t for t in out if t]
+    for msg in reversed(history):
+        if not isinstance(msg, dict) or msg.get("role") != "user":
+            continue
+        content = msg.get("content", "")
+        if isinstance(content, str):
+            t = content.strip()
+        elif isinstance(content, list):
+            parts = []
+            for item in content:
+                if isinstance(item, dict) and item.get("type") == "text":
+                    parts.append(str(item.get("text", "")))
+            t = " ".join(parts).strip()
+        else:
+            t = ""
+        if t:
+            out.append(t)
+        if len(out) >= 3:
+            break
+    return [t for t in out if t]
+
+
+def infer_turn_emotion_hint(user_text: str, history: list[dict] | None = None) -> str | None:
+    """从当轮 + 近几轮用户话里推断情绪读数，生成 prompt 提示（零 LLM）。
+
+    用于调整当轮语气，而非事后复盘。失败/无信号时返回 None。
+    """
+    texts = _texts_for_turn_read(user_text, history)
+    scores: dict[str, int] = {}
+    for t in texts:
+        for emotion, kws in _TURN_EMOTION_SIGNALS.items():
+            for kw in kws:
+                if kw in t:
+                    scores[emotion] = scores.get(emotion, 0) + 1
+
+    if scores:
+        top = sorted(scores, key=scores.get, reverse=True)[:2]
+        labels = "、".join(top)
+        if any(e in top for e in ("焦虑", "疲惫", "沮丧")):
+            tone = "语气放慢，多倾听少推进，不急着给方案。"
+        else:
+            tone = "保持敏锐克制，顺着当前节奏回应。"
+        return f"[当轮情绪读数] 感知：{labels}。{tone}"
+
+    try:
+        recent = recent_emotion(days=3)
+        if recent:
+            peak = max(recent, key=recent.get)
+            if recent[peak] >= 6:
+                return (
+                    f"[当轮情绪读数] 近几天{peak}偏高（{recent[peak]:.0f}/10）。"
+                    "语气放慢，多倾听少推进。"
+                )
+    except Exception:
+        pass
+    return None
+
+
 def recent_emotion(days: int = 7) -> dict[str, float] | None:
     """获取最近 N 天的平均情绪，用于 /status 等快速展示。"""
     conn = sqlite3.connect(DB_PATH)

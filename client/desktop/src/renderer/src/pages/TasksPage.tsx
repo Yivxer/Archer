@@ -78,7 +78,7 @@ export function TasksPage({ data }: { data: ArcherAdapter }) {
   }, [selectedId, visibleJobs])
 
   if (data.status.adapter !== 'local') {
-    return <EmptyDetail icon={Clock3} title="等待本地 API" text="后台任务需要连接本地 Archer。" />
+    return <EmptyDetail icon={Clock3} title="等待连接" text="后台任务需要先连上 Archer 大脑。" />
   }
 
   return (

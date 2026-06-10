@@ -3,6 +3,7 @@ import { ArrowLeft, Clipboard, Database, Eye, KeyRound, Moon, Palette, Settings2
 import type { ApiConnectionState, ArcherAdapter, ConversationMode, MemoryContextMode, ObsidianContextMode, Route, Theme } from '../types'
 import { FormField } from '../components/common'
 import { clearDesktopApiToken, getDesktopApiToken, resolveDesktopApiToken, saveDesktopApiToken, saveLocalSettings, switchLocalMode } from '../adapters/localArcher'
+import { connectionStatusLabel, modeLabelFromId, personaPresetFromMode } from '../lib/conversationPersona'
 
 type SettingsTab = 'model' | 'context' | 'local' | 'appearance'
 
@@ -226,8 +227,16 @@ export function SettingsPage({
 
         {activeTab === 'context' && (
           <SettingsGroup icon={SlidersHorizontal} title="上下文偏好" note="控制记忆和笔记注入强度。">
-            <SettingRow title="对话模式" description="Archer 的回应姿态。">
+            <SettingRow title="对话姿态" description="与聊天区人格按钮同步；自动 = 每轮按内容选姿态。">
               <div className="segmented mode-segmented">
+                <button
+                  className={activeConversationMode === 'auto' ? 'active' : ''}
+                  type="button"
+                  disabled={Boolean(modeSaving)}
+                  onClick={() => void chooseConversationMode('auto')}
+                >
+                  {modeSaving === 'auto' ? '切换中' : '自动'}
+                </button>
                 {conversationModes.map((mode) => (
                   <button
                     key={mode.id}
@@ -241,7 +250,12 @@ export function SettingsPage({
                   </button>
                 ))}
               </div>
-              <span className="settings-note">当前：{activeConversationMode || data.status.mode || '未读取'}</span>
+              <span className="settings-note">
+                当前：{modeLabelFromId(activeConversationMode || 'auto', conversationModes)}
+                {activeConversationMode !== 'auto' && (
+                  <> · 聊天人格：{personaPresetFromMode(activeConversationMode).label}</>
+                )}
+              </span>
             </SettingRow>
             <SettingRow title="记忆上下文" description="off / conservative / full。">
               <div className="segmented compact-segmented">
@@ -398,11 +412,11 @@ function SettingRow({
 }
 
 function apiStatusText(apiState: ApiConnectionState, isLocal: boolean): string {
-  if (isLocal || apiState === 'connected') return '已连接'
+  if (isLocal || apiState === 'connected') return connectionStatusLabel(apiState, true)
   if (apiState === 'loading') return '连接中'
   if (apiState === 'missing_token') return '需要本地连接口令'
   if (apiState === 'bad_token') return 'token 不匹配'
-  if (apiState === 'api_offline') return '本地 API 未启动'
+  if (apiState === 'api_offline') return '大脑进程未运行'
   return '本地 API 未连接'
 }
 
@@ -410,7 +424,7 @@ function apiStatusHelp(apiState: ApiConnectionState, isLocal: boolean): string {
   if (isLocal || apiState === 'connected') return '可以读取本地会话、记忆、Soul 文件和设置。'
   if (apiState === 'missing_token') return '本地服务已打开，但桌面端还没有保存连接口令。'
   if (apiState === 'bad_token') return '已保存的连接口令与本地 API 启动参数不一致。'
-  if (apiState === 'api_offline') return '本地 API 未连接，启动后可读取历史、记忆和配置。'
+  if (apiState === 'api_offline') return '大脑进程未连接；在 Archer 里点重试会自动拉起。'
   if (apiState === 'loading') return '正在检查本地 API 状态。'
   return '本地 API 未连接，显示的是示例数据，连接后可读取真实内容。'
 }
@@ -419,6 +433,6 @@ function localFixHint(apiState: ApiConnectionState, isLocal: boolean): string {
   if (isLocal || apiState === 'connected') return '连接正常。可以恢复会话、引用本地文件。'
   if (apiState === 'missing_token') return '请在下方输入 API 启动时使用的口令，然后保存并重连。启动命令：python terminal/archer_api.py --token <你的口令>'
   if (apiState === 'bad_token') return '口令与终端启动参数不一致。覆盖后保存并重连。'
-  if (apiState === 'api_offline') return '需要聊天、记忆读取或设置保存时，先启动本地 API：python terminal/archer_api.py --token <你的口令>'
+  if (apiState === 'api_offline') return '通常点应用内「重试」即可；手动启动：cd ~/Projects/Archer && .venv/bin/python archer_api.py --token <口令>'
   return '确认本地 API 已启动，再检查口令和模型配置。'
 }

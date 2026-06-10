@@ -66,7 +66,7 @@ export function EmptyDetail({ icon: Icon, title, text }: { icon: React.ElementTy
       <p>{text}</p>
       <div className="empty-meta">
         <Clock3 size={15} />
-        <span>等待本地 API</span>
+        <span>等待连接</span>
       </div>
     </div>
   )

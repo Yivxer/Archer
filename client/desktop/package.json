@@ -11,7 +11,10 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "build": "tsc --noEmit && electron-vite build",
-    "build:mac": "npm run build && electron-builder --mac dmg"
+    "build:mac": "npm run build && electron-builder --mac dmg",
+    "sign:local": "bash scripts/sign-local-mac.sh",
+    "install:local": "rm -rf /Applications/Archer.app && cp -R release/mac-arm64/Archer.app /Applications/",
+    "build:mac:local": "npm run build:mac && npm run sign:local && npm run install:local"
   },
   "dependencies": {
     "@vitejs/plugin-react": "^5.1.0",

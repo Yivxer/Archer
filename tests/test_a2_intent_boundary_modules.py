@@ -22,35 +22,19 @@ def test_core_intent_module_exports_query_and_boundary_classifiers():
     assert classify_boundary_request("帮我生成图片") == "image"
 
 
-def test_boundary_responses_use_external_tool_config():
+def test_boundary_response_no_longer_short_circuits():
     from core.boundary_responses import boundary_response
 
     cfg = {
         "boundaries": {"refuse_code_generation": True},
         "external_tools": {"code_agent": "Codex"},
     }
-    text = boundary_response("帮我写代码实现这个功能", cfg)
-    assert text is not None
-    assert "Codex" in text
-    assert "需求" in text or "架构" in text
-
-
-def test_boundary_response_relationship_depth_layers():
-    from core.boundary_responses import boundary_response
-
-    cfg = {
-        "boundaries": {"refuse_image_generation": True},
-        "external_tools": {"image_model": "图像模型"},
-    }
-    polite = boundary_response("帮我生成图片", cfg, relationship_depth="new")
-    familiar = boundary_response("帮我生成图片", cfg, relationship_depth="familiar")
-    trusted = boundary_response("帮我生成图片", cfg, relationship_depth="deep")
-
-    assert polite != familiar != trusted
-    assert "图像模型" in polite
-    assert "图像模型" in familiar
-    assert "图像模型" in trusted
-    assert trusted.startswith("这事别让我硬上")
+    assert boundary_response("帮我写代码实现这个功能", cfg) is None
+    assert boundary_response(
+        "帮我生成图片",
+        {"boundaries": {"refuse_image_generation": True}, "external_tools": {"image_model": "图像模型"}},
+        relationship_depth="deep",
+    ) is None
 
 
 def test_context_keeps_backward_compatible_exports():
@@ -58,5 +42,7 @@ def test_context_keeps_backward_compatible_exports():
 
     assert classify_query_intent("复盘一下 Archer")["intent"] == "reflection"
     assert classify_boundary_request("帮我剪视频") == "video"
-    cfg = {"boundaries": {"refuse_video_generation": True}, "external_tools": {"video_model": "视频模型"}}
-    assert "视频模型" in boundary_response("帮我剪视频", cfg)
+    assert boundary_response(
+        "帮我剪视频",
+        {"boundaries": {"refuse_video_generation": True}, "external_tools": {"video_model": "视频模型"}},
+    ) is None

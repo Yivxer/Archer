@@ -322,15 +322,12 @@ def _run_job_chat_with_tools(prompt: str, job_id: str) -> dict:
     Medium+ risk tools (shell, github, file_ops, obsidian_write, hugo_blog)
     are skipped — they require user approval which isn't available in background.
     """
-    from core.context import classify_query_intent, boundary_response
+    from core.context import classify_query_intent
     from core.llm import stream_chat
     from terminal.api._tools import _select_api_skills, _filter_api_skills_for_intent
 
     config = _load_config()
     intent_info = classify_query_intent(prompt)
-    boundary = boundary_response(prompt, config)
-    if boundary:
-        return {"role": "assistant", "text": boundary}
 
     tool_parts: list[str] = []
     enriched_messages: list[dict] = [{"role": "user", "content": prompt}]
@@ -833,7 +830,9 @@ def _mode_label_from_file(path: Path, fallback: str) -> str:
 
 def _available_modes(cfg: dict) -> dict:
     persona = cfg.get("persona", {})
-    current = persona.get("current_mode", persona.get("default_mode", "listener"))
+    mode_auto = persona.get("mode_auto", True) is not False
+    locked = persona.get("current_mode", persona.get("default_mode", "listener"))
+    current = "auto" if mode_auto else locked
     default = persona.get("default_mode", "listener")
     raw_modes = persona.get("modes", {})
     toml_modes = raw_modes if isinstance(raw_modes, dict) else {}
@@ -849,7 +848,7 @@ def _available_modes(cfg: dict) -> dict:
                 "id": mode_id,
                 "label": _mode_label_from_file(path, mode_id),
                 "source": "file",
-                "active": mode_id == current,
+                "active": (not mode_auto) and mode_id == locked,
             })
 
     for mode_id, meta in sorted(toml_modes.items()):
@@ -860,10 +859,10 @@ def _available_modes(cfg: dict) -> dict:
             "id": mode_id,
             "label": label,
             "source": "toml",
-            "active": mode_id == current,
+            "active": (not mode_auto) and mode_id == locked,
         })
 
-    return {"current": current, "default": default, "modes": items}
+    return {"current": current, "default": default, "modes": items, "modeAuto": mode_auto}
 
 
 def _persist_current_mode(mode: str) -> None:
@@ -880,15 +879,39 @@ def _persist_current_mode(mode: str) -> None:
     CONFIG_PATH.write_text(text, encoding="utf-8")
 
 
+def _persist_mode_auto(flag: bool) -> None:
+    text = CONFIG_PATH.read_text(encoding="utf-8")
+    new_line = f'mode_auto = {"true" if flag else "false"}'
+    if re.search(r'^mode_auto\s*=', text, re.MULTILINE):
+        text = re.sub(r'^mode_auto\s*=.*$', new_line, text, flags=re.MULTILINE)
+    elif re.search(r'^default_mode\s*=', text, re.MULTILINE):
+        text = re.sub(r'^(default_mode\s*=.*)$', rf'\1\n{new_line}', text, flags=re.MULTILINE)
+    elif "[persona]" in text:
+        text = re.sub(r'^\[persona\]\s*$', f"[persona]\n{new_line}", text, count=1, flags=re.MULTILINE)
+    else:
+        text = text.rstrip() + f'\n\n[persona]\n{new_line}\n'
+    CONFIG_PATH.write_text(text, encoding="utf-8")
+
+
 def _switch_current_mode(payload: dict, cfg: dict) -> dict:
     mode = str(payload.get("mode", "")).strip()
     if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", mode):
         raise ValueError("mode must be a short identifier")
     available = _available_modes(cfg)
+    # 特殊值 "auto"：恢复每轮自动选择姿态
+    if mode == "auto":
+        _persist_mode_auto(True)
+        return {
+            "ok": True,
+            "current": "auto",
+            "label": "自动",
+            "modes": [{**item, "active": False} for item in available["modes"]],
+        }
     modes = {item["id"]: item for item in available["modes"]}
     if mode not in modes:
         raise ValueError(f"unknown mode: {mode}")
     _persist_current_mode(mode)
+    _persist_mode_auto(False)
     return {
         "ok": True,
         "current": mode,
@@ -1102,10 +1125,13 @@ def _status(cfg: dict) -> dict:
     archer_id = auth.get("archer_id", "")
     pending = len([m for m in memory_items if m["status"] == "pending"])
     confirmed = len(memory_items) - pending
+    persona = cfg.get("persona", {})
+    mode_auto = persona.get("mode_auto", True) is not False
+    mode = "auto" if mode_auto else persona.get("current_mode", persona.get("default_mode", "listener"))
     return {
         "adapter": "local",
         "model": cfg.get("api", {}).get("model", ""),
-        "mode": cfg.get("persona", {}).get("current_mode", "operator"),
+        "mode": mode,
         "memoryCount": confirmed,
         "pendingMemoryCount": pending,
         "skillCount": len(skill_items),

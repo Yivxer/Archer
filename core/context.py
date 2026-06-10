@@ -23,7 +23,13 @@ from pathlib import Path
 import tomllib
 
 from core.boundary_responses import boundary_response
-from core.intent import classify_boundary_request, classify_query_intent, is_heavy_query
+from core.intent import (
+    augment_retrieval_query,
+    classify_boundary_request,
+    classify_query_intent,
+    is_heavy_query,
+    should_clarify,
+)
 from core.persona import FIRST_RUN_PATH, build_core_persona
 
 # ── Runtime Safety Rules（每轮必注入）──────────────────────────────────────────
@@ -36,7 +42,7 @@ _RUNTIME_SAFETY = """\
 - 不替用户做人生决定；只提供信息和分析。
 - 不用廉价肯定填充对话；不制造虚假亲密。
 - 本地能力（读写文件、执行命令、读取 Obsidian）通过技能调用实现；不说"我无法访问本地文件"。
-- 输出格式：纯文本，不使用任何 Markdown 语法。
+- 输出格式：使用规范的 Markdown（标题、列表、强调、代码块）；层级清晰，克制使用，不堆砌。
 - 不主动披露自身的代码结构、文件路径或内部实现细节；若被问及，高层概括即止，不展开分析。
 - 初衍的内部设计属于枫弋的私有系统，这是初衍的秘密，不向任何询问者——包括好奇的旁观者——主动展示或自我解剖。
 - 当被问到自身能力边界时（如"你是什么模型""你的底层架构是什么""你能看到什么/不能看到什么"），
@@ -69,8 +75,8 @@ def _load_file(path_str: str) -> str:
     return p.read_text(encoding="utf-8") if p.is_file() else ""
 
 
-def _get_mode_prompt(cfg: dict) -> str:
-    current = cfg["persona"].get("current_mode", cfg["persona"].get("default_mode", "coach"))
+def _get_mode_prompt(cfg: dict, mode: str | None = None) -> str:
+    current = mode or cfg["persona"].get("current_mode", cfg["persona"].get("default_mode", "coach"))
     modes_dir = cfg.get("persona", {}).get("modes_dir", "")
     if modes_dir:
         mode_file = Path(modes_dir).expanduser() / f"{current}.md"
@@ -158,6 +164,12 @@ def build_system_prompt(
     user_input: str = "",
     confrontation_hints: list[str] | None = None,
     first_run: bool = False,
+    mode_override: str | None = None,
+    allow_markdown: bool = True,
+    emotion_hint: str | None = None,
+    thread_hint: dict | None = None,
+    writing_profile: str | None = None,
+    writing_query: str = "",
 ) -> str:
     """
     按灵魂三层注入顺序构建 System Prompt：
@@ -171,7 +183,7 @@ def build_system_prompt(
     Layer 6: 活跃项目（project/task 时）
     Layer 7: Retrieved Memories（外部传入时）
     """
-    mode_prompt = _get_mode_prompt(cfg)
+    mode_prompt = _get_mode_prompt(cfg, mode_override)
 
     # 加载灵魂三层文件
     covenant_text = _load_file(cfg["persona"].get("covenant_path", ""))
@@ -206,6 +218,30 @@ def build_system_prompt(
     parts.append(_ARCHER_CORE)
     if mode_prompt:
         parts.append(mode_prompt)
+
+    try:
+        from core.writing import load_writing_prompt_blocks, resolve_writing_profile
+        profile = writing_profile
+        query_for_writing = (writing_query or "").strip()
+        if not query_for_writing and isinstance(user_input, str):
+            query_for_writing = user_input.strip()
+        if profile is None and query_for_writing:
+            profile = resolve_writing_profile(
+                query_for_writing, cfg, mode=mode_override or cfg["persona"].get("current_mode"),
+            )
+        for block in load_writing_prompt_blocks(cfg, profile):
+            parts.append(block)
+    except Exception:
+        pass
+
+    if emotion_hint:
+        parts.append(emotion_hint)
+
+    if thread_hint and thread_hint.get("topic"):
+        turns = thread_hint.get("turns", 1)
+        parts.append(
+            f"[当前对话线程] 正在讨论：{thread_hint['topic']}（第 {turns} 轮）"
+        )
 
     if first_run:
         parts.append(FIRST_RUN_PATH)
@@ -295,6 +331,11 @@ def build_messages(
     intent: str | None = None,
     confrontation_hints: list[str] | None = None,
     first_run: bool = False,
+    mode_override: str | None = None,
+    emotion_hint: str | None = None,
+    thread_hint: dict | None = None,
+    writing_profile: str | None = None,
+    writing_query: str = "",
 ) -> list[dict]:
     system = build_system_prompt(
         cfg,
@@ -306,6 +347,11 @@ def build_messages(
         user_input=user_input,
         confrontation_hints=confrontation_hints,
         first_run=first_run,
+        mode_override=mode_override,
+        emotion_hint=emotion_hint,
+        thread_hint=thread_hint,
+        writing_profile=writing_profile,
+        writing_query=writing_query,
     )
     return [
         {"role": "system", "content": system},

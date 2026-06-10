@@ -1,10 +1,11 @@
-import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, desktopCapturer, dialog, ipcMain, nativeImage, shell, systemPreferences } from 'electron'
 import { join } from 'node:path'
 import { spawn } from 'node:child_process'
 import type { ChildProcess } from 'node:child_process'
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { randomBytes } from 'node:crypto'
-import { probeExistingApi } from './apiProcess'
+import { execFile } from 'node:child_process'
+import { probeExistingApi, verifyApiToken, waitForHealthyApi } from './apiProcess'
 
 const isDev = !app.isPackaged
 
@@ -15,6 +16,47 @@ const API_SCRIPT = join(ARCHER_ROOT, 'archer_api.py')
 
 let apiProcess: ChildProcess | null = null
 let desktopApiToken = ''
+let ensureApiPromise: Promise<{ ok: boolean; reason: string }> | null = null
+let apiWatchTimer: ReturnType<typeof setInterval> | null = null
+
+type ApiEnsureResult = { ok: boolean; reason: string }
+
+const PREVIEWABLE_IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp', '.tiff', '.tif', '.heic'])
+
+function screenshotFilePath(prefix: string): string {
+  const screenshotDir = join(app.getPath('userData'), 'screenshots')
+  mkdirSync(screenshotDir, { recursive: true })
+  return join(screenshotDir, `${prefix}-${new Date().toISOString().replace(/[:.]/g, '-')}.png`)
+}
+
+function imagePreviewDataUrl(path: string): string | undefined {
+  const ext = path.slice(path.lastIndexOf('.')).toLowerCase()
+  if (!PREVIEWABLE_IMAGE_EXTENSIONS.has(ext)) return undefined
+  const image = nativeImage.createFromPath(path)
+  if (image.isEmpty()) return undefined
+  const size = image.getSize()
+  const longestEdge = Math.max(size.width, size.height)
+  const scale = longestEdge > 320 ? 320 / longestEdge : 1
+  const preview = scale < 1
+    ? image.resize({
+      width: Math.max(1, Math.round(size.width * scale)),
+      height: Math.max(1, Math.round(size.height * scale)),
+      quality: 'good'
+    })
+    : image
+  return preview.toDataURL()
+}
+
+function fileRefFromPath(path: string) {
+  const size = statSync(path).size
+  if (size === 0) return null
+  return {
+    path,
+    name: path.split(/[\\/]/).pop() || 'screenshot.png',
+    size,
+    previewDataUrl: imagePreviewDataUrl(path)
+  }
+}
 
 function getOrCreateDesktopApiToken(): string {
   const tokenDir = join(app.getPath('userData'), 'security')
@@ -34,37 +76,89 @@ function getOrCreateDesktopApiToken(): string {
   }
 }
 
-async function startApiProcess() {
-  if (!existsSync(PYTHON_BIN) || !existsSync(API_SCRIPT)) {
-    console.log('[archer_api] Python or script not found, skipping auto-start')
-    return
-  }
-  if (apiProcess) return
+function attachApiProcessHandlers(child: ChildProcess) {
+  child.on('exit', (code) => {
+    console.log(`[archer_api] Process exited with code ${code}`)
+    if (apiProcess === child) apiProcess = null
+    setTimeout(() => {
+      void ensureApiProcess()
+    }, 1500)
+  })
 
+  child.on('error', (err) => {
+    console.error('[archer_api] Failed to start:', err.message)
+    if (apiProcess === child) apiProcess = null
+  })
+}
+
+function spawnApiProcess(): ChildProcess | null {
   desktopApiToken = desktopApiToken || getOrCreateDesktopApiToken()
-
-  if (await probeExistingApi()) {
-    console.log('[archer_api] Existing API detected on 127.0.0.1:8765, reusing it')
-    return
-  }
-
-  apiProcess = spawn(PYTHON_BIN, [API_SCRIPT, '--token', desktopApiToken], {
+  const child = spawn(PYTHON_BIN, [API_SCRIPT, '--token', desktopApiToken], {
     cwd: ARCHER_ROOT,
     stdio: 'ignore',
-    detached: false
+    detached: false,
   })
+  attachApiProcessHandlers(child)
+  console.log('[archer_api] Started, pid:', child.pid)
+  return child
+}
 
-  apiProcess.on('exit', (code) => {
-    console.log(`[archer_api] Process exited with code ${code}`)
-    apiProcess = null
-  })
+async function ensureApiProcess(): Promise<ApiEnsureResult> {
+  if (ensureApiPromise) return ensureApiPromise
 
-  apiProcess.on('error', (err) => {
-    console.error('[archer_api] Failed to start:', err.message)
-    apiProcess = null
-  })
+  ensureApiPromise = (async () => {
+    if (!existsSync(PYTHON_BIN) || !existsSync(API_SCRIPT)) {
+      console.log('[archer_api] Python or script not found, cannot auto-start')
+      return { ok: false, reason: 'missing_python' }
+    }
 
-  console.log('[archer_api] Started, pid:', apiProcess.pid)
+    desktopApiToken = desktopApiToken || getOrCreateDesktopApiToken()
+
+    if (apiProcess && apiProcess.pid && !apiProcess.killed) {
+      if (await verifyApiToken(fetch, desktopApiToken)) {
+        return { ok: true, reason: 'owned' }
+      }
+    }
+
+    if (await probeExistingApi()) {
+      if (await verifyApiToken(fetch, desktopApiToken)) {
+        console.log('[archer_api] Reusing healthy API on 127.0.0.1:8765')
+        return { ok: true, reason: 'reused' }
+      }
+      console.warn('[archer_api] Port 8765 is up but token mismatch; starting a fresh API is not attempted while port is busy')
+      return { ok: false, reason: 'token_mismatch' }
+    }
+
+    apiProcess = spawnApiProcess()
+    if (!apiProcess) {
+      return { ok: false, reason: 'spawn_failed' }
+    }
+
+    const healthy = await waitForHealthyApi(fetch)
+    if (!healthy) {
+      console.error('[archer_api] API did not become healthy in time')
+      return { ok: false, reason: 'spawn_failed' }
+    }
+
+    if (!(await verifyApiToken(fetch, desktopApiToken))) {
+      return { ok: false, reason: 'token_mismatch' }
+    }
+
+    return { ok: true, reason: 'started' }
+  })()
+
+  try {
+    return await ensureApiPromise
+  } finally {
+    ensureApiPromise = null
+  }
+}
+
+function startApiWatchdog() {
+  if (apiWatchTimer) return
+  apiWatchTimer = setInterval(() => {
+    void ensureApiProcess()
+  }, 45_000)
 }
 
 function stopApiProcess() {
@@ -147,17 +241,91 @@ ipcMain.handle('archer:pick-files', async () => {
   const { statSync } = await import('node:fs')
   return result.filePaths.map((path) => {
     let size = 0
+    let previewDataUrl: string | undefined
     try {
       size = statSync(path).size
+      previewDataUrl = imagePreviewDataUrl(path)
     } catch {
       size = 0
     }
     return {
       path,
       name: path.split(/[\\/]/).pop() || path,
-      size
+      size,
+      previewDataUrl
     }
   })
+})
+
+ipcMain.handle('archer:capture-screenshot', async () => {
+  const screenshotPath = screenshotFilePath('archer-screenshot')
+
+  await new Promise<void>((resolve, reject) => {
+    execFile('/usr/sbin/screencapture', ['-i', screenshotPath], (error) => {
+      if (error) {
+        reject(error)
+        return
+      }
+      resolve()
+    })
+  })
+
+  if (!existsSync(screenshotPath)) return null
+  return fileRefFromPath(screenshotPath)
+})
+
+ipcMain.handle('archer:capture-window-screenshot', async () => {
+  const screenshotPath = screenshotFilePath('archer-window')
+
+  await new Promise<void>((resolve, reject) => {
+    execFile('/usr/sbin/screencapture', ['-i', '-w', screenshotPath], (error) => {
+      if (error) {
+        reject(error)
+        return
+      }
+      resolve()
+    })
+  })
+
+  if (!existsSync(screenshotPath)) return null
+  return fileRefFromPath(screenshotPath)
+})
+
+ipcMain.handle('archer:list-capture-sources', async () => {
+  const screenStatus = systemPreferences.getMediaAccessStatus('screen')
+  const sources = await desktopCapturer.getSources({
+    types: ['screen', 'window'],
+    thumbnailSize: { width: 320, height: 200 },
+    fetchWindowIcons: true
+  })
+  return sources
+    .filter((source) => !source.name.toLowerCase().includes('archer'))
+    .slice(0, 12)
+    .map((source) => ({
+      id: source.id,
+      name: source.name,
+      kind: source.id.startsWith('screen') ? 'screen' : 'window',
+      thumbnailEmpty: source.thumbnail.isEmpty(),
+      screenStatus
+    }))
+})
+
+ipcMain.handle('archer:capture-source', async (_event, sourceId: string) => {
+  const screenStatus = systemPreferences.getMediaAccessStatus('screen')
+  if (screenStatus !== 'granted') {
+    throw new Error(`screen:${screenStatus}`)
+  }
+  const sources = await desktopCapturer.getSources({
+    types: ['screen', 'window'],
+    thumbnailSize: { width: 1920, height: 1200 },
+    fetchWindowIcons: false
+  })
+  const source = sources.find((item) => item.id === sourceId)
+  if (!source || source.thumbnail.isEmpty()) return null
+
+  const screenshotPath = screenshotFilePath(source.id.startsWith('screen') ? 'archer-screen' : 'archer-window')
+  writeFileSync(screenshotPath, source.thumbnail.toPNG())
+  return fileRefFromPath(screenshotPath)
 })
 
 ipcMain.handle('archer:get-api-token', async () => {
@@ -165,13 +333,17 @@ ipcMain.handle('archer:get-api-token', async () => {
   return desktopApiToken
 })
 
+ipcMain.handle('archer:ensure-api', async () => ensureApiProcess())
+
 app.whenReady().then(async () => {
   app.setName('Archer Desktop')
   desktopApiToken = getOrCreateDesktopApiToken()
-  await startApiProcess()
+  await ensureApiProcess()
+  startApiWatchdog()
   createWindow()
 
   app.on('activate', () => {
+    void ensureApiProcess()
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
 })

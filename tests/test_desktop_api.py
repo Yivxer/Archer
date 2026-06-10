@@ -285,7 +285,7 @@ def test_background_job_uses_tool_loop_enrichment(tmp_path, monkeypatch):
     # Mock skill selection to avoid web search triggering
     monkeypatch.setattr(
         "terminal.api._tools._select_api_skills",
-        lambda query: set(),
+        lambda query: {},
     )
 
     _, created = routes.payload_post("/jobs", {
@@ -320,7 +320,7 @@ def test_background_job_tool_summary_in_result(tmp_path, monkeypatch):
 
     # Make web_search appear as selected, but provide a mock result
     def fake_select(_query):
-        return {"web_search"}
+        return {"web_search": {}}
 
     monkeypatch.setattr("terminal.api._tools._select_api_skills", fake_select)
     monkeypatch.setattr(
@@ -347,7 +347,7 @@ def test_background_job_tool_summary_in_result(tmp_path, monkeypatch):
     _, created = routes.payload_post("/jobs", {
         "title": "工具摘要测试",
         "kind": "analysis",
-        "prompt": "Python 3.14 有什么新特性？",
+        "prompt": "搜索一下 Python 3.14 有什么新特性？",
     })
     job_id = created["job"]["id"]
 
@@ -358,7 +358,7 @@ def test_background_job_tool_summary_in_result(tmp_path, monkeypatch):
             break
         time.sleep(0.01)
 
-    assert detail_payload["job"]["status"] == "complete"
+    assert detail_payload["job"]["status"] == "complete", detail_payload["job"].get("error", "")
     # 结果应包含工具执行摘要标记
     assert "后台任务自动执行了以下工具" in detail_payload["job"]["result"]
     assert "[web_search]" in detail_payload["job"]["result"]
@@ -971,6 +971,7 @@ class TestDesktopModes:
             "persona": {
                 "default_mode": "listener",
                 "current_mode": "listener",
+                "mode_auto": False,
                 "modes_dir": str(modes_dir),
                 "modes": {"coach": {"name": "教练"}},
             }
@@ -985,6 +986,30 @@ class TestDesktopModes:
         assert modes["listener"]["source"] == "file"
         assert modes["coach"]["source"] == "toml"
         assert modes["listener"]["active"] is True
+
+    def test_modes_route_reports_auto_when_mode_auto_enabled(self, tmp_path, monkeypatch):
+        from terminal.api import _routes as routes
+
+        modes_dir = tmp_path / "modes"
+        modes_dir.mkdir()
+        (modes_dir / "listener.md").write_text("[模式：倾听者]\n慢一点。", encoding="utf-8")
+        cfg = {
+            "persona": {
+                "default_mode": "listener",
+                "current_mode": "listener",
+                "mode_auto": True,
+                "modes_dir": str(modes_dir),
+                "modes": {},
+            }
+        }
+        monkeypatch.setattr(routes, "_load_config", lambda: cfg)
+
+        status, payload = routes.payload_get("/modes")
+
+        assert status == 200
+        assert payload["current"] == "auto"
+        assert payload["modeAuto"] is True
+        assert all(not item["active"] for item in payload["modes"])
 
     def test_switch_mode_persists_current_mode(self, tmp_path, monkeypatch):
         from terminal.api import _routes as routes

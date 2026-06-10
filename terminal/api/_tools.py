@@ -23,98 +23,24 @@ from terminal.api._config import (
 logger = logging.getLogger("archer_api")
 
 # ---------------------------------------------------------------------------
-# Intent detection helpers
+# Intent detection helpers（委托 core/desktop_tool_router，保留旧函数名兼容测试）
 # ---------------------------------------------------------------------------
 
-def _should_preview_obsidian(query: str) -> bool:
-    lowered = query.lower()
-    keywords = (
-        "obsidian", "笔记", "知识库", "vault",
-        "搜索", "看一下笔记", "查一下", "找一下",
-        "读一下", "帮我读", "看看笔记", "翻一下",
-        "读取", "读这篇", "打开笔记", "查看笔记",
-    )
-    return any(keyword in lowered for keyword in keywords)
-
-
-def _should_draft_obsidian_write(query: str) -> bool:
-    lowered = query.lower()
-    # 匹配写入意图的动作词，覆盖更多自然表达
-    keywords = (
-        "写入", "写到", "记录到", "保存到", "追加到", "记到",
-        "记个笔记", "记下来", "帮我记", "存一下", "保存一下",
-        "记录一下", "写个笔记", "新建笔记", "创建笔记",
-        "添加到笔记", "写进", "放到笔记", "存到",
-        "备忘", "mark", "note this", "save this",
-    )
-    return any(keyword in lowered for keyword in keywords)
-
-
-def _should_trigger_shell(query: str) -> bool:
-    lowered = query.lower()
-    # 只匹配明确的命令执行请求：①以命令动词开头 ②包含可辨识的系统命令
-    keywords = (
-        "执行", "运行", "终端", "command", "shell", "bash",
-        "ls ", "cat ", "grep ", "find ", "ps ", "git ",
-        "npm ", "pip ", "python ", "node ", "which ", "whereis ",
-        "mkdir ", "touch ", "cp ", "mv ", "head ", "tail ",
-    )
-    if any(keyword in lowered for keyword in keywords):
-        return True
-    # 额外检测：包含独立系统命令名（由空格、标点或边界包围）
-    cmd_names = ("hugo", "rsync", "scp", "ssh", "curl", "wget", "docker", "kubectl", "brew")
-    for cmd in cmd_names:
-        # 检查命令前后是否有空格或边界
-        for sep_start in ("", " ", "，", "。", "！", "？"):
-            for sep_end in (" ", "，", "。", "！", "？", ""):
-                if f"{sep_start}{cmd}{sep_end}" in lowered or lowered.startswith(cmd) or lowered.endswith(cmd):
-                    return True
-    return False
-
-
-def _should_trigger_github(query: str) -> bool:
-    lowered = query.lower()
-    keywords = (
-        "github", "repo", "repository", "issue", "pull request",
-        "gh ", "git ", "仓库", "代码库", "提交", "star",
-        "列出仓库", "列出 issue", "列出 pr",
-        "查看仓库", "创建 issue",
-    )
-    return any(keyword in lowered for keyword in keywords) or re.search(r"\bpr\b", lowered) is not None
-
-
-def _extract_github_args(query: str) -> dict:
-    args = {"action": "", "repo": "", "title": "", "body": "", "command": ""}
-    lowered = query.lower()
-    if "列出" in query and "仓库" in query:
-        args["action"] = "list_repos"
-    elif "列出" in query and "issue" in lowered:
-        args["action"] = "list_issues"
-    elif "列出" in query and ("pr" in lowered or "pull request" in lowered):
-        args["action"] = "list_prs"
-    elif "查看" in query and "仓库" in query:
-        args["action"] = "view_repo"
-    elif "创建" in query and "issue" in lowered:
-        args["action"] = "create_issue"
-    elif any(k in lowered for k in ["gh ", "git ", "star ", "fork "]):
-        args["action"] = "run"
-        for prefix in ("gh ", "git "):
-            if prefix in query:
-                idx = query.lower().find(prefix)
-                args["command"] = query[idx + len(prefix):].strip()
-                break
-    else:
-        args["action"] = "list_repos"
-    repo_match = re.search(r"([a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+)", query)
-    if repo_match:
-        args["repo"] = repo_match.group(1)
-    title_match = re.search(r"标题[：:]\s*(.+?)(?:\n|$)", query)
-    if title_match:
-        args["title"] = title_match.group(1).strip()
-    body_match = re.search(r"内容[：:]\s*(.+?)(?:\n|$)", query)
-    if body_match:
-        args["body"] = body_match.group(1).strip()
-    return args
+from core.desktop_tool_router import (
+    extract_github_args as _extract_github_args,
+    extract_obsidian_target_path as _extract_obsidian_target_path,
+    extract_obsidian_write_content as _extract_obsidian_write_content,
+    extract_shell_command as _extract_shell_command,
+    filter_skills_for_intent as _filter_skills_for_intent,
+    plan_desktop_turn as _plan_desktop_turn,
+    plan_desktop_tools as _plan_desktop_tools,
+    should_draft_obsidian_write as _should_draft_obsidian_write,
+    should_preview_obsidian as _should_preview_obsidian,
+    should_trigger_github as _should_trigger_github,
+    should_trigger_shell as _should_trigger_shell,
+    wants_hugo_creation as _wants_hugo_creation,
+    wants_hugo_deploy as _wants_hugo_deploy,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -145,36 +71,6 @@ def _execute_shell_command(command: str, timeout: int = 30) -> dict:
         return {"ok": False, "output": f"错误：{exc}"}
 
 
-def _extract_shell_command(query: str) -> str:
-    """从用户输入中提取 shell 命令。找不到明确命令时返回空字符串。"""
-    for keyword in ("执行", "运行", "execute", "run"):
-        pattern = re.compile(re.escape(keyword) + r"\s*[:：]?\s*(.+)", re.IGNORECASE)
-        match = pattern.search(query)
-        if match:
-            return match.group(1).strip()
-    # 检查是否包含可直接识别的命令（如 hugo build, rsync, npm install 等）
-    cmd_patterns = [
-        # 独立命令名（前后不是字母，避免匹配单词内部）
-        r'(?<![a-zA-Z])(' + '|'.join([
-            'hugo', 'rsync', 'scp', 'ssh', 'curl', 'wget', 'tar', 'zip', 'unzip', 'make', 'cmake'
-        ]) + r')(?![a-zA-Z])',
-        r'\b(npm|pip|yarn|pnpm|bun)\s+(install|run|build|test|start|dev)',
-        r'\b(git|gh|docker|kubectl|brew)\s+\w+',
-    ]
-    for pat in cmd_patterns:
-        m = re.search(pat, query, re.IGNORECASE)
-        if m:
-            # 提取从命令开始的整段文本
-            start = m.start()
-            rest = query[start:].strip()
-            # 截到第一个句号/问号/感叹号
-            end_match = re.search(r'[。？！\n]', rest)
-            if end_match:
-                rest = rest[:end_match.start()]
-            return rest.strip()
-    return ""
-
-
 # ---------------------------------------------------------------------------
 # Tool event construction
 # ---------------------------------------------------------------------------
@@ -192,65 +88,6 @@ def _tool_event(
     if draft:
         tool_event["draft"] = draft
     return {"type": "tool_event", "toolEvent": tool_event}
-
-
-def _clean_obsidian_path(path: str) -> str:
-    return path.strip().strip("`'\"「」『』（）()[]【】，,。；;：:")
-
-
-def _extract_obsidian_target_path(query: str) -> str:
-    """Best-effort extraction of the target note path from a desktop chat request."""
-    known_notes = {
-        "客户端构建日志": "50计划清单📌/Archer/客户端构建日志.md",
-        "终端构建日志": "50计划清单📌/Archer/终端构建日志.md",
-        "网页端构建日志": "50计划清单📌/Archer/网页端构建日志.md",
-        "构建日志": "50计划清单📌/Archer/客户端构建日志.md",
-    }
-    lowered = query.lower()
-    for keyword, path in known_notes.items():
-        if keyword.lower() in lowered:
-            return path
-
-    quoted = re.search(r"[「『\"'`]([^」』\"'`]+\.md)[」』\"'`]", query, re.IGNORECASE)
-    if quoted:
-        return _clean_obsidian_path(quoted.group(1))
-
-    # Absolute macOS/iCloud paths may contain spaces; match lazily up to .md before trying relatives.
-    absolute = re.search(r"((?:/Users|~/).*?\.md)", query, re.IGNORECASE | re.DOTALL)
-    if absolute:
-        return _clean_obsidian_path(absolute.group(1))
-
-    relative = re.search(r"([A-Za-z0-9_\-./\u4e00-\u9fff📌🚀🦞]+\.md)", query, re.IGNORECASE)
-    if relative:
-        return _clean_obsidian_path(relative.group(1))
-
-    return "Archer/客户端写入草稿.md"
-
-
-def _extract_obsidian_write_content(query: str) -> str:
-    """Extract a useful append body; fall back to recording the full user request."""
-    target_path = _extract_obsidian_target_path(query)
-    if target_path and target_path in query:
-        after_path = query.split(target_path, 1)[1].strip()
-        after_path = after_path.lstrip("：:，,。；;、\n \t")
-        if after_path:
-            return after_path
-
-    path_match = re.search(r"(?:/Users|~/).*?\.md", query, re.IGNORECASE | re.DOTALL)
-    if path_match:
-        after_path = query[path_match.end():].strip().lstrip("：:，,。；;、\n \t")
-        if after_path:
-            return after_path
-
-    patterns = (
-        r"(?:写入|写到|记录到|保存到|追加到|记到)[^：:\n]*[：:]\s*(.+)",
-        r"内容[：:]\s*(.+)",
-    )
-    for pattern in patterns:
-        match = re.search(pattern, query, re.DOTALL)
-        if match and match.group(1).strip():
-            return match.group(1).strip()
-    return query.strip()
 
 
 def _obsidian_write_draft(query: str) -> dict:
@@ -281,59 +118,13 @@ def _make_api_tool_request(
 
 
 def _select_api_skills(query: str, all_skills: dict | None = None) -> dict:
-    from core.skill_router import select_skills
-    from skills.loader import load_skills
-    skills = all_skills if all_skills is not None else load_skills()
-    return select_skills(query, skills)
+    return _plan_desktop_turn(
+        query, all_skills, llm_fallback=False,
+    ).raw_selected
 
 
-def _has_explicit_web_search_intent(query: str) -> bool:
-    lowered = query.lower()
-    return bool(re.search(r"https?://", query)) or any(term in lowered for term in (
-        "搜索", "搜一下", "查一下", "查找", "联网", "上网", "网上", "网页",
-        "最新", "新闻", "资料", "调研", "检索", "search", "google",
-    ))
-
-
-def _has_explicit_file_write_intent(query: str) -> bool:
-    lowered = query.lower()
-    has_path = bool(re.search(r"(?:^|\s)(?:~|/Users/|\.{1,2}/)[^\s]+|\b[\w.-]+\.(?:md|txt|json|py|ts|tsx|js|css|html)\b", query))
-    return has_path or any(term in lowered for term in (
-        "保存到", "写入文件", "写到文件", "创建文件", "新建文件", "生成文件",
-        "另存", "保存为", "放到", "写到路径", "修改文件", "编辑文件",
-        "覆盖文件", "追加到", "append to", "save to", "write file",
-    ))
-
-
-def _is_plain_content_request(query: str) -> bool:
-    lowered = query.lower()
-    return any(term in lowered for term in (
-        "帮我生成一篇", "生成一篇", "帮我写一篇", "写一篇", "按照这个逻辑",
-        "帮我分析文章", "分析文章", "改写", "润色", "扩写", "缩写",
-        "写成文章", "整理成文章", "生成文章",
-    ))
-
-
-def _filter_api_skills_for_intent(query: str, selected: dict) -> dict:
-    """Keep tools unavailable unless the user explicitly asked for that side effect."""
-    if (
-        _is_plain_content_request(query)
-        and not _has_explicit_web_search_intent(query)
-        and not _has_explicit_file_write_intent(query)
-        and not (_wants_hugo_deploy(query) or _wants_hugo_creation(query))
-    ):
-        return {}
-
-    filtered = dict(selected)
-    if "hugo_blog" in filtered and not (_wants_hugo_deploy(query) or _wants_hugo_creation(query)):
-        filtered.pop("hugo_blog", None)
-    if not _has_explicit_web_search_intent(query):
-        filtered.pop("web_search", None)
-        if not re.search(r"https?://", query):
-            filtered.pop("web_fetch", None)
-    if not _has_explicit_file_write_intent(query):
-        filtered.pop("file_ops", None)
-    return filtered
+def _filter_api_skills_for_intent(query: str, selected: dict, *, intent: str = "chat") -> dict:
+    return _filter_skills_for_intent(query, selected, intent=intent)
 
 
 def _tool_event_from_request(
@@ -552,22 +343,25 @@ def _run_desktop_tool_loop(
 # Tool event iterators (per skill)
 # ---------------------------------------------------------------------------
 
-def _iter_obsidian_search_events(query: str):
-    if not _should_preview_obsidian(query):
+def _iter_obsidian_search_events(query: str, plan):
+    if not plan.should_run("obsidian_search"):
         return
+    entry = plan.get("obsidian_search")
+    args = entry.args if entry else {"keyword": query[:80], "max_results": 5}
     yield _execute_api_tool_preview(
         "obsidian_search",
-        {"keyword": query[:80], "max_results": 5},
+        args,
         event_id="obsidian-search",
         display_name="obsidian_search",
         summary="Obsidian 搜索摘要完成",
     )
 
 
-def _iter_obsidian_read_events(query: str):
-    if not _should_preview_obsidian(query):
+def _iter_obsidian_read_events(query: str, plan):
+    if not plan.should_run("obsidian_read"):
         return
-    target_path = _extract_obsidian_target_path(query)
+    entry = plan.get("obsidian_read")
+    target_path = (entry.args.get("path") if entry else "") or _extract_obsidian_target_path(query)
     # 跳过无意义回退路径（说明用户没给出具体笔记名）
     if not target_path or target_path == "Archer/客户端写入草稿.md":
         return
@@ -580,8 +374,8 @@ def _iter_obsidian_read_events(query: str):
     )
 
 
-def _iter_obsidian_write_events(query: str):
-    if not _should_draft_obsidian_write(query):
+def _iter_obsidian_write_events(query: str, plan):
+    if not plan.should_run("obsidian_write"):
         return
     draft_event_id = f"obsidian-write-{uuid4().hex[:8]}"
     draft_fields = _obsidian_write_draft(query)
@@ -640,11 +434,12 @@ def _iter_obsidian_write_events(query: str):
     )
 
 
-def _iter_shell_events(query: str):
-    if not _should_trigger_shell(query):
+def _iter_shell_events(query: str, plan):
+    if not plan.should_run("shell"):
         return
     shell_event_id = f"shell-execute-{uuid4().hex[:8]}"
-    command = _extract_shell_command(query)
+    entry = plan.get("shell")
+    command = (entry.args.get("command") if entry else "") or _extract_shell_command(query)
     if not command or len(command) < 3:
         return  # 没有提取到有效命令，不弹卡片
     request = _make_api_tool_request(
@@ -661,11 +456,12 @@ def _iter_shell_events(query: str):
     )
 
 
-def _iter_github_events(query: str):
-    if not _should_trigger_github(query):
+def _iter_github_events(query: str, plan):
+    if not plan.should_run("github_ops"):
         return
     github_event_id = f"github-{uuid4().hex[:8]}"
-    args = _extract_github_args(query)
+    entry = plan.get("github_ops")
+    args = entry.args if entry and entry.args.get("action") else _extract_github_args(query)
     github_args = {
         "action": args["action"],
         "repo": args.get("repo", ""),
@@ -696,33 +492,7 @@ def _iter_github_events(query: str):
     )
 
 
-_HUGO_BLOG_TARGET_TERMS = (
-    "博客", "博文", "枫弋札记", "hugo", "yivxer-blog", "iver.yivxer.com",
-    "网站", "站点", "posts/", "content/posts",
-)
-_HUGO_DEPLOY_TERMS = ("部署", "上线", "发布", "上传", "推送", "同步到服务器", "deploy", "publish", "upload", "rsync")
-_HUGO_CREATE_TERMS = ("写到博客", "发到博客", "发布到博客", "上传到博客", "新建博客", "博客文章", "博客草稿", "博文")
 _HUGO_CAPABILITY_TERMS = ("能不能", "可以吗", "还能不能", "是否", "吗", "?")
-
-
-def _has_hugo_blog_target(query: str) -> bool:
-    lowered = query.lower()
-    return any(term in lowered for term in _HUGO_BLOG_TARGET_TERMS)
-
-
-def _wants_hugo_deploy(query: str) -> bool:
-    lowered = query.lower()
-    wants_deploy = any(term in lowered for term in _HUGO_DEPLOY_TERMS)
-    if not wants_deploy:
-        return False
-    if _has_hugo_blog_target(query):
-        return True
-    return any(term in lowered for term in ("部署", "上线", "同步到服务器", "rsync"))
-
-
-def _wants_hugo_creation(query: str) -> bool:
-    lowered = query.lower()
-    return _has_hugo_blog_target(query) and any(term in lowered for term in _HUGO_CREATE_TERMS)
 
 
 def _iter_hugo_blog_events(query: str):
@@ -871,14 +641,13 @@ def _generate_obsidian_draft_with_ai(query: str, messages: list[dict], ai_reply:
     """
     from core.llm import stream_chat
 
+    from core.writing import load_writing_prompt_blocks
+    spec_blocks = load_writing_prompt_blocks(_load_config(), "note")
     system_prompt = (
         "你是 Archer 的 Obsidian 写作助手。"
         "请基于完整对话上下文，将需要记录的内容整理成结构化的 Markdown 笔记。\n\n"
-        "要求：\n"
-        "- 使用简洁清晰的 Markdown 格式\n"
-        "- 保留关键观点、细节和上下文关联\n"
-        "- 不要添加多余的解释、元信息或引导语\n"
-        "- 只输出笔记正文，第一行直接开始正文"
+        + ("\n\n".join(spec_blocks) if spec_blocks else "")
+        + "\n\n只输出笔记正文，第一行直接开始正文。"
     )
 
     gen_messages = [
@@ -904,11 +673,33 @@ _API_TOOL_EVENT_BUILDERS = {
 }
 
 
-def _iter_api_tool_events(query: str):
-    selected = _filter_api_skills_for_intent(query, _select_api_skills(query))
+def _iter_api_tool_events(
+    query: str,
+    *,
+    intent_info: dict | None = None,
+    tool_plan=None,
+    turn_plan=None,
+):
+    if turn_plan is not None:
+        selected = turn_plan.filtered_skills
+        tool_plan = turn_plan.tool_plan
+    else:
+        selected = _filter_api_skills_for_intent(query, _select_api_skills(query))
+        if tool_plan is None:
+            info = intent_info or {}
+            tool_plan = _plan_desktop_tools(
+                query, selected,
+                intent=info.get("intent", "chat"),
+                needs_tools=bool(info.get("needs_tools")),
+                llm_fallback=True,
+            )
     for skill_name, builder in _API_TOOL_EVENT_BUILDERS.items():
-        if skill_name in selected:
+        if skill_name not in selected:
+            continue
+        if skill_name == "hugo_blog":
             yield from builder(query)
+        else:
+            yield from builder(query, tool_plan)
 
 
 # ---------------------------------------------------------------------------
@@ -1089,10 +880,6 @@ def _clean_obsidian_mode(value: object) -> str:
 
 def _chat(payload: dict) -> dict:
     messages = _clean_chat_messages(payload.get("messages"))
-    from core.context import boundary_response
-    boundary_text = boundary_response(_latest_user_text(messages), _load_config())
-    if boundary_text:
-        return {"role": "assistant", "text": boundary_text}
     from core.llm import stream_chat
     chunks: list[str] = []
     for chunk in stream_chat(messages):
@@ -1166,19 +953,36 @@ def _iter_chat_chunks(
     obsidian_mode: str = "summary",
     file_refs: list[dict] | None = None,
 ):
-    from core.context import boundary_response, classify_query_intent
+    from core.context import classify_query_intent, augment_retrieval_query
     from core.llm import stream_chat
 
     query = _latest_user_text(messages)
-    intent_info = classify_query_intent(query)
+    # 历史（不含当前这条用户消息），用于历史感知意图与检索改写
+    prior_history = messages[:-1] if (messages and messages[-1].get("role") == "user") else messages
+    intent_info = classify_query_intent(query, history=prior_history, llm_fallback=True)
     intent = intent_info["intent"]
-    boundary_text = boundary_response(query, _load_config())
-    if boundary_text:
-        yield {"type": "ready", "ready": True}
-        yield {"type": "token", "text": boundary_text}
-        yield {"type": "done", "done": True}
-        return
-
+    _turn_plan = _plan_desktop_turn(
+        query,
+        intent=intent,
+        needs_tools=bool(intent_info.get("needs_tools")),
+        llm_fallback=True,
+    )
+    _selected_tools = _turn_plan.filtered_skills
+    _tool_plan = _turn_plan.tool_plan
+    # 动态对话姿态：桌面端也按当轮内容选 mode（与终端共用选择器）
+    active_stance = None
+    stance_prompt = ""
+    try:
+        from core.stance import resolve_active_stance, available_modes
+        from core.context import _get_mode_prompt
+        _cfg = _load_config()
+        active_stance, _ = resolve_active_stance(
+            _cfg, query, intent, available=available_modes(_cfg),
+        )
+        stance_prompt = _get_mode_prompt(_cfg, active_stance)
+    except Exception:
+        active_stance = None
+        stance_prompt = ""
     enriched_messages = list(messages)
     file_context, file_events = _file_reference_context(file_refs or [])
     for event in file_events:
@@ -1202,7 +1006,9 @@ def _iter_chat_chunks(
         )
         try:
             from memory.retrieve import for_context, format_for_prompt
-            core, related = for_context(query, limit=limit, intent=intent)
+            core, related = for_context(
+                augment_retrieval_query(query, prior_history), limit=limit, intent=intent,
+            )
             memory_context = format_for_prompt(core, related)
             if memory_context:
                 enriched_messages = [
@@ -1232,7 +1038,7 @@ def _iter_chat_chunks(
             "obsidian-search", "obsidian_search", "complete", "low",
             "Obsidian 搜索上下文已关闭", "mode: off",
         )
-    elif obsidian_mode in ("summary", "full") and _should_preview_obsidian(query):
+    elif obsidian_mode in ("summary", "full") and _tool_plan.obsidian_preview:
         yield _tool_event(
             "obsidian-search", "obsidian_search", "running", "low",
             "检索 Obsidian 笔记",
@@ -1326,7 +1132,7 @@ def _iter_chat_chunks(
             )
 
     # ── Web Search 自动预检：当 skill_router 命中 web_search 时执行搜索并注入上下文 ──
-    _pre_selected = _filter_api_skills_for_intent(query, _select_api_skills(query))
+    _pre_selected = _selected_tools
     if "web_search" in _pre_selected:
         yield _tool_event(
             "web-search", "web_search", "running", "low",
@@ -1379,7 +1185,7 @@ def _iter_chat_chunks(
 
     # ── 预检工具事件。显式 Hugo 部署请求必须先于模型工具循环处理，
     # 避免用户只想确认部署时仍卡在“思考中”。
-    api_tool_events = list(_iter_api_tool_events(query))
+    api_tool_events = list(_iter_api_tool_events(query, turn_plan=_turn_plan))
     direct_hugo_deploy_approval = any(
         isinstance(event, dict)
         and event.get("toolEvent", {}).get("name") == "hugo_blog"
@@ -1399,7 +1205,7 @@ def _iter_chat_chunks(
         return
 
     # ── Desktop Tool Loop：让 LLM 通过 function calling 自主调用未被专用 builder 覆盖的技能 ──
-    _all_selected = _filter_api_skills_for_intent(query, _select_api_skills(query))
+    _all_selected = _selected_tools
     enriched_messages, tool_loop_events = _run_desktop_tool_loop(
         enriched_messages, _all_selected, query,
     )
@@ -1441,7 +1247,7 @@ def _iter_chat_chunks(
 
     # ── 通用技能宣告：告诉 LLM 所有被 skill_router 选中但无专用 event builder 的技能 ──
     _AUTO_EXECUTED_SKILLS = {"web_search", "web_fetch"}
-    selected_skills = _filter_api_skills_for_intent(query, _select_api_skills(query))
+    selected_skills = _selected_tools
     for skill_name in sorted(selected_skills):
         if skill_name in _API_TOOL_EVENT_BUILDERS or skill_name in _AUTO_EXECUTED_SKILLS:
             continue  # 已有专用 builder 或已自动执行注入上下文
@@ -1473,16 +1279,43 @@ def _iter_chat_chunks(
         return
 
     # ── 检测 Obsidian 写入意图（非预检，不在此阶段弹草稿卡） ──
-    obsidian_write_intent = _should_draft_obsidian_write(query)
+    obsidian_write_intent = _tool_plan.obsidian_write
     obsidian_target_path = _extract_obsidian_target_path(query) if obsidian_write_intent else None
 
     # ── 构建 AI 系统提示词 ──
-    # 使用与 Terminal CLI 共享的 persona 构建函数
+    # 想法3：桌面端与终端共用完整灵魂分层（COVENANT/PRESENCE/SOUL/MEMORY/mode/对峙提醒），
+    # 并按桌面渲染允许 Markdown。记忆检索结果仍由上方 enriched_messages 单独注入，
+    # 因此这里 db_memories 留空，避免重复。
     try:
-        from core.context import build_desktop_core_prompt
-        core_persona = build_desktop_core_prompt()
+        from core.context import build_system_prompt
+        from memory.narrative import confrontation_hook
+        from memory.emotion import infer_turn_emotion_hint
+        from core.thread import resolve_topic_thread
+        try:
+            hints = confrontation_hook(query, prior_history)
+        except Exception:
+            hints = None
+        emotion_hint = infer_turn_emotion_hint(query, prior_history)
+        thread_hint = resolve_topic_thread(query, prior_history)
+        core_persona = build_system_prompt(
+            _load_config(),
+            db_memories="",
+            heavy=intent_info["needs_memory"],
+            intent=intent,
+            user_input=query,
+            confrontation_hints=hints or None,
+            mode_override=active_stance,
+            emotion_hint=emotion_hint,
+            thread_hint=thread_hint,
+        )
     except Exception:
-        core_persona = "Archer 的核心身份是长期陪伴型 AI 灵魂伴生体。"
+        try:
+            from core.context import build_desktop_core_prompt
+            core_persona = build_desktop_core_prompt()
+            if stance_prompt:
+                core_persona = f"{core_persona}\n\n{stance_prompt}"
+        except Exception:
+            core_persona = "Archer 的核心身份是长期陪伴型 AI 灵魂伴生体。"
 
     tool_context = ""
     if tool_notes:
