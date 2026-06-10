@@ -24,7 +24,8 @@ def test_chat_column_and_composer_share_one_width():
 
     assert "--chat-column: 900px" in css
     assert "width: min(var(--chat-column), calc(100% - 40px));" in css
-    assert "padding: var(--chat-top-safe-area) max" in css
+    assert "padding-top: var(--chat-top-safe-area)" in css
+    assert "--chat-left-safe-area" in css
     assert "margin: 0 auto" in css
 
 

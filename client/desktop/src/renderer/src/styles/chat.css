@@ -75,12 +75,18 @@
 /* ── chat layout ─────────────────────────────────────────────────────── */
 .chat-layout {
   --chat-column: 900px;
-  --chat-top-safe-area: 72px;
+  --chat-top-safe-area: 96px;
+  --chat-left-safe-area: 24px;
   display: grid;
   grid-template-rows: minmax(0, 1fr) auto;
   gap: 0;
   height: 100%;
   background: #ffffff;
+}
+
+/* 侧栏收起时，为左上角标题栏按钮留出水平安全区 */
+.app-shell.focus-mode .chat-layout {
+  --chat-left-safe-area: 152px;
 }
 
 .chat-layout .composer {
@@ -101,7 +107,13 @@
   display: flex;
   flex-direction: column;
   min-height: 0;
-  padding: var(--chat-top-safe-area) max(20px, calc((100% - var(--chat-column)) / 2)) 28px;
+  padding-top: var(--chat-top-safe-area);
+  padding-right: max(20px, calc((100% - var(--chat-column)) / 2));
+  padding-bottom: 28px;
+  padding-left: max(
+    var(--chat-left-safe-area),
+    max(20px, calc((100% - var(--chat-column)) / 2))
+  );
   overflow: auto;
   scroll-behavior: smooth;
   border: none;
@@ -590,14 +602,24 @@
 
 @media (max-width: 1120px) {
   .chat-layout {
-    --chat-top-safe-area: 88px;
+    --chat-top-safe-area: 104px;
+  }
+
+  .app-shell.focus-mode .chat-layout {
+    --chat-left-safe-area: 152px;
   }
 }
 
 @media (max-width: 720px) {
   .chat-layout {
     --chat-column: 100%;
-    --chat-top-safe-area: 72px;
+    --chat-top-safe-area: 96px;
+    --chat-left-safe-area: 20px;
+  }
+
+  .app-shell.focus-mode .chat-layout,
+  .app-shell.has-sidebar .chat-layout {
+    --chat-left-safe-area: 148px;
   }
 
   .chat-layout .composer,
