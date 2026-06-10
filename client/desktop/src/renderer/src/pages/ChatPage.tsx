@@ -1,7 +1,7 @@
 import React from 'react'
 import { ArrowUp, Check, ChevronDown, Copy, CornerDownLeft, Crop, Edit3, FileText, Github, Infinity, Loader2, Mic, Monitor, Paperclip, RotateCcw, Send, Terminal, UserRoundCog, X } from 'lucide-react'
 import { appendLocalSession, approveJobToolEvent, cancelBackgroundJobEvent, createBackgroundJobEvent, fetchBackgroundJob, pollBackgroundJobEvents, retryBackgroundJobEvent, saveLocalSession, streamLocalChat, submitToolApprovalEvent, switchLocalMode } from '../adapters/localArcher'
-import { PERSONA_PRESETS, personaIdFromMode } from '../lib/conversationPersona'
+import { extendedConversationModes, PERSONA_PRESETS, personaIdFromMode } from '../lib/conversationPersona'
 import type { ArcherAdapter, ChatMessage, FileRef, MemoryContextMode, ObsidianContextMode, SessionDetail, ToolEvent } from '../types'
 import { ArcherRing, MarkdownMessage, ThinkingDots } from '../components/common'
 import { createInitialRuntimeState, createPersistentEventLog, reduceRuntimeEvent, routeTaskForRuntime, jobSnapshotToAgentEvent } from '../../../agent'
@@ -19,6 +19,8 @@ const MODEL_OPTIONS = [
 ]
 
 const PERSONA_OPTIONS = PERSONA_PRESETS
+const extendedPersonaModes = (modes: ArcherAdapter['modes']['modes']) =>
+  extendedConversationModes(modes)
 
 export function ChatPage({
   data,
@@ -63,6 +65,8 @@ export function ChatPage({
   const [captureSourcesState, setCaptureSourcesState] = React.useState<'idle' | 'loading' | 'error'>('idle')
   const [selectedModel, setSelectedModel] = React.useState('auto')
   const [selectedPersona, setSelectedPersona] = React.useState('default')
+  const activeConversationMode = data.modes.current || data.status.mode || 'auto'
+  const morePersonaModes = extendedPersonaModes(data.modes.modes)
 
   React.useEffect(() => {
     setSelectedPersona(personaIdFromMode(data.modes.current))
@@ -1015,7 +1019,7 @@ export function ChatPage({
           </div>
           <div className="composer-menu-wrapper">
             <button
-              className={`composer-tool-btn${activeComposerMenu === 'persona' || selectedPersona !== 'default' ? ' active' : ''}`}
+              className={`composer-tool-btn${activeComposerMenu === 'persona' || activeConversationMode !== 'auto' ? ' active' : ''}`}
               type="button"
               onClick={() => setActiveComposerMenu((current) => (current === 'persona' ? null : 'persona'))}
               title="人格模型"
@@ -1025,9 +1029,10 @@ export function ChatPage({
             </button>
             {activeComposerMenu === 'persona' && (
               <div className="composer-popover choice-menu persona-menu">
+                <p className="composer-menu-section-label">快捷人格</p>
                 {PERSONA_OPTIONS.map((option) => (
                   <button
-                    className={selectedPersona === option.id ? 'active' : ''}
+                    className={activeConversationMode === option.mode ? 'active' : ''}
                     type="button"
                     key={option.id}
                     onClick={() => {
@@ -1054,9 +1059,45 @@ export function ChatPage({
                       <strong>{option.label}</strong>
                       <em>{option.note}</em>
                     </span>
-                    {selectedPersona === option.id && <Check size={14} />}
+                    {activeConversationMode === option.mode && <Check size={14} />}
                   </button>
                 ))}
+                {morePersonaModes.length > 0 && (
+                  <>
+                    <p className="composer-menu-section-label">全部姿态</p>
+                    {morePersonaModes.map((mode) => (
+                      <button
+                        className={activeConversationMode === mode.id ? 'active' : ''}
+                        type="button"
+                        key={mode.id}
+                        onClick={() => {
+                          void (async () => {
+                            setActiveComposerMenu(null)
+                            if (data.status.adapter === 'local') {
+                              try {
+                                const result = await switchLocalMode(mode.id)
+                                setSelectedPersona(personaIdFromMode(mode.id))
+                                setToolNotice(`已切换到 ${result.label}`)
+                                await onRefresh?.()
+                                return
+                              } catch (error) {
+                                setToolNotice(error instanceof Error ? error.message : '模式切换失败')
+                                return
+                              }
+                            }
+                            setToolNotice(`${mode.label} 已选择（连接本地后可写入模式）`)
+                          })()
+                        }}
+                      >
+                        <span>
+                          <strong>{mode.label}</strong>
+                          <em>{mode.id}</em>
+                        </span>
+                        {activeConversationMode === mode.id && <Check size={14} />}
+                      </button>
+                    ))}
+                  </>
+                )}
               </div>
             )}
           </div>

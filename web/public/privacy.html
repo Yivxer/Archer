@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>隐私政策 · Archer</title>
+  <meta name="description" content="Archer 隐私政策。" />
+  <link rel="icon" type="image/svg+xml" href="/archer-favicon.svg">
+  <link rel="icon" type="image/png" sizes="32x32" href="/archer-favicon-32.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="/archer-favicon-180.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Comfortaa:wght@700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #f8f5ef;
+      --bg-soft: #f3eee6;
+      --surface: rgba(255, 252, 247, 0.76);
+      --border: rgba(89, 102, 113, 0.14);
+      --text: #2f3a42;
+      --muted: #6e7880;
+      --accent: #4dd9d4;
+      --nav-bg: rgba(248, 245, 239, 0.78);
+      --footer-color: rgba(89, 102, 113, 0.72);
+      --footer-link: rgba(89, 102, 113, 0.78);
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+      color: var(--text);
+      background: var(--bg);
+    }
+
+    [data-theme="dark"] {
+      --bg: #0d1219;
+      --bg-soft: #0a0f14;
+      --surface: rgba(18, 30, 50, 0.62);
+      --border: rgba(77, 217, 212, 0.12);
+      --text: #d0dde8;
+      --muted: #8a9dac;
+      --accent: #4dd9d4;
+      --nav-bg: rgba(13, 18, 25, 0.82);
+      --footer-color: rgba(138, 157, 172, 0.60);
+      --footer-link: rgba(138, 157, 172, 0.72);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100dvh;
+      background:
+        radial-gradient(circle at 16% 12%, rgba(77, 217, 212, 0.11), transparent 24rem),
+        radial-gradient(circle at 84% 20%, rgba(245, 97, 42, 0.07), transparent 22rem),
+        linear-gradient(180deg, var(--bg), var(--bg-soft));
+    }
+
+    .nav {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 22px clamp(20px, 5vw, 52px);
+      border-bottom: 1px solid var(--border);
+      background: var(--nav-bg);
+      backdrop-filter: blur(18px);
+    }
+    @supports not (backdrop-filter: blur(1px)) {
+      .nav { background: var(--bg); }
+    }
+
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 12px;
+      color: var(--text);
+      text-decoration: none;
+      font-size: 14px;
+      font-weight: 700;
+      font-family: "Comfortaa", "PingFang SC", sans-serif;
+      letter-spacing: 0.1em;
+    }
+
+    .ring {
+      width: 16px;
+      height: 16px;
+      border-radius: 46% 54% 53% 47% / 48% 52% 44% 56%;
+      background: conic-gradient(from 195deg, #5ee8e0, #1e7be8, #f5c842, #f5612a, #e8212a, #5ee8e0);
+      -webkit-mask: radial-gradient(circle at center, transparent 39%, #000 41%);
+      mask: radial-gradient(circle at center, transparent 39%, #000 41%);
+    }
+
+    .nav a:last-child {
+      color: var(--muted);
+      font-size: 13px;
+      text-decoration: none;
+    }
+
+    main {
+      width: min(760px, calc(100% - 40px));
+      margin: 0 auto;
+      padding: clamp(54px, 9vw, 96px) 0;
+    }
+
+    article {
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      background: var(--surface);
+      box-shadow: 0 28px 80px rgba(48, 80, 118, 0.1);
+      padding: clamp(28px, 5vw, 48px);
+    }
+
+    h1 {
+      margin: 0 0 10px;
+      color: var(--text);
+      font-size: clamp(30px, 5vw, 46px);
+      line-height: 1.12;
+    }
+
+    .date {
+      margin-bottom: 34px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    h2 {
+      margin: 34px 0 10px;
+      color: var(--text);
+      font-size: 19px;
+    }
+
+    p, li {
+      color: var(--muted);
+      font-size: 15px;
+      line-height: 1.9;
+    }
+
+    ul {
+      margin: 10px 0 0;
+      padding-left: 20px;
+    }
+
+    footer {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      flex-wrap: wrap;
+      margin-top: 28px;
+      padding-bottom: max(20px, env(safe-area-inset-bottom, 0px));
+      color: var(--footer-color);
+      font-size: 12px;
+    }
+
+    footer a {
+      color: var(--footer-link);
+      text-decoration: none;
+    }
+  </style>
+</head>
+<body>
+  <script>(function(){var t=localStorage.getItem("archer-theme");if(t!=="light")document.documentElement.setAttribute("data-theme","dark")})()</script>
+  <nav class="nav">
+    <a class="brand" href="index.html"><span class="ring"></span><span>Archer</span></a>
+    <a href="index.html">返回首页</a>
+  </nav>
+  <main>
+    <article>
+      <h1>隐私政策</h1>
+      <div class="date">生效日期：2026-04-20</div>
+
+      <p>Archer 目前是个人维护的实验性网站。我们会尽量少收集信息，只在提供基础功能和改进体验所必需的范围内处理数据。</p>
+
+      <h2>我们可能处理的信息</h2>
+      <ul>
+        <li>你在 Soul 构建流程中主动填写的内容。</li>
+        <li>浏览器本地保存的数据，例如基础 Soul 草稿。</li>
+        <li>服务器为安全和排错自动产生的访问日志。</li>
+      </ul>
+
+      <h2>本地保存</h2>
+      <p>当前 Archer 入口页会把 Soul 草稿保存在你的浏览器 localStorage 中。这些内容默认不会上传到服务器；清理浏览器数据或点击重置后，本地草稿会被删除。</p>
+
+      <h2>第三方服务</h2>
+      <p>后续如果接入 DeepSeek 或其他模型服务，页面不会直接暴露 API Key。请求应通过 Archer 自己的服务端代理转发，并只传递完成回答所需的上下文。</p>
+
+      <h2>信息安全</h2>
+      <p>我们会采取合理措施保护网站和服务器安全，但任何互联网服务都无法保证绝对安全。请不要在当前实验版本中输入高度敏感的信息。</p>
+
+      <h2>联系我们</h2>
+      <p>如需删除、修正或询问相关信息，可通过网站所有者公开联系方式联系。</p>
+    </article>
+    <footer>
+      <span>© 2026 Archer · 浙ICP备2021027919号-5</span>
+      <span><a href="terms.html">用户协议</a></span>
+    </footer>
+  </main>
+</body>
+</html>

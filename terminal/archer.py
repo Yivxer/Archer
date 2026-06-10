@@ -484,6 +484,10 @@ def run():
             spinner = _brand_spinner("思考中")
             console.print(spinner)
             active_skills = select_skills(user_text, skills)
+            from core.desktop_tool_router import filter_skills_for_intent
+            active_skills = filter_skills_for_intent(
+                user_text, active_skills, intent=intent,
+            )
             # MCP 工具：三条件策略注入（recent/server_name/capability_keyword）
             if _mcp_skills and _should_inject_mcp(user_text, _mcp_skills, cfg):
                 active_skills = {**active_skills, **_mcp_skills}

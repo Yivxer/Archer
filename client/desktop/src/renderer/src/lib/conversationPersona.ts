@@ -8,12 +8,30 @@ export const PERSONA_PRESETS = [
 
 export type PersonaPresetId = (typeof PERSONA_PRESETS)[number]['id']
 
+export const PRESET_MODE_IDS = new Set(
+  PERSONA_PRESETS.map((item) => item.mode).filter((mode) => mode !== 'auto'),
+)
+
+export type ConversationModeOption = {
+  id: string
+  label: string
+  source?: string
+}
+
 export const MODE_TO_PERSONA: Record<string, PersonaPresetId> = {
   auto: 'default',
   critic: 'sharp',
   listener: 'patient',
   coach: 'strategist',
   writer: 'craft',
+}
+
+/** 设置页 / API 返回的 12 个姿态里，Composer 快捷区未覆盖的部分。 */
+export function extendedConversationModes(
+  modes: ConversationModeOption[],
+): ConversationModeOption[] {
+  const seen = new Set<string>(['auto', ...PRESET_MODE_IDS])
+  return modes.filter((mode) => !seen.has(mode.id))
 }
 
 export function personaIdFromMode(mode: string | undefined): PersonaPresetId {

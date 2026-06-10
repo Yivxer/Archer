@@ -1,0 +1,535 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>Archer</title>
+  <meta name="description" content="Archer 是一个长期理解你的灵魂伴生体。Archer is not a tool for everything. It is a companion for becoming yourself." />
+  <meta property="og:title" content="Archer · 灵魂伴生体" />
+  <meta property="og:description" content="Archer 是一个长期理解你的灵魂伴生体。" />
+  <meta property="og:image" content="/og.png" />
+  <meta property="og:type" content="website" />
+  <link rel="icon" type="image/svg+xml" href="/archer-favicon.svg">
+  <link rel="icon" type="image/png" sizes="32x32" href="/archer-favicon-32.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="/archer-favicon-180.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Comfortaa:wght@400;500;700&family=Cormorant+Garamond:ital,wght@0,300;0,400;1,400&family=Noto+Serif+SC:wght@300;400;500&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
+  <noscript><link href="https://fonts.googleapis.com/css2?family=Comfortaa:wght@400;500;700&family=Cormorant+Garamond:ital,wght@0,300;0,400;1,400&family=Noto+Serif+SC:wght@300;400;500&display=swap" rel="stylesheet"></noscript>
+  <script>(function(){var t=localStorage.getItem('archer-theme');if(t!=='light')document.documentElement.setAttribute('data-theme','dark');})();</script>
+  <script>(function(){var cpu=navigator.hardwareConcurrency||8;var mem=navigator.deviceMemory||8;if(cpu<=2||mem<=1)document.documentElement.setAttribute('data-perf','low');})();</script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+  <link rel="stylesheet" href="assets/index.css">
+</head>
+<body>
+  <main class="scene" id="scene">
+    <div class="aurora"></div>
+    <div class="noise"></div>
+
+    <section class="panel" id="hero">
+      <a class="site-mark" href="index.html" aria-label="Archer 首页">
+        <span class="site-mark-ring"></span>
+        <span class="site-mark-text">Archer</span>
+      </a>
+
+      <button class="theme-toggle" id="themeToggle" aria-label="切换主题">
+        <svg class="icon-sun" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+          <circle cx="12" cy="12" r="4.5"/>
+          <line x1="12" y1="2" x2="12" y2="4.5"/>
+          <line x1="12" y1="19.5" x2="12" y2="22"/>
+          <line x1="2" y1="12" x2="4.5" y2="12"/>
+          <line x1="19.5" y1="12" x2="22" y2="12"/>
+          <line x1="5.64" y1="5.64" x2="7.41" y2="7.41"/>
+          <line x1="16.59" y1="16.59" x2="18.36" y2="18.36"/>
+          <line x1="5.64" y1="18.36" x2="7.41" y2="16.59"/>
+          <line x1="16.59" y1="7.41" x2="18.36" y2="5.64"/>
+        </svg>
+        <svg class="icon-moon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+        </svg>
+      </button>
+
+      <div class="float-layer">
+        <!-- 蓝色四芒星 -->
+        <svg class="spark" style="top:8%;left:10%;width:20px;height:26px;--dur:5.4s;--delay:0s;--op:.92;" viewBox="0 0 20 26">
+          <path d="M10 0L11.6 10L20 13L11.6 16L10 26L8.4 16L0 13L8.4 10Z" fill="#1e7be8"/>
+        </svg>
+        <svg class="spark" style="top:16%;right:11%;width:16px;height:21px;--dur:7.0s;--delay:1.5s;--op:.80;" viewBox="0 0 20 26">
+          <path d="M10 0L11.6 10L20 13L11.6 16L10 26L8.4 16L0 13L8.4 10Z" fill="#5aabf0"/>
+        </svg>
+        <svg class="spark" style="top:44%;left:7%;width:13px;height:17px;--dur:4.8s;--delay:2.2s;--op:.72;" viewBox="0 0 20 26">
+          <path d="M10 0L11.6 10L20 13L11.6 16L10 26L8.4 16L0 13L8.4 10Z" fill="#1e7be8"/>
+        </svg>
+        <svg class="spark" style="top:35%;right:8%;width:22px;height:28px;--dur:7.6s;--delay:0.7s;--op:.86;" viewBox="0 0 20 26">
+          <path d="M10 0L11.6 10L20 13L11.6 16L10 26L8.4 16L0 13L8.4 10Z" fill="#1e7be8"/>
+        </svg>
+        <!-- 金/橙四芒星 -->
+        <svg class="spark" style="top:25%;left:19%;width:15px;height:19px;--dur:6.0s;--delay:3.1s;--op:.88;" viewBox="0 0 20 26">
+          <path d="M10 0L11.6 10L20 13L11.6 16L10 26L8.4 16L0 13L8.4 10Z" fill="#f5c842"/>
+        </svg>
+        <svg class="spark" style="top:60%;right:13%;width:18px;height:23px;--dur:6.4s;--delay:1.9s;--op:.82;" viewBox="0 0 20 26">
+          <path d="M10 0L11.6 10L20 13L11.6 16L10 26L8.4 16L0 13L8.4 10Z" fill="#f5c842"/>
+        </svg>
+        <svg class="spark" style="bottom:24%;left:13%;width:16px;height:20px;--dur:5.2s;--delay:1.0s;--op:.76;" viewBox="0 0 20 26">
+          <path d="M10 0L11.6 10L20 13L11.6 16L10 26L8.4 16L0 13L8.4 10Z" fill="#f5c842"/>
+        </svg>
+        <svg class="spark" style="bottom:15%;right:19%;width:13px;height:17px;--dur:5.8s;--delay:2.6s;--op:.72;" viewBox="0 0 20 26">
+          <path d="M10 0L11.6 10L20 13L11.6 16L10 26L8.4 16L0 13L8.4 10Z" fill="#5aabf0"/>
+        </svg>
+        <!-- 红橙四芒星（暖色新增）-->
+        <svg class="spark" style="top:52%;right:6%;width:14px;height:18px;--dur:6.2s;--delay:0.4s;--op:.78;" viewBox="0 0 20 26">
+          <path d="M10 0L11.6 10L20 13L11.6 16L10 26L8.4 16L0 13L8.4 10Z" fill="#f5612a"/>
+        </svg>
+        <svg class="spark" style="top:12%;left:32%;width:11px;height:14px;--dur:7.4s;--delay:2.0s;--op:.68;" viewBox="0 0 20 26">
+          <path d="M10 0L11.6 10L20 13L11.6 16L10 26L8.4 16L0 13L8.4 10Z" fill="#e8212a"/>
+        </svg>
+        <!-- 红色飘落花瓣 -->
+        <svg class="spark" style="top:30%;left:27%;width:10px;height:14px;--dur:7.2s;--delay:3.6s;--op:.65;" viewBox="0 0 10 14">
+          <ellipse cx="5" cy="7" rx="3.2" ry="5.5" fill="#e8212a" transform="rotate(20 5 7)"/>
+        </svg>
+        <svg class="spark" style="top:22%;right:23%;width:9px;height:13px;--dur:6.8s;--delay:1.3s;--op:.60;" viewBox="0 0 10 14">
+          <ellipse cx="5" cy="7" rx="3.2" ry="5.5" fill="#f5612a" transform="rotate(-15 5 7)"/>
+        </svg>
+        <svg class="spark" style="top:68%;left:18%;width:9px;height:13px;--dur:8.2s;--delay:4.5s;--op:.55;" viewBox="0 0 10 14">
+          <ellipse cx="5" cy="7" rx="3.2" ry="5.5" fill="#e8212a" transform="rotate(35 5 7)"/>
+        </svg>
+      </div>
+
+      <div class="content">
+        <div class="logo-wrap" aria-hidden="true">
+          <svg class="orbit-svg" viewBox="0 0 324 324" xmlns="http://www.w3.org/2000/svg">
+            <defs>
+              <linearGradient id="orbitCyan" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%"   stop-color="#4dd9d4" stop-opacity="0.7"/>
+                <stop offset="50%"  stop-color="#4dd9d4" stop-opacity="0.15"/>
+                <stop offset="100%" stop-color="#4dd9d4" stop-opacity="0.5"/>
+              </linearGradient>
+              <linearGradient id="orbitWarm" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%"   stop-color="#f5612a" stop-opacity="0.4"/>
+                <stop offset="50%"  stop-color="#f5c842" stop-opacity="0.1"/>
+                <stop offset="100%" stop-color="#f5612a" stop-opacity="0.3"/>
+              </linearGradient>
+            </defs>
+            <ellipse cx="162" cy="162" rx="134" ry="112" fill="none"
+                     stroke="url(#orbitCyan)" stroke-width="1.6" stroke-dasharray="7 11"
+                     transform="rotate(14 162 162)" opacity="0.55"/>
+            <ellipse cx="162" cy="162" rx="122" ry="104" fill="none"
+                     stroke="url(#orbitWarm)" stroke-width="1.2" stroke-dasharray="4 15"
+                     transform="rotate(-17 162 162)" opacity="0.42"/>
+            <path d="M4.5 0L5.8 3.2L9 4.5L5.8 5.8L4.5 9L3.2 5.8L0 4.5L3.2 3.2Z"
+                  fill="#4dd9d4" opacity="0.8" transform="translate(272 96)"/>
+            <path d="M3.5 0L4.5 2.5L7 3.5L4.5 4.5L3.5 7L2.5 4.5L0 3.5L2.5 2.5Z"
+                  fill="#4dd9d4" opacity="0.55" transform="translate(52 222)"/>
+            <path d="M3.5 0L4.5 2.5L7 3.5L4.5 4.5L3.5 7L2.5 4.5L0 3.5L2.5 2.5Z"
+                  fill="#f5c842" opacity="0.7" transform="translate(278 168)"/>
+            <path d="M2.5 0L3.2 1.8L5 2.5L3.2 3.2L2.5 5L1.8 3.2L0 2.5L1.8 1.8Z"
+                  fill="#f5612a" opacity="0.55" transform="translate(148 46)"/>
+          </svg>
+          <div class="ring-wrap">
+            <div class="ring-base"></div>
+            <div class="ring-shine"></div>
+            <div class="ring-halo"></div>
+          </div>
+        </div>
+
+        <h1 class="brand"><span class="gradient">Archer</span></h1>
+
+        <div class="title">
+          <span class="line">一个了解你</span>
+          <span class="line">并与你共同生长的<span class="soul">灵魂</span></span>
+        </div>
+
+        <div class="subtitle">
+          <span class="line">一个长期理解你的灵魂伴生体。</span>
+        </div>
+
+        <div class="actions">
+          <button type="button" class="btn-enter" id="heroEnterBtn">进入 Archer</button>
+        </div>
+        <div class="progress-note" id="homeProgressNote"></div>
+      </div>
+
+      <footer class="site-footer">
+        <span>© 2026 Archer · <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener">浙ICP备2021027919号-5</a> · <a href="privacy.html">隐私政策</a> · <a href="terms.html">用户协议</a></span>
+      </footer>
+
+      <div class="flow-layer" aria-hidden="true">
+        <svg viewBox="0 0 1800 640" preserveAspectRatio="none">
+          <defs>
+            <linearGradient id="flowCyan" x1="0%" y1="0%" x2="100%" y2="0%">
+              <stop offset="0%"   stop-color="#4dd9d4" stop-opacity="0"/>
+              <stop offset="12%"  stop-color="#5ee8e0" stop-opacity="0.82"/>
+              <stop offset="44%"  stop-color="#4dd9d4" stop-opacity="0.58"/>
+              <stop offset="70%"  stop-color="#4dd9d4" stop-opacity="0.76"/>
+              <stop offset="100%" stop-color="#5ee8e0" stop-opacity="0"/>
+            </linearGradient>
+            <linearGradient id="flowWarm" x1="0%" y1="0%" x2="100%" y2="0%">
+              <stop offset="0%"   stop-color="#f5c842" stop-opacity="0"/>
+              <stop offset="28%"  stop-color="#f5c842" stop-opacity="0.22"/>
+              <stop offset="64%"  stop-color="#f5612a" stop-opacity="0.18"/>
+              <stop offset="100%" stop-color="#e8212a" stop-opacity="0"/>
+            </linearGradient>
+            <linearGradient id="flowThin" x1="0%" y1="0%" x2="100%" y2="0%">
+              <stop offset="0%"   stop-color="#4dd9d4" stop-opacity="0"/>
+              <stop offset="24%"  stop-color="#5ee8e0" stop-opacity="0.48"/>
+              <stop offset="72%"  stop-color="#4dd9d4" stop-opacity="0.36"/>
+              <stop offset="100%" stop-color="#4dd9d4" stop-opacity="0"/>
+            </linearGradient>
+          </defs>
+          <path d="M0 478 C 260 318, 410 548, 718 450 S 1090 278, 1382 406 S 1618 502, 1800 338"
+                fill="none" stroke="url(#flowCyan)" stroke-width="16"
+                stroke-linecap="round" opacity="0.92"/>
+          <path d="M140 528 C 390 418, 572 588, 876 494 S 1282 352, 1558 464"
+                fill="none" stroke="url(#flowWarm)" stroke-width="6.5"
+                stroke-linecap="round" opacity="0.72"/>
+          <path d="M60 558 C 330 444, 492 608, 820 512 S 1198 374, 1504 494 S 1682 542, 1800 430"
+                fill="none" stroke="url(#flowThin)" stroke-width="3.5"
+                stroke-linecap="round" opacity="0.68"/>
+          <path d="M200 580 C 460 490, 640 610, 960 538 S 1340 420, 1620 510"
+                fill="none" stroke="#4dd9d4" stroke-width="1.5"
+                stroke-linecap="round" opacity="0.28"/>
+        </svg>
+      </div>
+    </section>
+  </main>
+
+  <div class="invite-modal" id="inviteModal" aria-hidden="true">
+    <div class="invite-dialog" role="dialog" aria-modal="true" aria-labelledby="inviteBrand">
+      <div class="invite-mark">
+        <div class="invite-ring" aria-hidden="true"></div>
+        <div class="invite-brand" id="inviteBrand">Archer</div>
+      </div>
+      <div class="invite-code-section">
+        <div class="invite-auth">
+          <div class="invite-user-line" id="inviteUserLine">
+            <span id="inviteUserEmail"></span>
+            <button type="button" class="ghost-btn" id="inviteLogoutBtn">切换账号</button>
+          </div>
+          <div id="inviteGoogleSection">
+            <button type="button" class="invite-google-btn" id="inviteGoogleBtn">
+              <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
+                <path d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844a4.14 4.14 0 0 1-1.796 2.716v2.259h2.908c1.702-1.567 2.684-3.875 2.684-6.615z" fill="#4285F4"/>
+                <path d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 0 0 9 18z" fill="#34A853"/>
+                <path d="M3.964 10.71A5.41 5.41 0 0 1 3.682 9c0-.593.102-1.17.282-1.71V4.958H.957A8.996 8.996 0 0 0 0 9c0 1.452.348 2.827.957 4.042l3.007-2.332z" fill="#FBBC05"/>
+                <path d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 0 0 .957 4.958L3.964 7.29C4.672 5.163 6.656 3.58 9 3.58z" fill="#EA4335"/>
+              </svg>
+              <span id="inviteGoogleBtnText">使用 Google 账号登录</span>
+            </button>
+            <div class="invite-divider">或</div>
+          </div>
+          <div id="inviteEmailForm">
+            <div class="invite-form-stack">
+              <div class="invite-email-row">
+                <input class="invite-email" id="inviteEmailInput" type="email" placeholder="邮箱" autocomplete="email" aria-describedby="inviteAuthStatus" />
+                <button type="button" class="ghost-btn invite-send-btn" id="inviteLoginBtn">发送验证码</button>
+              </div>
+              <input class="invite-otp" id="inviteOtpInput" type="text" inputmode="numeric" maxlength="8" placeholder="验证码" autocomplete="one-time-code" aria-describedby="inviteAuthStatus" />
+              <input class="invite-input" id="inviteInput" type="text" placeholder="邀请码" autocomplete="off" spellcheck="false" />
+            </div>
+          </div>
+          <div class="invite-auth-status" id="inviteAuthStatus"></div>
+        </div>
+        <div class="invite-error" id="inviteError"></div>
+        <div class="invite-actions">
+          <button type="button" class="invite-submit-btn" id="inviteSubmitBtn">确认</button>
+          <button type="button" class="invite-back-link" id="inviteBackBtn">返回主页</button>
+        </div>
+        <p class="invite-request-note" style="margin-top:14px;font-size:12px;color:var(--muted,#888);text-align:center;">没有邀请码？联系枫弋获取。</p>
+      </div>
+      <div class="invite-request" id="inviteRequest" style="display:none;"></div>
+    </div>
+  </div>
+
+  <!-- 常驻星星层（仪式开始时激活，整个流程都在） -->
+  <div class="void-stars" id="voidStars"></div>
+  <div class="void-color-sparks" aria-hidden="true">
+    <svg class="spark" style="top:8%;left:8%;width:22px;height:28px;--dur:5.4s;--delay:0s;--op:.92;" viewBox="0 0 20 26">
+      <path d="M10 0L11.6 10L20 13L11.6 16L10 26L8.4 16L0 13L8.4 10Z" fill="#1e7be8"/>
+    </svg>
+    <svg class="spark" style="top:13%;right:9%;width:18px;height:24px;--dur:7.0s;--delay:1.5s;--op:.84;" viewBox="0 0 20 26">
+      <path d="M10 0L11.6 10L20 13L11.6 16L10 26L8.4 16L0 13L8.4 10Z" fill="#5aabf0"/>
+    </svg>
+    <svg class="spark" style="top:23%;left:14%;width:15px;height:20px;--dur:6.0s;--delay:3.1s;--op:.88;" viewBox="0 0 20 26">
+      <path d="M10 0L11.6 10L20 13L11.6 16L10 26L8.4 16L0 13L8.4 10Z" fill="#f5c842"/>
+    </svg>
+    <svg class="spark" style="top:28%;right:15%;width:17px;height:22px;--dur:6.4s;--delay:1.9s;--op:.82;" viewBox="0 0 20 26">
+      <path d="M10 0L11.6 10L20 13L11.6 16L10 26L8.4 16L0 13L8.4 10Z" fill="#f5c842"/>
+    </svg>
+    <svg class="spark" style="top:38%;left:7%;width:14px;height:18px;--dur:4.8s;--delay:2.2s;--op:.72;" viewBox="0 0 20 26">
+      <path d="M10 0L11.6 10L20 13L11.6 16L10 26L8.4 16L0 13L8.4 10Z" fill="#1e7be8"/>
+    </svg>
+    <svg class="spark" style="top:36%;right:7%;width:20px;height:26px;--dur:7.6s;--delay:0.7s;--op:.86;" viewBox="0 0 20 26">
+      <path d="M10 0L11.6 10L20 13L11.6 16L10 26L8.4 16L0 13L8.4 10Z" fill="#1e7be8"/>
+    </svg>
+    <svg class="spark" style="top:17%;left:28%;width:12px;height:16px;--dur:7.4s;--delay:2.0s;--op:.68;" viewBox="0 0 20 26">
+      <path d="M10 0L11.6 10L20 13L11.6 16L10 26L8.4 16L0 13L8.4 10Z" fill="#e8212a"/>
+    </svg>
+    <svg class="spark" style="top:20%;right:26%;width:13px;height:17px;--dur:6.2s;--delay:0.4s;--op:.78;" viewBox="0 0 20 26">
+      <path d="M10 0L11.6 10L20 13L11.6 16L10 26L8.4 16L0 13L8.4 10Z" fill="#f5612a"/>
+    </svg>
+    <svg class="spark" style="top:31%;left:24%;width:10px;height:14px;--dur:7.2s;--delay:3.6s;--op:.65;" viewBox="0 0 10 14">
+      <ellipse cx="5" cy="7" rx="3.2" ry="5.5" fill="#e8212a" transform="rotate(20 5 7)"/>
+    </svg>
+    <svg class="spark" style="top:30%;right:25%;width:9px;height:13px;--dur:6.8s;--delay:1.3s;--op:.60;" viewBox="0 0 10 14">
+      <ellipse cx="5" cy="7" rx="3.2" ry="5.5" fill="#f5612a" transform="rotate(-15 5 7)"/>
+    </svg>
+  </div>
+
+  <!-- ════════════════════════════════════════════════════
+       后续流程层 —— 仪式跑完后激活
+       ════════════════════════════════════════════════════ -->
+  <div class="void-stage" id="voidStage">
+    <!-- 中央光点 -->
+    <div class="void-pinpoint" id="voidPinpoint"></div>
+
+    <!-- Soul 创建：一次一问 -->
+    <div class="void-scene" id="sceneSoul">
+      <div class="soul-step" data-step="0">
+        <div class="soul-prompt">
+          在开始之前，<span class="br-narrow"></span>
+          Archer 想先 <span class="brand-gradient-text">认识你。</span>
+        </div>
+        <button type="button" class="ghost-btn" data-soul-next>好</button>
+      </div>
+
+      <div class="soul-step" data-step="1">
+        <div class="soul-orb" aria-hidden="true"></div>
+        <div class="soul-brand" aria-hidden="true">Archer</div>
+        <div class="soul-prompt">你想让它怎么称呼你？</div>
+        <div class="soul-input-wrap">
+          <input type="text" class="soul-input" data-soul-input
+                 placeholder="一个名字，或一个称呼" maxlength="20" />
+        </div>
+      </div>
+
+      <div class="soul-step" data-step="2">
+        <div class="soul-orb" aria-hidden="true"></div>
+        <div class="soul-brand" aria-hidden="true">Archer</div>
+        <div class="soul-prompt">你最近，常常在想什么？</div>
+        <div class="soul-input-wrap">
+          <input type="text" class="soul-input" data-soul-input
+                 placeholder="一件事，一个人，或一种感觉" maxlength="60" />
+        </div>
+      </div>
+
+      <div class="soul-step" data-step="3">
+        <div class="soul-orb" aria-hidden="true"></div>
+        <div class="soul-brand" aria-hidden="true">Archer</div>
+        <div class="soul-prompt">你希望 Archer 怎么对你？</div>
+        <div class="soul-input-wrap">
+          <input type="text" class="soul-input" data-soul-input
+                 placeholder="一句话，说给它听" maxlength="60" />
+        </div>
+      </div>
+
+      <button type="button" class="ghost-btn soul-continue" id="soulContinueBtn">继 续</button>
+    </div>
+
+    <!-- 十问开场 -->
+    <div class="threshold" id="thresholdView">
+      <div class="threshold-orb" aria-hidden="true"></div>
+      <div class="threshold-brand" aria-hidden="true">Archer</div>
+      <div class="threshold-title">灵 魂 十 问</div>
+      <div class="threshold-text">准备好了吗？</div>
+      <div class="threshold-actions">
+        <button type="button" class="ghost-btn" id="thresholdStartBtn">
+          <span class="threshold-action-symbol" aria-hidden="true">✦</span>
+          <span>开 始</span>
+        </button>
+        <button type="button" class="ghost-btn" id="thresholdWaitBtn">
+          <span class="threshold-action-symbol" aria-hidden="true">☾</span>
+          <span>等 等</span>
+        </button>
+      </div>
+      <div class="threshold-trust" aria-hidden="true">Archer 会记住你说的每一句话</div>
+    </div>
+
+    <!-- 八问对话 -->
+    <div class="void-scene" id="sceneChat">
+      <!-- 彩色四芒星点缀层（沿用首页 float-layer 风格） -->
+      <div class="chat-sparks" aria-hidden="true">
+        <svg class="spark" style="top:9%;left:8%;width:18px;height:24px;--dur:5.4s;--delay:0s;--op:.88;" viewBox="0 0 20 26">
+          <path d="M10 0L11.6 10L20 13L11.6 16L10 26L8.4 16L0 13L8.4 10Z" fill="#1e7be8"/>
+        </svg>
+        <svg class="spark" style="top:14%;right:9%;width:15px;height:20px;--dur:7.0s;--delay:1.5s;--op:.78;" viewBox="0 0 20 26">
+          <path d="M10 0L11.6 10L20 13L11.6 16L10 26L8.4 16L0 13L8.4 10Z" fill="#5aabf0"/>
+        </svg>
+        <svg class="spark" style="top:22%;left:14%;width:12px;height:16px;--dur:4.8s;--delay:2.2s;--op:.70;" viewBox="0 0 20 26">
+          <path d="M10 0L11.6 10L20 13L11.6 16L10 26L8.4 16L0 13L8.4 10Z" fill="#f5c842"/>
+        </svg>
+        <svg class="spark" style="top:26%;right:16%;width:14px;height:19px;--dur:6.0s;--delay:3.1s;--op:.80;" viewBox="0 0 20 26">
+          <path d="M10 0L11.6 10L20 13L11.6 16L10 26L8.4 16L0 13L8.4 10Z" fill="#f5c842"/>
+        </svg>
+        <svg class="spark" style="top:32%;left:20%;width:10px;height:13px;--dur:7.4s;--delay:0.7s;--op:.62;" viewBox="0 0 20 26">
+          <path d="M10 0L11.6 10L20 13L11.6 16L10 26L8.4 16L0 13L8.4 10Z" fill="#f5612a"/>
+        </svg>
+        <svg class="spark" style="top:36%;right:22%;width:11px;height:14px;--dur:6.4s;--delay:1.9s;--op:.70;" viewBox="0 0 20 26">
+          <path d="M10 0L11.6 10L20 13L11.6 16L10 26L8.4 16L0 13L8.4 10Z" fill="#1e7be8"/>
+        </svg>
+        <!-- 下半屏点缀（稀疏） -->
+        <svg class="spark" style="bottom:28%;left:10%;width:12px;height:16px;--dur:5.8s;--delay:2.6s;--op:.55;" viewBox="0 0 20 26">
+          <path d="M10 0L11.6 10L20 13L11.6 16L10 26L8.4 16L0 13L8.4 10Z" fill="#5aabf0"/>
+        </svg>
+        <svg class="spark" style="bottom:32%;right:12%;width:13px;height:17px;--dur:6.8s;--delay:1.3s;--op:.58;" viewBox="0 0 20 26">
+          <path d="M10 0L11.6 10L20 13L11.6 16L10 26L8.4 16L0 13L8.4 10Z" fill="#f5c842"/>
+        </svg>
+      </div>
+
+      <div class="chat-topbar">
+        <div class="chat-mini-ring" id="chatMiniRing"></div>
+        <div class="chat-brand" aria-hidden="true">Archer</div>
+      </div>
+      <div class="chat-stage">
+        <div class="q-number" id="qNumber"></div>
+        <div class="question" id="questionText"></div>
+        <div class="my-answer" id="myAnswer"></div>
+      </div>
+      <div class="silence-hint" id="silenceHint" aria-label="记录中">
+        <span style="--delay:0s;">记</span>
+        <span style="--delay:.22s;">录</span>
+        <span style="--delay:.44s;">中</span>
+      </div>
+      <div class="chat-input-wrap" id="chatInputWrap">
+        <div class="keyboard-context" id="keyboardContext" aria-hidden="true">
+          <div class="keyboard-context-mark">
+            <div class="keyboard-context-ring"></div>
+            <div class="keyboard-context-brand">Archer</div>
+          </div>
+          <div class="keyboard-context-question" id="keyboardQuestion"></div>
+        </div>
+        <textarea class="chat-textarea" id="chatTextarea" wrap="soft"
+                  placeholder="" rows="1"></textarea>
+        <button type="button" class="ghost-btn" id="chatSendBtn">继 续</button>
+      </div>
+    </div>
+
+    <!-- 终章 -->
+    <div class="ending" id="endingView">
+      <div class="ending-ring"></div>
+      <div class="ending-brand" aria-hidden="true">Archer</div>
+      <div class="ending-title">十问已尽</div>
+      <div class="ending-text">
+        Archer 已经看见你的轮廓。<br>
+        你的初始 Soul 已生成。
+      </div>
+
+      <!-- 分叉选择：继续深入 · 或今天先到这里 -->
+      <div class="ending-choice">
+        <div class="ending-choice-q">还想继续吗？</div>
+        <div class="ending-choice-sub">
+          Archer 还有一些更深的问题想问你。<br>
+          一起走完，它会更懂你。
+        </div>
+        <div class="ending-actions">
+          <button type="button" class="ghost-btn ghost-btn-primary" id="endingContinueBtn">继续深入</button>
+          <button type="button" class="ghost-btn" id="endingStopBtn">先到这里</button>
+        </div>
+      </div>
+
+      <!-- 结束后的提示（用户选"今天先到这里"或深度流程走完后显示） -->
+      <div class="ending-farewell" id="endingFarewell">
+        <div class="ending-farewell-text">
+          Soul 已保存。<br>
+          <span class="ending-farewell-line">你可以随时回来，</span>
+          <span class="ending-farewell-line">继续与 Archer 一起生长。</span>
+        </div>
+        <div class="ending-farewell-actions">
+          <button type="button" class="ghost-btn" id="endingHomeBtn">返回首页</button>
+          <button type="button" class="ghost-btn ghost-btn-primary" id="endingStartChatBtn">开始聊天</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="deep-checkpoint" id="deepCheckpoint">
+      <div class="deep-checkpoint-ring" aria-hidden="true"></div>
+      <div class="deep-checkpoint-brand" aria-hidden="true">Archer</div>
+      <div class="deep-checkpoint-title">Archer 又更靠近你了一点。</div>
+      <div class="deep-checkpoint-depth" id="deepCheckpointDepth">Soul 深度 15/50</div>
+      <div class="deep-checkpoint-actions">
+        <button type="button" class="ghost-btn ghost-btn-primary" id="deepContinueBtn">继续 5 问</button>
+        <button type="button" class="ghost-btn" id="deepSaveBtn">保存到这里</button>
+      </div>
+    </div>
+
+    <div class="return-gate" id="returnGate" aria-hidden="true">
+      <div class="ending-ring" aria-hidden="true"></div>
+      <div class="ending-brand" aria-hidden="true">Archer</div>
+      <div class="return-gate-title" id="returnGateTitle">Soul 已生成</div>
+      <div class="return-gate-text" id="returnGateText">
+        你已经完成了基础十问。<br>
+        现在可以开始聊天，或继续完善 Soul。
+      </div>
+      <div class="return-gate-actions" id="returnGateActions">
+        <button type="button" class="ghost-btn ghost-btn-primary" id="returnStartChatBtn">开始聊天</button>
+        <button type="button" class="ghost-btn" id="returnImproveSoulBtn">完善 Soul</button>
+      </div>
+    </div>
+
+    <div class="soul-review" id="soulReview" aria-hidden="true">
+      <div class="soul-review-title">回顾 Soul</div>
+      <div class="soul-review-text">你可以先看一遍自己的回答，再决定是否重新回答。</div>
+      <pre class="soul-review-body" id="soulReviewBody"></pre>
+      <div class="soul-review-actions">
+        <button type="button" class="ghost-btn" id="soulReviewBackBtn">返回</button>
+        <button type="button" class="ghost-btn ghost-btn-primary" id="soulRestartBtn">重新回答</button>
+      </div>
+    </div>
+
+    <div class="live-chat" id="liveChatView" aria-hidden="true">
+      <div class="live-chat-card">
+        <aside class="live-sidebar" id="liveSidebar">
+          <div class="live-sidebar-head">
+            <div class="live-chat-title">
+              <div class="live-chat-logo" aria-hidden="true"></div>
+              <span>Archer</span>
+            </div>
+            <button type="button" class="live-home-btn workspace-icon-btn" id="liveChatHomeBtn" aria-label="返回首页">⌂</button>
+          </div>
+          <button type="button" class="workspace-action primary live-new-chat" id="liveNewChatBtn">新对话</button>
+          <div class="conversation-section">
+            <div class="conversation-section-label">对话</div>
+            <button type="button" class="conversation-item active" data-thread="first">初次使用 Archer</button>
+            <button type="button" class="conversation-item" data-thread="current">现在卡住的事</button>
+            <button type="button" class="conversation-item" data-thread="soul">继续完善 Soul</button>
+          </div>
+          <div class="conversation-section">
+            <div class="conversation-section-label">继续使用</div>
+            <button type="button" class="sidebar-action strong" id="workspaceLoginBtn">✦ 登录解锁完整版</button>
+            <button type="button" class="sidebar-action" id="workspaceImproveSoulBtn">继续完善 Soul</button>
+            <button type="button" class="sidebar-action" id="workspaceDownloadSoulBtn">下载 Soul.md</button>
+            <button type="button" class="sidebar-action" id="workspaceExportSoulJsonBtn">导出 Soul JSON</button>
+            <button type="button" class="sidebar-action strong" id="workspaceDesktopBtn">⬇ 安装桌面客户端</button>
+            <button type="button" class="sidebar-action" id="workspaceTerminalBtn">⌘ 安装终端版</button>
+          </div>
+          <div class="live-sidebar-note">网页端适合体验。长期记忆、本地文件和深度陪伴，需要客户端或终端版。</div>
+        </aside>
+        <div class="live-chat-body">
+          <div class="live-main-header">
+            <button type="button" class="workspace-icon-btn live-sidebar-toggle" id="liveSidebarToggle" aria-label="打开侧栏">☰</button>
+            <div class="live-main-title">
+              <span id="liveThreadTitle">初次使用 Archer</span>
+              <small id="liveChatStatus">Web Trial · 临时 Soul 已载入</small>
+            </div>
+            <div class="background-picker" aria-label="选择背景">
+              <button type="button" class="bg-choice active" data-bg="deep" title="深海背景"></button>
+              <button type="button" class="bg-choice paper" data-bg="paper" title="米纸背景"></button>
+              <button type="button" class="bg-choice plain" data-bg="plain" title="极简背景"></button>
+            </div>
+          </div>
+          <main class="live-chat-main">
+            <div class="live-chat-messages" id="liveChatMessages"></div>
+            <div class="live-chat-composer">
+              <textarea id="liveChatInput" rows="1" placeholder="回答刚才的问题，或说一个你现在卡住的处境…"></textarea>
+              <button type="button" class="live-send-btn" id="liveChatSendBtn" aria-label="发送">↑</button>
+            </div>
+          </main>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="assets/soul-profile.js"></script>
+  <script src="assets/web-companion.js"></script>
+  <script src="assets/index.js"></script>
+</body>
+</html>

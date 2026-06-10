@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>用户协议 · Archer</title>
+  <meta name="description" content="Archer 用户协议。" />
+  <link rel="icon" type="image/svg+xml" href="/archer-favicon.svg">
+  <link rel="icon" type="image/png" sizes="32x32" href="/archer-favicon-32.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="/archer-favicon-180.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Comfortaa:wght@700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #f8f5ef;
+      --bg-soft: #f3eee6;
+      --surface: rgba(255, 252, 247, 0.76);
+      --border: rgba(89, 102, 113, 0.14);
+      --text: #2f3a42;
+      --muted: #6e7880;
+      --accent: #4dd9d4;
+      --nav-bg: rgba(248, 245, 239, 0.78);
+      --footer-color: rgba(89, 102, 113, 0.72);
+      --footer-link: rgba(89, 102, 113, 0.78);
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+      color: var(--text);
+      background: var(--bg);
+    }
+
+    [data-theme="dark"] {
+      --bg: #0d1219;
+      --bg-soft: #0a0f14;
+      --surface: rgba(18, 30, 50, 0.62);
+      --border: rgba(77, 217, 212, 0.12);
+      --text: #d0dde8;
+      --muted: #8a9dac;
+      --accent: #4dd9d4;
+      --nav-bg: rgba(13, 18, 25, 0.82);
+      --footer-color: rgba(138, 157, 172, 0.60);
+      --footer-link: rgba(138, 157, 172, 0.72);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100dvh;
+      background:
+        radial-gradient(circle at 16% 12%, rgba(77, 217, 212, 0.11), transparent 24rem),
+        radial-gradient(circle at 84% 20%, rgba(245, 97, 42, 0.07), transparent 22rem),
+        linear-gradient(180deg, var(--bg), var(--bg-soft));
+    }
+
+    .nav {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 22px clamp(20px, 5vw, 52px);
+      border-bottom: 1px solid var(--border);
+      background: var(--nav-bg);
+      backdrop-filter: blur(18px);
+    }
+    @supports not (backdrop-filter: blur(1px)) {
+      .nav { background: var(--bg); }
+    }
+
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 12px;
+      color: var(--text);
+      text-decoration: none;
+      font-size: 14px;
+      font-weight: 700;
+      font-family: "Comfortaa", "PingFang SC", sans-serif;
+      letter-spacing: 0.1em;
+    }
+
+    .ring {
+      width: 16px;
+      height: 16px;
+      border-radius: 46% 54% 53% 47% / 48% 52% 44% 56%;
+      background: conic-gradient(from 195deg, #5ee8e0, #1e7be8, #f5c842, #f5612a, #e8212a, #5ee8e0);
+      -webkit-mask: radial-gradient(circle at center, transparent 39%, #000 41%);
+      mask: radial-gradient(circle at center, transparent 39%, #000 41%);
+    }
+
+    .nav a:last-child {
+      color: var(--muted);
+      font-size: 13px;
+      text-decoration: none;
+    }
+
+    main {
+      width: min(760px, calc(100% - 40px));
+      margin: 0 auto;
+      padding: clamp(54px, 9vw, 96px) 0;
+    }
+
+    article {
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      background: var(--surface);
+      box-shadow: 0 28px 80px rgba(48, 80, 118, 0.1);
+      padding: clamp(28px, 5vw, 48px);
+    }
+
+    h1 {
+      margin: 0 0 10px;
+      color: var(--text);
+      font-size: clamp(30px, 5vw, 46px);
+      line-height: 1.12;
+    }
+
+    .date {
+      margin-bottom: 34px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    h2 {
+      margin: 34px 0 10px;
+      color: var(--text);
+      font-size: 19px;
+    }
+
+    p, li {
+      color: var(--muted);
+      font-size: 15px;
+      line-height: 1.9;
+    }
+
+    ul {
+      margin: 10px 0 0;
+      padding-left: 20px;
+    }
+
+    footer {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      flex-wrap: wrap;
+      margin-top: 28px;
+      padding-bottom: max(20px, env(safe-area-inset-bottom, 0px));
+      color: var(--footer-color);
+      font-size: 12px;
+    }
+
+    footer a {
+      color: var(--footer-link);
+      text-decoration: none;
+    }
+  </style>
+</head>
+<body>
+  <script>(function(){var t=localStorage.getItem("archer-theme");if(t!=="light")document.documentElement.setAttribute("data-theme","dark")})()</script>
+  <nav class="nav">
+    <a class="brand" href="index.html"><span class="ring"></span><span>Archer</span></a>
+    <a href="index.html">返回首页</a>
+  </nav>
+  <main>
+    <article>
+      <h1>用户协议</h1>
+      <div class="date">生效日期：2026-04-20</div>
+
+      <p>欢迎使用 Archer。Archer 目前是个人维护的实验性工具，用于探索个人 Soul 文件、长期上下文和 AI 回应体验。</p>
+
+      <h2>服务性质</h2>
+      <p>Archer 提供的内容仅用于个人记录、思考辅助和实验性体验，不构成医疗、法律、财务或其他专业建议。</p>
+
+      <h2>用户责任</h2>
+      <ul>
+        <li>你应对自己输入的内容和基于输出采取的行动负责。</li>
+        <li>请不要输入他人的隐私、违法内容或高度敏感信息。</li>
+        <li>请不要试图攻击、干扰或滥用网站服务。</li>
+      </ul>
+
+      <h2>内容与输出</h2>
+      <p>AI 或本地规则生成的回应可能不准确、不完整或不适合你的具体处境。重要决定应结合现实信息、专业意见和自己的判断。</p>
+
+      <h2>服务变更</h2>
+      <p>Archer 仍处于早期阶段，页面、功能、数据保存方式和模型接入方式可能随时调整。重大变化会尽量在页面或维护文档中说明。</p>
+
+      <h2>终止使用</h2>
+      <p>如果你不同意本协议，可以停止使用 Archer，并清理浏览器中与 Archer 相关的本地数据。</p>
+    </article>
+    <footer>
+      <span>© 2026 Archer · 浙ICP备2021027919号-5</span>
+      <span><a href="privacy.html">隐私政策</a></span>
+    </footer>
+  </main>
+</body>
+</html>

@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>登录验证 · Archer</title>
+  <link rel="icon" type="image/svg+xml" href="/archer-favicon.svg">
+  <link rel="icon" type="image/png" sizes="32x32" href="/archer-favicon-32.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="/archer-favicon-180.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Comfortaa:wght@400;700&family=Noto+Serif+SC:wght@300;400&display=swap" rel="stylesheet">
+  <script>(function(){var t=localStorage.getItem('archer-theme');if(t!=='light')document.documentElement.setAttribute('data-theme','dark');})();</script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --cyan: #4dd9d4;
+      --blue: #1e7be8;
+      --bg: #0d1219;
+      --surface: rgba(18,30,50,0.72);
+      --border: rgba(77,217,212,0.16);
+      --text: rgba(232,230,224,0.92);
+      --muted: rgba(155,180,198,0.55);
+      --error: #f5612a;
+      --success: #4dd9d4;
+    }
+    [data-theme="light"] {
+      --bg: #f5f2ec;
+      --surface: rgba(255,255,255,0.82);
+      --border: rgba(30,123,232,0.16);
+      --text: rgba(36,49,58,0.92);
+      --muted: rgba(89,102,113,0.62);
+    }
+
+    html, body {
+      height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Noto Serif SC", "PingFang SC", sans-serif;
+      font-weight: 300;
+    }
+
+    body {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100dvh;
+      padding: 24px;
+      padding-bottom: max(24px, env(safe-area-inset-bottom, 0px));
+    }
+
+    .card {
+      width: min(400px, 100%);
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 36px 32px 32px;
+      backdrop-filter: blur(20px);
+      box-shadow: 0 24px 64px rgba(0,0,0,0.28);
+    }
+
+    .logo {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 28px;
+    }
+
+    .ring {
+      width: 48px;
+      height: 48px;
+      border-radius: 46% 54% 53% 47% / 48% 52% 44% 56%;
+      background: conic-gradient(from 195deg, #5ee8e0, #2aabf0, #1e7be8, #f5c842, #f5612a, #e8212a, #5ee8e0);
+      -webkit-mask: radial-gradient(circle at center, transparent 38%, #000 40%);
+      mask: radial-gradient(circle at center, transparent 38%, #000 40%);
+      filter: drop-shadow(0 0 12px rgba(77,217,212,0.45));
+      animation: morph 14s ease-in-out infinite;
+      flex-shrink: 0;
+    }
+    @keyframes morph {
+      0%,100% { border-radius: 46% 54% 53% 47% / 48% 52% 44% 56%; }
+      33%      { border-radius: 53% 47% 46% 54% / 55% 45% 57% 43%; }
+      66%      { border-radius: 47% 53% 57% 43% / 43% 57% 46% 54%; }
+    }
+
+    .brand {
+      font-family: "Comfortaa", sans-serif;
+      font-size: 20px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      background: linear-gradient(108deg, #4dd9d4 0%, #1e7be8 40%, #f5c842 70%, #f5612a 100%);
+      -webkit-background-clip: text;
+      background-clip: text;
+      -webkit-text-fill-color: transparent;
+      color: transparent;
+    }
+
+    /* Loading state */
+    #stateLoading {
+      text-align: center;
+      padding: 8px 0 16px;
+    }
+    #stateLoading .spinner {
+      width: 32px;
+      height: 32px;
+      border: 3px solid var(--border);
+      border-top-color: var(--cyan);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin: 0 auto 16px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    #stateLoading p {
+      font-size: 14px;
+      color: var(--muted);
+    }
+
+    /* Success state */
+    #stateSuccess { display: none; }
+    .success-icon {
+      font-size: 36px;
+      text-align: center;
+      margin-bottom: 14px;
+    }
+    h1 {
+      font-size: 17px;
+      font-weight: 400;
+      text-align: center;
+      margin-bottom: 6px;
+      letter-spacing: 0.04em;
+    }
+    .subtitle {
+      font-size: 13px;
+      color: var(--muted);
+      text-align: center;
+      margin-bottom: 24px;
+      line-height: 1.7;
+    }
+
+    .token-box {
+      background: rgba(0,0,0,0.22);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 14px;
+      font-size: 12px;
+      font-family: "SF Mono", "Fira Code", monospace;
+      color: var(--cyan);
+      word-break: break-all;
+      line-height: 1.6;
+      margin-bottom: 12px;
+      max-height: 80px;
+      overflow-y: auto;
+    }
+    [data-theme="light"] .token-box {
+      background: rgba(0,0,0,0.04);
+    }
+
+    .btn {
+      width: 100%;
+      padding: 13px;
+      border-radius: 999px;
+      border: none;
+      font-family: "Comfortaa", sans-serif;
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      cursor: pointer;
+      background: linear-gradient(135deg, #3aceca, #1876e2 40%, #eebe34 75%, #f05024);
+      color: #fff;
+      transition: opacity 0.2s ease, transform 0.15s ease;
+      margin-bottom: 8px;
+    }
+    .btn:hover { opacity: 0.88; transform: translateY(-1px); }
+    .btn.copied {
+      background: rgba(77,217,212,0.18);
+      color: var(--cyan);
+      border: 1px solid var(--border);
+    }
+
+    .instructions {
+      margin-top: 20px;
+      padding: 14px 16px;
+      background: rgba(77,217,212,0.06);
+      border: 1px solid rgba(77,217,212,0.14);
+      border-radius: 10px;
+    }
+    .instructions p {
+      font-size: 12px;
+      color: var(--muted);
+      line-height: 1.8;
+      margin-bottom: 8px;
+    }
+    .instructions p:last-child { margin-bottom: 0; }
+    .instructions code {
+      font-family: "SF Mono", "Fira Code", monospace;
+      font-size: 12px;
+      color: var(--cyan);
+      background: rgba(77,217,212,0.1);
+      padding: 1px 5px;
+      border-radius: 4px;
+    }
+
+    /* Error state */
+    #stateError { display: none; text-align: center; padding: 8px 0 16px; }
+    #stateError .icon { font-size: 32px; margin-bottom: 12px; }
+    #stateError p { font-size: 14px; color: var(--muted); line-height: 1.8; }
+    #stateError a {
+      color: var(--cyan);
+      text-decoration: none;
+      font-size: 13px;
+      display: inline-block;
+      margin-top: 14px;
+    }
+
+    .footer {
+      margin-top: 20px;
+      text-align: center;
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .footer a { color: var(--muted); text-decoration: none; }
+    .footer a:hover { color: var(--text); }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="logo">
+      <div class="ring"></div>
+      <span class="brand">Archer</span>
+    </div>
+
+    <div id="stateLoading">
+      <div class="spinner"></div>
+      <p>正在验证身份…</p>
+    </div>
+
+    <div id="stateSuccess">
+      <div class="success-icon">✅</div>
+      <h1>登录成功</h1>
+      <p class="subtitle">复制下方 Token，粘贴到终端完成 <code style="font-family:monospace;font-size:12px;color:var(--cyan)">archer login</code></p>
+
+      <div class="token-box" id="tokenDisplay"></div>
+      <button class="btn" id="copyBtn" type="button">复制 Token</button>
+
+      <div class="instructions">
+        <p>在终端里运行 <code>archer login</code>，然后粘贴此 Token，即可完成登录。</p>
+        <p>Token 会自动保存到 <code>archer.toml</code>，之后无需重复操作。</p>
+      </div>
+    </div>
+
+    <div id="stateError">
+      <div class="icon">❌</div>
+      <p>验证失败或链接已过期。<br>请重新获取登录链接。</p>
+      <a href="login.html">← 重新登录</a>
+    </div>
+  </div>
+
+  <div class="footer">
+    <a href="index.html">← 返回首页</a>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+  <script>
+    const SUPABASE_URL = 'https://lwtgagkykcilomdfynkj.supabase.co'
+    const SUPABASE_KEY = 'sb_publishable_xJiGJ0eERe7WbvCnp_m9ng_7yTkbbzG'
+    const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY)
+
+    const stateLoading = document.getElementById('stateLoading')
+    const stateSuccess = document.getElementById('stateSuccess')
+    const stateError   = document.getElementById('stateError')
+    const tokenDisplay = document.getElementById('tokenDisplay')
+    const copyBtn      = document.getElementById('copyBtn')
+
+    function showState(name) {
+      stateLoading.style.display = name === 'loading' ? 'block' : 'none'
+      stateSuccess.style.display = name === 'success' ? 'block' : 'none'
+      stateError.style.display   = name === 'error'   ? 'block' : 'none'
+    }
+
+    function maybeReturnToWeb(session) {
+      const urlReturnTo = new URLSearchParams(location.search).get('return_to')
+      const returnTo = localStorage.getItem('archer_auth_return_to') || urlReturnTo
+      if (!returnTo) return false
+      localStorage.removeItem('archer_auth_return_to')
+      localStorage.setItem('archer_account_email', session?.user?.email || '')
+      let target = `${location.origin}/index.html`
+      try {
+        const parsed = new URL(returnTo, location.origin)
+        if (parsed.origin === location.origin) target = parsed.href
+      } catch (_) {}
+      location.replace(target)
+      return true
+    }
+
+    async function handleCallback() {
+      // Supabase puts tokens in the URL hash after Magic Link redirect
+      const hash = window.location.hash.substring(1)
+      const params = new URLSearchParams(hash)
+      const accessToken  = params.get('access_token')
+      const refreshToken = params.get('refresh_token')
+
+      if (accessToken) {
+        // Set the session so Supabase SDK is aware
+        const { data } = await sb.auth.setSession({ access_token: accessToken, refresh_token: refreshToken || '' })
+        if (maybeReturnToWeb(data.session)) return
+        tokenDisplay.textContent = accessToken
+        showState('success')
+        return
+      }
+
+      // No hash token — try exchangeCodeForSession (PKCE flow)
+      const urlParams = new URLSearchParams(window.location.search)
+      const code = urlParams.get('code')
+      if (code) {
+        const { data, error } = await sb.auth.exchangeCodeForSession(code)
+        if (!error && data.session) {
+          if (maybeReturnToWeb(data.session)) return
+          tokenDisplay.textContent = data.session.access_token
+          showState('success')
+          return
+        }
+      }
+
+      // Also check if there's already an active session
+      const { data: { session } } = await sb.auth.getSession()
+      if (session) {
+        if (maybeReturnToWeb(session)) return
+        tokenDisplay.textContent = session.access_token
+        showState('success')
+        return
+      }
+
+      showState('error')
+    }
+
+    copyBtn.addEventListener('click', async () => {
+      const token = tokenDisplay.textContent
+      try {
+        await navigator.clipboard.writeText(token)
+        copyBtn.textContent = '已复制 ✓'
+        copyBtn.classList.add('copied')
+        setTimeout(() => {
+          copyBtn.textContent = '复制 Token'
+          copyBtn.classList.remove('copied')
+        }, 2000)
+      } catch {
+        // Fallback for older browsers
+        const el = document.createElement('textarea')
+        el.value = token
+        el.style.position = 'fixed'
+        el.style.opacity = '0'
+        document.body.appendChild(el)
+        el.select()
+        document.execCommand('copy')
+        document.body.removeChild(el)
+        copyBtn.textContent = '已复制 ✓'
+        copyBtn.classList.add('copied')
+        setTimeout(() => {
+          copyBtn.textContent = '复制 Token'
+          copyBtn.classList.remove('copied')
+        }, 2000)
+      }
+    })
+
+    handleCallback()
+  </script>
+</body>
+</html>
