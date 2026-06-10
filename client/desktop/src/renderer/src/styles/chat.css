@@ -548,8 +548,8 @@
 /* ── P91 minimal letter workspace: chat ─────────────────────────────── */
 .chat-home {
   justify-content: center;
-  gap: 18px;
-  padding: 0 28px 92px;
+  gap: 14px;
+  padding: 0 20px 56px;
 }
 
 .home-title {
@@ -590,6 +590,33 @@
 
 @media (max-width: 1120px) {
   .chat-layout {
-    --chat-top-safe-area: 108px;
+    --chat-top-safe-area: 88px;
+  }
+}
+
+@media (max-width: 720px) {
+  .chat-layout {
+    --chat-column: 100%;
+    --chat-top-safe-area: 72px;
+  }
+
+  .chat-layout .composer,
+  .conversation-divider {
+    width: calc(100% - 24px);
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  .conversation {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+
+  .chat-home {
+    padding: 0 12px 48px;
+  }
+
+  .chat-home .composer {
+    max-width: none;
   }
 }

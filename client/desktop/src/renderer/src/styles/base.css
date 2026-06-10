@@ -15,7 +15,7 @@ body,
 }
 
 body {
-  min-width: 720px;
+  min-width: 0;
   color: var(--text);
   background: var(--bg-1);
   font-family: var(--body-font);
@@ -852,50 +852,51 @@ body {
 
 .app-title-tools {
   position: fixed;
-  top: 8px;
-  left: 100px;
+  top: 10px;
+  left: 72px;
   z-index: 1000;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
   opacity: 1;
   pointer-events: auto;
   transition: opacity 180ms ease;
   -webkit-app-region: no-drag;
 }
 
-@media (max-width: 1120px) {
-  .app-title-tools {
-    left: 132px;
-  }
-}
-
 .app-title-button {
   display: grid;
   place-items: center;
-  width: 34px;
-  height: 34px;
-  border: 0;
-  border-radius: 11px;
+  width: 32px;
+  height: 32px;
+  border: 1px solid transparent;
+  border-radius: 999px;
   color: color-mix(in srgb, var(--ink) 68%, var(--muted));
-  background: transparent;
+  background: color-mix(in srgb, var(--field) 58%, transparent);
   pointer-events: auto;
   -webkit-app-region: no-drag;
-  transition: background 140ms ease, color 140ms ease, transform 120ms ease;
+  transition:
+    background 140ms ease,
+    color 140ms ease,
+    border-color 140ms ease,
+    transform 120ms ease;
 }
 
 .app-title-button:hover {
   color: var(--ink);
-  background: var(--soft-hover);
+  border-color: color-mix(in srgb, var(--ink) 7%, transparent);
+  background: color-mix(in srgb, var(--ink) 5%, var(--field));
 }
 
 .app-title-button.active {
   color: var(--cyan);
+  border-color: color-mix(in srgb, var(--cyan) 24%, transparent);
+  background: color-mix(in srgb, var(--cyan) 8%, var(--field));
 }
 
 .app-title-button.active:hover {
   color: var(--cyan);
-  background: color-mix(in srgb, var(--cyan) 10%, transparent);
+  background: color-mix(in srgb, var(--cyan) 12%, var(--field));
 }
 
 .app-title-button:active {

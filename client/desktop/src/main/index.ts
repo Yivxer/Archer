@@ -1,4 +1,4 @@
-import { app, BrowserWindow, desktopCapturer, dialog, ipcMain, nativeImage, shell, systemPreferences } from 'electron'
+import { app, BrowserWindow, desktopCapturer, dialog, ipcMain, Menu, nativeImage, shell, systemPreferences } from 'electron'
 import { join } from 'node:path'
 import { spawn } from 'node:child_process'
 import type { ChildProcess } from 'node:child_process'
@@ -190,16 +190,21 @@ function isAllowedAppNavigation(rawUrl: string): boolean {
   }
 }
 
-function createWindow(): void {
+type WindowOptions = {
+  width?: number
+  height?: number
+}
+
+function createWindow(options: WindowOptions = {}): BrowserWindow {
   const mainWindow = new BrowserWindow({
-    width: 1280,
-    height: 820,
-    minWidth: 980,
-    minHeight: 680,
+    width: options.width ?? 1280,
+    height: options.height ?? 820,
+    minWidth: 360,
+    minHeight: 640,
     title: 'Archer Desktop',
     backgroundColor: '#0d1219',
     titleBarStyle: 'hiddenInset',
-    trafficLightPosition: { x: 18, y: 18 },
+    trafficLightPosition: { x: 14, y: 16 },
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,
@@ -226,6 +231,81 @@ function createWindow(): void {
   } else {
     mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
   }
+
+  return mainWindow
+}
+
+function buildAppMenu(): void {
+  const isMac = process.platform === 'darwin'
+  const template: Electron.MenuItemConstructorOptions[] = [
+    ...(isMac
+      ? [{
+          label: app.name,
+          submenu: [
+            { role: 'about' as const },
+            { type: 'separator' as const },
+            { role: 'services' as const },
+            { type: 'separator' as const },
+            { role: 'hide' as const },
+            { role: 'hideOthers' as const },
+            { role: 'unhide' as const },
+            { type: 'separator' as const },
+            { role: 'quit' as const }
+          ]
+        }]
+      : []),
+    {
+      label: '文件',
+      submenu: [
+        {
+          label: '新建窗口',
+          accelerator: 'CmdOrCtrl+Shift+N',
+          click: () => {
+            createWindow({ width: 405, height: 720 })
+          }
+        },
+        { type: 'separator' },
+        isMac ? { role: 'close' } : { role: 'quit' }
+      ]
+    },
+    {
+      label: '编辑',
+      submenu: [
+        { role: 'undo' },
+        { role: 'redo' },
+        { type: 'separator' },
+        { role: 'cut' },
+        { role: 'copy' },
+        { role: 'paste' },
+        { role: 'selectAll' }
+      ]
+    },
+    {
+      label: '视图',
+      submenu: [
+        { role: 'reload' },
+        { role: 'forceReload' },
+        { role: 'toggleDevTools' },
+        { type: 'separator' },
+        { role: 'resetZoom' },
+        { role: 'zoomIn' },
+        { role: 'zoomOut' },
+        { type: 'separator' },
+        { role: 'togglefullscreen' }
+      ]
+    },
+    {
+      label: '窗口',
+      submenu: [
+        { role: 'minimize' },
+        { role: 'zoom' },
+        { type: 'separator' },
+        { role: 'front' }
+      ]
+    }
+  ]
+
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template))
 }
 
 ipcMain.handle('archer:pick-files', async () => {
@@ -337,6 +417,7 @@ ipcMain.handle('archer:ensure-api', async () => ensureApiProcess())
 
 app.whenReady().then(async () => {
   app.setName('Archer Desktop')
+  buildAppMenu()
   desktopApiToken = getOrCreateDesktopApiToken()
   await ensureApiProcess()
   startApiWatchdog()

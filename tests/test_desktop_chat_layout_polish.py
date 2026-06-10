@@ -28,11 +28,12 @@ def test_chat_column_and_composer_share_one_width():
     assert "margin: 0 auto" in css
 
 
-def test_composer_text_has_more_vertical_breathing_room():
+def test_composer_stays_compact_for_multi_window_layout():
     css = COMPOSER_CSS.read_text()
 
-    assert "min-height: 92px" in css
-    assert "padding: 22px 104px 22px 22px" in css
+    assert "min-height: 56px" in css
+    assert "min-height: 42px" in css
+    assert "border-radius: 999px" in css
 
 
 def test_message_actions_are_direct_buttons_not_a_dropdown_menu():

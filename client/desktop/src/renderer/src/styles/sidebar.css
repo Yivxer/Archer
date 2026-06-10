@@ -605,3 +605,31 @@
     pointer-events: none;
   }
 }
+
+@media (max-width: 720px) {
+  .sidebar:not(.closed) {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 850;
+    box-shadow: 8px 0 28px rgba(15, 23, 42, 0.08);
+  }
+
+  .sidebar-head {
+    padding-top: 56px;
+  }
+
+  .sidebar-brand {
+    min-height: 108px;
+  }
+
+  .sidebar-brand .archer-ring {
+    width: 64px;
+    height: 64px;
+  }
+
+  .sidebar-nav-item {
+    min-height: 46px;
+  }
+}

@@ -41,7 +41,7 @@ def test_chat_top_safe_area_expands_on_narrow_windows():
     assert "--chat-top-safe-area: 72px" in chat
     assert "padding: var(--chat-top-safe-area)" in chat
     assert "@media (max-width: 1120px)" in chat
-    assert "--chat-top-safe-area: 108px" in chat
-    assert "@media (max-width: 1120px)" in base
+    assert "--chat-top-safe-area: 88px" in chat
     assert ".app-title-tools" in base
-    assert "left: 132px" in base
+    assert "left: 72px" in base
+    assert "border-radius: 999px" in base

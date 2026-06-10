@@ -883,7 +883,7 @@ export function ChatPage({
           if (e.key === 'Enter' && !e.shiftKey && !isComposing) { e.preventDefault(); sendMessage() }
         }}
         placeholder={composerPlaceholder}
-        rows={2}
+        rows={1}
         autoFocus={isHome}
       />
       {toolNotice && <div className="composer-notice">{toolNotice}</div>}
