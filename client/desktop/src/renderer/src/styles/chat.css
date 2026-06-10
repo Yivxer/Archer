@@ -75,18 +75,23 @@
 /* ── chat layout ─────────────────────────────────────────────────────── */
 .chat-layout {
   --chat-column: 900px;
-  --chat-top-safe-area: 96px;
+  --chat-top-safe-area: 132px;
   --chat-left-safe-area: 24px;
   display: grid;
-  grid-template-rows: minmax(0, 1fr) auto;
+  grid-template-rows: minmax(0, 1fr) auto auto;
   gap: 0;
   height: 100%;
   background: #ffffff;
 }
 
+.app-shell.has-sidebar .chat-layout {
+  --chat-top-safe-area: 136px;
+}
+
 /* 侧栏收起时，为左上角标题栏按钮留出水平安全区 */
 .app-shell.focus-mode .chat-layout {
-  --chat-left-safe-area: 176px;
+  --chat-left-safe-area: 188px;
+  --chat-top-safe-area: 128px;
 }
 
 .chat-layout .composer {
@@ -109,7 +114,7 @@
   min-height: 0;
   padding-top: var(--chat-top-safe-area);
   padding-right: max(20px, calc((100% - var(--chat-column)) / 2));
-  padding-bottom: 28px;
+  padding-bottom: 20px;
   padding-left: max(
     var(--chat-left-safe-area),
     max(20px, calc((100% - var(--chat-column)) / 2))
@@ -118,6 +123,23 @@
   scroll-behavior: smooth;
   border: none;
   background: #ffffff;
+}
+
+.conversation > .message-row:first-child {
+  margin-top: 4px;
+}
+
+.chat-approval-dock {
+  width: min(var(--chat-column), calc(100% - 40px));
+  margin: 0 auto;
+  padding: 0 0 8px;
+  display: grid;
+  gap: 8px;
+}
+
+.chat-approval-dock .tool-event-card {
+  width: 100%;
+  margin: 0;
 }
 
 /* chat + home pages fill full workspace */
@@ -602,24 +624,25 @@
 
 @media (max-width: 1120px) {
   .chat-layout {
-    --chat-top-safe-area: 104px;
+    --chat-top-safe-area: 144px;
   }
 
   .app-shell.focus-mode .chat-layout {
-    --chat-left-safe-area: 176px;
+    --chat-left-safe-area: 188px;
   }
 }
 
 @media (max-width: 720px) {
   .chat-layout {
     --chat-column: 100%;
-    --chat-top-safe-area: 96px;
+    --chat-top-safe-area: 128px;
     --chat-left-safe-area: 20px;
   }
 
   .app-shell.focus-mode .chat-layout,
   .app-shell.has-sidebar .chat-layout {
-    --chat-left-safe-area: 168px;
+    --chat-left-safe-area: 176px;
+    --chat-top-safe-area: 132px;
   }
 
   .chat-layout .composer,

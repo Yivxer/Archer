@@ -510,7 +510,7 @@ def _iter_hugo_blog_events(query: str):
     if not wants_deploy and not wants_creation:
         return
 
-    if wants_deploy and not wants_creation and not asks_capability:
+    if wants_deploy and not wants_creation:
         draft_event_id = f"hugo-blog-deploy-{uuid4().hex[:8]}"
         request = _make_api_tool_request(
             "hugo_blog",
@@ -1206,7 +1206,7 @@ def _iter_chat_chunks(
         yield {"type": "ready", "ready": True}
         yield {
             "type": "token",
-            "text": "已准备部署枫弋札记，请在工具卡片中确认。确认后会执行 Hugo 构建、部署，并验证单页可访问。",
+            "text": "部署确认卡已出现在输入框上方，点 **发布** 后会执行 Hugo 构建、同步上线并验证页面可访问。",
         }
         yield {"type": "done", "done": True}
         return

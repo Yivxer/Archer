@@ -554,6 +554,16 @@ export function ChatPage({
   }
 
   const isHome = messages.length === 0 && !isTyping && !isSending && !activeSession
+  const approvalToolEvents = React.useMemo(() => {
+    const merged = new Map<string, ToolEvent>()
+    for (const event of toolEvents) {
+      if (event.requiresApproval) merged.set(event.id, event)
+    }
+    for (const req of runtimeState.pendingApprovals) {
+      if (!merged.has(req.id)) merged.set(req.id, toolEventFromRuntimeRequest(req))
+    }
+    return [...merged.values()]
+  }, [toolEvents, runtimeState.pendingApprovals])
   const draftLineCount = Math.max(1, draft.split('\n').length)
   const shouldCollapseDraft = (text: string) => text.split('\n').length > 8 || text.length > 1800
 
@@ -1243,44 +1253,34 @@ export function ChatPage({
           />
         ))}
 
-        {toolEvents.filter((event) => {
-          // 隐藏信息检索类工具卡片（记忆、搜索、文件引用），只保留需要用户交互的
-          const lowInterest = ['obsidian_search', 'obsidian_read', 'memory.retrieve', 'memory-retrieve', 'file.reference', 'hugo_blog']
-          return !lowInterest.includes(event.name) || event.requiresApproval
-        }).map((event) => {
-          // Derive decision from runtimeState.toolResults (single source of truth for approvals)
-          const toolResult = runtimeState.toolResults[event.id]
-          const decision = toolResult?.decision
-          return (
+        {toolEvents
+          .filter((event) => !event.requiresApproval && !isHiddenToolEvent(event.name))
+          .map((event) => (
             <ToolEventCard
               key={event.id}
               event={event}
-              decision={decision}
+              decision={runtimeState.toolResults[event.id]?.decision}
               onDecide={(nextDecision) => decideTool(event.id, nextDecision)}
             />
-          )
-        })}
-
-        {/* Pending approvals from runtime state — ensures approval cards survive page refresh / eventLog restore */}
-        {runtimeState.pendingApprovals
-          .filter((req) => !toolEvents.some((e) => e.id === req.id))
-          .map((req) => {
-            const toolResult = runtimeState.toolResults[req.id]
-            const decision = toolResult?.decision
-            const syntheticEvent = toolEventFromRuntimeRequest(req)
-            return (
-              <ToolEventCard
-                key={req.id}
-                event={syntheticEvent}
-                decision={decision}
-                onDecide={(nextDecision) => decideTool(req.id, nextDecision)}
-              />
-            )
-          })}
+          ))}
 
         {chatError && <div className="chat-error">{chatError}</div>}
         <div ref={bottomRef} />
       </div>
+
+      {approvalToolEvents.length > 0 && (
+        <div className="chat-approval-dock" aria-label="待确认操作">
+          {approvalToolEvents.map((event) => (
+            <ToolEventCard
+              key={event.id}
+              event={event}
+              decision={runtimeState.toolResults[event.id]?.decision}
+              onDecide={(nextDecision) => decideTool(event.id, nextDecision)}
+              defaultExpanded={event.name === 'hugo_blog'}
+            />
+          ))}
+        </div>
+      )}
 
       <div className="conversation-divider" />
       {composerEl}
@@ -1297,6 +1297,10 @@ function restoreRuntimeState(sessionId: string, eventLog: EventLog | null) {
 }
 
 /** Convert a runtime ToolRequestEvent to display-friendly ToolEvent for ToolEventCard rendering */
+function isHiddenToolEvent(name: string): boolean {
+  return ['obsidian_search', 'obsidian_read', 'memory.retrieve', 'memory-retrieve', 'file.reference'].includes(name)
+}
+
 function toolEventFromRuntimeRequest(req: import('../../../agent').ToolRequestEvent): ToolEvent {
   return {
     id: req.id,
@@ -1375,11 +1379,13 @@ function JobEventCard({
 function ToolEventCard({
   event,
   decision,
-  onDecide
+  onDecide,
+  defaultExpanded = false
 }: {
   event: ToolEvent
   decision?: 'approved' | 'denied'
   onDecide: (decision: 'approved' | 'denied') => void
+  defaultExpanded?: boolean
 }) {
   const needsApproval = Boolean(event.requiresApproval && !decision)
   const kind = toolKind(event)
@@ -1387,7 +1393,7 @@ function ToolEventCard({
   if (kind === 'shell') Icon = Terminal
   else if (kind === 'github') Icon = Github
   else if (kind === 'publish') Icon = Send
-  const [expanded, setExpanded] = React.useState(false)
+  const [expanded, setExpanded] = React.useState(defaultExpanded || needsApproval)
 
   return (
     <article className={`tool-event-card ${event.status} ${kind} risk-${event.risk} ${expanded ? 'expanded' : 'collapsed'}`}>

@@ -28,6 +28,14 @@ def test_chat_page_offers_lightweight_conversation_starters():
     assert "继续那条线" in source
 
 
+def test_chat_page_pins_approval_cards_above_composer():
+    source = CHAT_PAGE.read_text()
+
+    assert "chat-approval-dock" in source
+    assert "approvalToolEvents" in source
+    assert "defaultExpanded={event.name === 'hugo_blog'}" in source
+
+
 def test_chat_styles_keep_conversation_chrome_quiet():
     css = CHAT_CSS.read_text()
 

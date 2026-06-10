@@ -727,7 +727,7 @@ class TestApiSkillRouting:
             and event.get("toolEvent", {}).get("requiresApproval") is True
             for event in events
         )
-        assert any("请在工具卡片中确认" in event.get("text", "") for event in events)
+        assert any("部署确认卡" in event.get("text", "") for event in events)
         assert events[-1] == {"type": "done", "done": True}
 
     def test_hugo_new_approval_runs_deploy_after_create(self, monkeypatch):
