@@ -86,7 +86,7 @@
 
 /* 侧栏收起时，为左上角标题栏按钮留出水平安全区 */
 .app-shell.focus-mode .chat-layout {
-  --chat-left-safe-area: 152px;
+  --chat-left-safe-area: 176px;
 }
 
 .chat-layout .composer {
@@ -606,7 +606,7 @@
   }
 
   .app-shell.focus-mode .chat-layout {
-    --chat-left-safe-area: 152px;
+    --chat-left-safe-area: 176px;
   }
 }
 
@@ -619,7 +619,7 @@
 
   .app-shell.focus-mode .chat-layout,
   .app-shell.has-sidebar .chat-layout {
-    --chat-left-safe-area: 148px;
+    --chat-left-safe-area: 168px;
   }
 
   .chat-layout .composer,

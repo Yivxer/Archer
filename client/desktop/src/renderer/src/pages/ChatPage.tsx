@@ -1,6 +1,7 @@
 import React from 'react'
 import { ArrowUp, Check, ChevronDown, Copy, CornerDownLeft, Crop, Edit3, FileText, Github, Infinity, Loader2, Mic, Monitor, Paperclip, RotateCcw, Send, Terminal, UserRoundCog, X } from 'lucide-react'
 import { appendLocalSession, approveJobToolEvent, cancelBackgroundJobEvent, createBackgroundJobEvent, fetchBackgroundJob, pollBackgroundJobEvents, retryBackgroundJobEvent, saveLocalSession, streamLocalChat, submitToolApprovalEvent, switchLocalMode } from '../adapters/localArcher'
+import { pickChatGreeting } from '../lib/chatGreetings'
 import { extendedConversationModes, PERSONA_PRESETS, personaIdFromMode } from '../lib/conversationPersona'
 import type { ArcherAdapter, ChatMessage, FileRef, MemoryContextMode, ObsidianContextMode, SessionDetail, ToolEvent } from '../types'
 import { ArcherRing, MarkdownMessage, ThinkingDots } from '../components/common'
@@ -43,6 +44,7 @@ export function ChatPage({
   onRefresh?: () => Promise<void>
   onSessionAppended?: (messages: ChatMessage[]) => void
 }) {
+  const [homeGreeting] = React.useState(() => pickChatGreeting())
   const [messages, setMessages] = React.useState<ChatMessage[]>(activeSession?.messages ?? data.chat.initialMessages)
   const [draft, setDraft] = React.useState('')
   const [draftCollapsed, setDraftCollapsed] = React.useState(false)
@@ -1131,8 +1133,8 @@ export function ChatPage({
     return (
       <div className="chat-home">
         <div className="home-centerpiece">
-          <ArcherRing large />
-          <p className="home-title">今天怎么样？</p>
+          <ArcherRing large living />
+          <p className="home-title">{homeGreeting}</p>
           {sessionLoadState === 'loading' && <div className="session-source-banner">读取会话中…</div>}
           {sessionLoadState === 'error' && <div className="session-source-banner warning">{sessionLoadError || '会话读取失败'}</div>}
           {chatError && <div className="chat-error">{chatError}</div>}

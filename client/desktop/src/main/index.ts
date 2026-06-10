@@ -204,7 +204,7 @@ function createWindow(options: WindowOptions = {}): BrowserWindow {
     title: 'Archer Desktop',
     backgroundColor: '#0d1219',
     titleBarStyle: 'hiddenInset',
-    trafficLightPosition: { x: 14, y: 16 },
+    trafficLightPosition: { x: 16, y: 14 },
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,

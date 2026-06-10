@@ -421,6 +421,12 @@
   margin: 0 auto 8px;
 }
 
+.sidebar-brand .archer-ring.living {
+  filter:
+    drop-shadow(0 -6px 16px rgba(77, 217, 212, 0.26))
+    drop-shadow(0 14px 24px rgba(245, 97, 42, 0.14));
+}
+
 .sidebar-brand-wordmark {
   display: inline-flex;
   align-items: baseline;

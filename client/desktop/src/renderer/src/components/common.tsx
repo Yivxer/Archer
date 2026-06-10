@@ -3,10 +3,23 @@ import ReactMarkdown, { type Components } from 'react-markdown'
 import { AlertTriangle, Clipboard, Clock3, Search } from 'lucide-react'
 import remarkGfm from 'remark-gfm'
 
-export function ArcherRing({ small = false, large = false, pulse = false }: { small?: boolean; large?: boolean; pulse?: boolean }) {
+export function ArcherRing({
+  small = false,
+  large = false,
+  pulse = false,
+  living = false
+}: {
+  small?: boolean
+  large?: boolean
+  pulse?: boolean
+  living?: boolean
+}) {
   const sizeClass = large ? 'large' : small ? 'small' : ''
   return (
-    <span className={`archer-ring ${sizeClass} ${pulse ? 'pulse' : ''}`} aria-hidden="true">
+    <span
+      className={`archer-ring ${sizeClass} ${pulse ? 'pulse' : ''} ${living ? 'living' : ''}`.trim()}
+      aria-hidden="true"
+    >
       <span className="ring-base" />
       <span className="ring-shine" />
     </span>

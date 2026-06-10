@@ -180,6 +180,31 @@ input:focus-visible {
     drop-shadow(0 8px 18px rgba(245,97,42,0.10));
 }
 
+.archer-ring.living {
+  animation: ring-living-shell 5.2s ease-in-out infinite;
+  filter:
+    drop-shadow(0 -5px 14px rgba(77, 217, 212, 0.24))
+    drop-shadow(0 12px 22px rgba(245, 97, 42, 0.14));
+}
+
+.archer-ring.living .ring-base {
+  animation:
+    organic-morph 7.5s ease-in-out infinite,
+    ring-orbit 16s linear infinite;
+}
+
+.archer-ring.living .ring-shine {
+  animation:
+    organic-morph 7.5s ease-in-out infinite reverse,
+    ring-shine-drift 5.5s ease-in-out infinite;
+}
+
+.archer-ring.large.living {
+  filter:
+    drop-shadow(0 -6px 16px rgba(77, 217, 212, 0.28))
+    drop-shadow(0 14px 26px rgba(245, 97, 42, 0.16));
+}
+
 /* ── keyframes ──────────────────────────────────────────────────────── */
 @keyframes msg-in {
   from {
@@ -211,19 +236,49 @@ input:focus-visible {
   }
 
   25% {
-    border-radius: 52% 48% 47% 53% / 54% 46% 56% 44%;
+    border-radius: 54% 46% 45% 55% / 56% 44% 58% 42%;
   }
 
   50% {
-    border-radius: 47% 53% 57% 43% / 43% 57% 46% 54%;
+    border-radius: 45% 55% 58% 42% / 42% 58% 44% 56%;
   }
 
   75% {
-    border-radius: 55% 45% 49% 51% / 50% 50% 55% 45%;
+    border-radius: 57% 43% 48% 52% / 48% 52% 57% 43%;
   }
 
   100% {
     border-radius: 46% 54% 53% 47% / 48% 52% 44% 56%;
+  }
+}
+
+@keyframes ring-living-shell {
+  0%,
+  100% {
+    transform: translateY(0) scale(1);
+  }
+
+  50% {
+    transform: translateY(-5px) scale(1.045);
+  }
+}
+
+@keyframes ring-orbit {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes ring-shine-drift {
+  0%,
+  100% {
+    opacity: 1;
+    filter: brightness(1);
+  }
+
+  50% {
+    opacity: 0.82;
+    filter: brightness(1.18);
   }
 }
 
@@ -852,8 +907,8 @@ body {
 
 .app-title-tools {
   position: fixed;
-  top: 10px;
-  left: 72px;
+  top: 7px;
+  left: 92px;
   z-index: 1000;
   display: inline-flex;
   align-items: center;

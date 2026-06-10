@@ -225,7 +225,7 @@ function App() {
       <aside className={`sidebar ${sidebarOpen ? '' : 'closed'}`}>
         <div className="sidebar-head">
           <button className="sidebar-brand" type="button" onClick={newChat} title="新建对话">
-            <ArcherRing />
+            <ArcherRing living />
             <span className="sidebar-brand-wordmark" aria-label="Archer">
               {['A', 'r', 'c', 'h', 'e', 'r'].map((letter, index) => (
                 <span aria-hidden="true" key={`${letter}-${index}`}>{letter}</span>
