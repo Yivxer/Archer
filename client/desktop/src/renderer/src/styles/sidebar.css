@@ -366,6 +366,8 @@
 
 /* ── P91 minimal letter workspace: sidebar ─────────────────────────── */
 .sidebar {
+  display: flex;
+  flex-direction: column;
   width: 228px;
   border-right: 1px solid var(--line);
   background: #ffffff;
@@ -378,6 +380,10 @@
   border-right-color: transparent;
   opacity: 0;
   pointer-events: none;
+}
+
+.sidebar:not(.closed) .sidebar-footer {
+  display: flex;
 }
 
 .sidebar-head {

@@ -858,8 +858,8 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  opacity: 0;
-  pointer-events: none;
+  opacity: 1;
+  pointer-events: auto;
   transition: opacity 180ms ease;
   -webkit-app-region: no-drag;
 }
@@ -868,11 +868,6 @@ body {
   .app-title-tools {
     left: 132px;
   }
-}
-
-.app-shell:hover .app-title-tools {
-  opacity: 1;
-  pointer-events: auto;
 }
 
 .app-title-button {

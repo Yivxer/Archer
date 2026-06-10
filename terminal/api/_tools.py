@@ -959,13 +959,14 @@ def _iter_chat_chunks(
     query = _latest_user_text(messages)
     # 历史（不含当前这条用户消息），用于历史感知意图与检索改写
     prior_history = messages[:-1] if (messages and messages[-1].get("role") == "user") else messages
-    intent_info = classify_query_intent(query, history=prior_history, llm_fallback=True)
+    intent_info = classify_query_intent(query, history=prior_history, llm_fallback=False)
     intent = intent_info["intent"]
+    needs_tools = bool(intent_info.get("needs_tools"))
     _turn_plan = _plan_desktop_turn(
         query,
         intent=intent,
-        needs_tools=bool(intent_info.get("needs_tools")),
-        llm_fallback=True,
+        needs_tools=needs_tools,
+        llm_fallback=needs_tools,
     )
     _selected_tools = _turn_plan.filtered_skills
     _tool_plan = _turn_plan.tool_plan

@@ -25,6 +25,15 @@ def test_light_theme_uses_unified_white_workspace_backgrounds():
     assert "background: #ffffff;" in sidebar
 
 
+def test_sidebar_defaults_open_and_exposes_status_footer():
+    main = (ROOT / "client/desktop/src/renderer/src/main.tsx").read_text()
+
+    assert "archer-sidebar-open" in main
+    assert "sidebar-footer" in main
+    assert "setProfileOpen" in main
+    assert "saved === null ? true" in main
+
+
 def test_chat_top_safe_area_expands_on_narrow_windows():
     chat = CHAT_CSS.read_text()
     base = BASE_CSS.read_text()

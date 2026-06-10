@@ -38,7 +38,10 @@ import './styles.css'
 
 function App() {
   const [route, setRoute] = React.useState<Route>('Chat')
-  const [sidebarOpen, setSidebarOpen] = React.useState(false)
+  const [sidebarOpen, setSidebarOpen] = React.useState(() => {
+    const saved = localStorage.getItem('archer-sidebar-open')
+    return saved === null ? true : saved === '1'
+  })
   const [chatKey, setChatKey] = React.useState(0)
   const [data, setData] = React.useState<ArcherAdapter>(mockArcher)
   const [apiState, setApiState] = React.useState<ApiConnectionState>('idle')
@@ -120,6 +123,10 @@ function App() {
   React.useEffect(() => {
     localStorage.setItem('archer-conversation-mode', conversationMode)
   }, [conversationMode])
+
+  React.useEffect(() => {
+    localStorage.setItem('archer-sidebar-open', sidebarOpen ? '1' : '0')
+  }, [sidebarOpen])
 
   async function connectLocalApi() {
     setApiState('loading')
@@ -248,6 +255,24 @@ function App() {
           })}
         </div>
 
+        <footer className="sidebar-footer">
+          <button
+            type="button"
+            className="profile-footer"
+            onClick={() => setProfileOpen((open) => !open)}
+            title="连接与模型状态"
+          >
+            <span>
+              <strong>{connectionStatusLabel(apiState, data.status.adapter === 'local')}</strong>
+              <em>
+                {modelLabelFromStatus(data.status.model)}
+                {' · '}
+                {modeLabelFromId(data.status.mode || data.modes.current, data.modes.modes)}
+              </em>
+            </span>
+            <span className={`conn-dot ${apiState === 'connected' ? 'live' : ''}`} aria-hidden="true" />
+          </button>
+        </footer>
       </aside>
 
       {/* ── Main workspace ── */}
