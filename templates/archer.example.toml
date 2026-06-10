@@ -6,8 +6,9 @@
 base_url     = "https://api.deepseek.com/v1"   # or any OpenAI-compatible endpoint
 api_key      = "sk-your-api-key-here"
 model        = "deepseek-chat"
+model_auto   = true                             # true=每轮按意图选 models[]；/model <名> 锁定后置 false
 vision_model = "deepseek-chat"                  # model to use when images are attached
-models       = ["deepseek-chat", "deepseek-reasoner"]  # available via /model command
+models       = ["deepseek-chat", "deepseek-reasoner"]  # [0]=快聊 [1]=重推理/工具；/model 列表
 timeout_s    = 45
 max_retries  = 1
 

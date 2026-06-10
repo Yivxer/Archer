@@ -15,7 +15,7 @@ import {
   X,
 } from 'lucide-react'
 import { checkLocalApiHealth, getDesktopApiToken, loadLocalArcher, loadLocalSession } from './adapters/localArcher'
-import { connectionStatusLabel, modeLabelFromId, personaPresetFromMode } from './lib/conversationPersona'
+import { connectionStatusLabel, modeLabelFromId, modelLabelFromStatus, personaPresetFromMode } from './lib/conversationPersona'
 import { mockArcher } from './adapters/mockArcher'
 import { ArcherRing, EmptyDetail, ErrorBoundary, SearchBox } from './components/common'
 import { ChatPage } from './pages/ChatPage'
@@ -392,7 +392,7 @@ function ProfilePanel({
         </div>
         <div>
           <span>模型</span>
-          <strong>{data.status.model || '未读取'}</strong>
+          <strong>{modelLabelFromStatus(data.status.model) || '未读取'}</strong>
         </div>
         <div>
           <span>姿态</span>

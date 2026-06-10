@@ -1346,9 +1346,18 @@ def _iter_chat_chunks(
     ]
 
     # ── AI 主回复（收集完整回复用于后续草稿生成） ──
+    from core.model_select import resolve_active_model
+    has_images = bool(file_refs and any(r.get("type") == "image" for r in file_refs))
+    active_model, _ = resolve_active_model(
+        _load_config(),
+        user_text=query,
+        intent=intent,
+        needs_tools=bool(intent_info.get("needs_tools")),
+        has_images=has_images,
+    )
     ai_reply_parts: list[str] = []
     try:
-        for chunk in stream_chat(model_messages):
+        for chunk in stream_chat(model_messages, model=active_model):
             if chunk:
                 ai_reply_parts.append(chunk)
                 yield {"type": "token", "text": chunk}

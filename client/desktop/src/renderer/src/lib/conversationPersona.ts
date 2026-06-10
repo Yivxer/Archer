@@ -49,6 +49,11 @@ export function modeLabelFromId(mode: string, modes: Array<{ id: string; label: 
   return modes.find((item) => item.id === mode)?.label ?? mode
 }
 
+export function modelLabelFromStatus(model: string | undefined): string {
+  if (!model || model === 'auto') return '自动'
+  return model
+}
+
 export function connectionStatusLabel(
   apiState: string,
   isLocal: boolean

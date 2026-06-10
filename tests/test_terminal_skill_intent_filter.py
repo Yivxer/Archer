@@ -28,11 +28,12 @@ class TestTerminalSkillIntentFilter(unittest.TestCase):
         filtered = filter_skills_for_intent("为什么我会这么焦虑", raw, intent="emotional")
         self.assertNotIn("web_search", filtered)
 
-    def test_terminal_imports_filter_in_turn_path(self):
+    def test_terminal_uses_desktop_turn_plan(self):
         import terminal.archer as archer_mod
 
         source = open(archer_mod.__file__, encoding="utf-8").read()
-        self.assertIn("filter_skills_for_intent", source)
+        self.assertIn("plan_desktop_turn", source)
+        self.assertIn("resolve_active_model", source)
 
 
 if __name__ == "__main__":

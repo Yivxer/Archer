@@ -41,7 +41,6 @@ from memory.extract import extract
 from memory.retrieve import for_context, format_for_prompt
 from skills.loader import load_skills
 from skills.installer import install as skill_install, remove as skill_remove
-from core.skill_router import select_skills
 from core.scheduler import (
     add_task, remove_task as remove_cron_task, set_enabled as cron_set_enabled,
     list_tasks, run_due_tasks, run_task_by_id, parse_interval, fmt_interval,
@@ -479,15 +478,30 @@ def run():
                 active_model = vision_model
                 console.print(f"[dim]图片模式 → {active_model}[/dim]")
 
+        if not active_model:
+            from core.model_select import resolve_active_model
+            active_model, model_reason = resolve_active_model(
+                cfg,
+                user_text=user_text,
+                intent=intent,
+                needs_tools=bool(intent_info.get("needs_tools")),
+                has_images=has_images,
+            )
+            if cfg["api"].get("model_auto", True) and model_reason not in ("locked", "single"):
+                console.print(f"[dim]· 模型 → {active_model}（{model_reason}）[/dim]")
+
         try:
             # 品牌标记
             spinner = _brand_spinner("思考中")
             console.print(spinner)
-            active_skills = select_skills(user_text, skills)
-            from core.desktop_tool_router import filter_skills_for_intent
-            active_skills = filter_skills_for_intent(
-                user_text, active_skills, intent=intent,
+            from core.desktop_tool_router import plan_desktop_turn
+            _turn = plan_desktop_turn(
+                user_text, skills,
+                intent=intent,
+                needs_tools=bool(intent_info.get("needs_tools")),
+                llm_fallback=True,
             )
+            active_skills = _turn.filtered_skills
             # MCP 工具：三条件策略注入（recent/server_name/capability_keyword）
             if _mcp_skills and _should_inject_mcp(user_text, _mcp_skills, cfg):
                 active_skills = {**active_skills, **_mcp_skills}

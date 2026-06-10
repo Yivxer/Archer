@@ -2,7 +2,9 @@
 base_url     = "https://api.deepseek.com/v1"
 api_key      = "sk-xxxxxxxxxxxxxxxx"
 model        = "deepseek-chat"
+model_auto   = true              # 每轮自动选 models[]；/model <名> 锁定
 vision_model = "deepseek-chat"   # 支持图片的模型
+models       = ["deepseek-chat", "deepseek-reasoner"]
 timeout_s    = 45
 max_retries  = 1
 

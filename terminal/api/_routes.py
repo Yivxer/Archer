@@ -1128,9 +1128,10 @@ def _status(cfg: dict) -> dict:
     persona = cfg.get("persona", {})
     mode_auto = persona.get("mode_auto", True) is not False
     mode = "auto" if mode_auto else persona.get("current_mode", persona.get("default_mode", "listener"))
+    from core.model_select import status_model_label
     return {
         "adapter": "local",
-        "model": cfg.get("api", {}).get("model", ""),
+        "model": status_model_label(cfg),
         "mode": mode,
         "memoryCount": confirmed,
         "pendingMemoryCount": pending,

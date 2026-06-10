@@ -1011,6 +1011,24 @@ class TestDesktopModes:
         assert payload["modeAuto"] is True
         assert all(not item["active"] for item in payload["modes"])
 
+    def test_status_reports_model_auto_when_enabled(self, monkeypatch):
+        from terminal.api import _routes as routes
+
+        cfg = {
+            "api": {"model": "fast-model", "model_auto": True, "models": ["fast-model", "heavy-model"]},
+            "persona": {"mode_auto": True, "default_mode": "listener"},
+            "auth": {},
+            "account": {},
+        }
+        monkeypatch.setattr(routes, "_load_config", lambda: cfg)
+        monkeypatch.setattr(routes, "_memory", lambda limit=100: [])
+        monkeypatch.setattr(routes, "_skills", lambda: [])
+
+        status, payload = routes.payload_get("/status")
+
+        assert status == 200
+        assert payload["model"] == "auto"
+
     def test_switch_mode_persists_current_mode(self, tmp_path, monkeypatch):
         from terminal.api import _routes as routes
 

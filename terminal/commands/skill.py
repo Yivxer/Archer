@@ -59,16 +59,29 @@ def _handle_skill(parts: list[str], skills: dict) -> dict:
 def _handle_model(parts: list[str], cfg: dict):
     models  = cfg["api"].get("models", [cfg["api"]["model"]])
     current = cfg["api"]["model"]
+    model_auto = cfg["api"].get("model_auto", True)
     if len(parts) < 2:
-        console.print(f"\n  当前模型：[bold #c44e00]{current}[/]")
+        if model_auto:
+            console.print(f"\n  当前模型：[bold #c44e00]自动[/]  [dim]（基线 {current}）[/dim]")
+        else:
+            console.print(f"\n  当前模型：[bold #c44e00]{current}[/]  [dim]（已锁定）[/dim]")
         for m in models:
-            marker = "  [dim]←[/]" if m == current else ""
+            marker = "  [dim]←[/]" if (not model_auto and m == current) else ""
             console.print(f"  [#c44e00]{m}[/]{marker}")
-        console.print(f"\n  用法：/model <模型名>")
+        console.print(f"\n  用法：/model <模型名>  ·  /model auto 恢复自动")
+        return
+    if parts[1] == "auto":
+        _persist_model_auto(True)
+        console.print("[dim]已开启模型自动：按意图在 models[] 中选择快/重模型。[/dim]")
         return
     new_model = parts[1]
+    if new_model not in models:
+        console.print(f"[yellow]未知模型：{new_model}[/yellow]")
+        return
     cfg["api"]["model"] = new_model
-    console.print(f"[bold #c44e00]已切换至 {new_model}[/]")
+    _persist_model(new_model)
+    _persist_model_auto(False)
+    console.print(f"[bold #c44e00]已锁定模型 {new_model}[/]")
 
 def _handle_mode(parts: list[str], cfg: dict):
     modes = cfg.get("persona", {}).get("modes", {})
@@ -294,6 +307,26 @@ def _persist_mode_auto(flag: bool) -> None:
         text = re.sub(r'^mode_auto\s*=.*$', new_line, text, flags=re.MULTILINE)
     else:
         text = re.sub(r'^(default_mode\s*=.*)$', rf'\1\n{new_line}', text, flags=re.MULTILINE)
+    _TOML_PATH.write_text(text, encoding="utf-8")
+
+
+def _persist_model(model: str) -> None:
+    text = _TOML_PATH.read_text(encoding="utf-8")
+    new_line = f'model = "{model}"'
+    if re.search(r'^model\s*=', text, re.MULTILINE):
+        text = re.sub(r'^model\s*=.*$', new_line, text, flags=re.MULTILINE)
+    else:
+        text = re.sub(r'^(\[api\]\s*)$', rf'\1\n{new_line}', text, flags=re.MULTILINE)
+    _TOML_PATH.write_text(text, encoding="utf-8")
+
+
+def _persist_model_auto(flag: bool) -> None:
+    text = _TOML_PATH.read_text(encoding="utf-8")
+    new_line = f'model_auto = {"true" if flag else "false"}'
+    if re.search(r'^model_auto\s*=', text, re.MULTILINE):
+        text = re.sub(r'^model_auto\s*=.*$', new_line, text, flags=re.MULTILINE)
+    else:
+        text = re.sub(r'^(model\s*=.*)$', rf'\1\n{new_line}', text, flags=re.MULTILINE)
     _TOML_PATH.write_text(text, encoding="utf-8")
 
 def _list_file_modes(cfg: dict) -> list[str]:
