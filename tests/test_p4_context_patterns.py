@@ -93,7 +93,13 @@ class TestContextBuilder(unittest.TestCase):
         cfg = self._make_cfg()
         project = {"name": "Archer", "description": "个人 AI 终端", "status": "active"}
         events = [{"event_type": "reflect", "content": "P3完成", "created_at": "2026-04-27T10:00:00"}]
-        prompt = build_system_prompt(cfg, project=project, project_events=events)
+        prompt = build_system_prompt(
+            cfg,
+            project=project,
+            project_events=events,
+            intent="project",
+            needs_project_context=True,
+        )
         self.assertIn("Archer", prompt)
         self.assertIn("P3完成", prompt)
 
@@ -108,6 +114,60 @@ class TestContextBuilder(unittest.TestCase):
         cfg = self._make_cfg()
         prompt = build_system_prompt(cfg, db_memories="DB_MEM_MARKER", heavy=False)
         self.assertIn("DB_MEM_MARKER", prompt)
+        self.assertIn("[context:memory.retrieve]", prompt)
+
+
+class TestContextLimitsAndSourceTags(unittest.TestCase):
+    def test_writing_scope_uses_tighter_retrieve_limit(self):
+        from core.context import resolve_context_limits
+
+        limits = resolve_context_limits(["writing_style", "preferences"])
+        self.assertEqual(limits.retrieve_total, 3)
+        self.assertEqual(limits.work_items, 0)
+
+    def test_project_scope_keeps_work_context(self):
+        from core.context import resolve_context_limits
+
+        limits = resolve_context_limits(["project", "work", "subtask"])
+        self.assertGreaterEqual(limits.retrieve_total, 5)
+        self.assertEqual(limits.work_items, 5)
+
+    def test_memory_md_block_has_source_tag(self):
+        import os
+        import tempfile
+        from core.context import build_system_prompt
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False, encoding="utf-8") as f:
+            f.write("TAGGED_MEMORY_MARKER")
+            memory_path = f.name
+        try:
+            cfg = {
+                "persona": {
+                    "memory_path": memory_path,
+                    "default_mode": "coach",
+                    "modes": {"coach": {"prompt": "教练模式"}},
+                }
+            }
+            prompt = build_system_prompt(
+                cfg,
+                heavy=False,
+                intent="project",
+                memory_scope=["project", "work"],
+            )
+            self.assertIn("[context:memory_md]", prompt)
+            self.assertIn("TAGGED_MEMORY_MARKER", prompt)
+        finally:
+            os.unlink(memory_path)
+
+    def test_format_for_prompt_tags_each_memory(self):
+        from memory.retrieve import format_for_prompt
+
+        text = format_for_prompt(
+            [{"id": 1, "content": "核心记忆内容测试", "type": "value", "importance": 5}],
+            [{"id": 2, "content": "相关记忆内容测试", "type": "preference", "importance": 3}],
+        )
+        self.assertIn("[src=memory.db:value:id=1]", text)
+        self.assertIn("[src=memory.db:preference:id=2]", text)
 
 
 # ── Pattern 质量约束 ───────────────────────────────────────────────────────────

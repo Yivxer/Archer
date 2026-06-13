@@ -18,6 +18,7 @@ v1.2 变更：
 - is_heavy_query 升级为 classify_query_intent
 """
 import os
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 import tomllib
@@ -86,11 +87,13 @@ def _get_mode_prompt(cfg: dict, mode: str | None = None) -> str:
     return modes.get(current, {}).get("prompt", "")
 
 
-def _format_work_context() -> str:
+def _format_work_context(limit: int = 5) -> str:
     """拉取进行中的 Work items，生成紧凑摘要（仅 task/project intent 时注入）。"""
+    if limit <= 0:
+        return ""
     try:
         from memory.work import list_active
-        items = list_active(limit=5)
+        items = list_active(limit=limit)
         if not items:
             return ""
         lines = ["[进行中的任务]"]
@@ -105,13 +108,13 @@ def _format_work_context() -> str:
         return ""
 
 
-def _format_project_context(project: dict, events: list | None) -> str:
+def _format_project_context(project: dict, events: list | None, *, event_limit: int = 3) -> str:
     lines = [f"[当前项目：{project['name']}]"]
     if project.get("description"):
         lines.append(f"说明：{project['description']}")
     if events:
         lines.append("最近动态：")
-        for e in (events or [])[:3]:
+        for e in (events or [])[: max(0, event_limit)]:
             date = (e.get("created_at") or "")[:10]
             snippet = (e.get("content") or "")[:80]
             lines.append(f"- [{e['event_type']}] {snippet}  {date}")
@@ -152,6 +155,88 @@ def _extract_presence_summary(presence_text: str) -> str:
     return "\n".join(summary_lines[:25]) if summary_lines else presence_text[:400]
 
 
+@dataclass(frozen=True)
+class ContextLimits:
+    retrieve_total: int = 5
+    soul_profile: int = 5
+    work_items: int = 5
+    project_events: int = 3
+    memory_md_max_chars: int | None = None
+
+
+def tag_context_block(source: str, content: str) -> str:
+    """Prefix injected recall blocks with a stable source tag for debugging."""
+    body = (content or "").strip()
+    if not body:
+        return ""
+    return f"[context:{source}]\n{body}"
+
+
+def _scope_profile(memory_scope: list[str]) -> str:
+    if any(scope in {"project", "work", "subtask"} for scope in memory_scope):
+        return "project"
+    if any(scope in {"writing_style", "recent_articles", "preferences"} for scope in memory_scope):
+        return "writing"
+    if any(scope in {"soul", "emotion", "patterns"} for scope in memory_scope):
+        return "emotional"
+    if any(scope in {"obsidian", "knowledge_structure"} for scope in memory_scope):
+        return "knowledge"
+    if any(
+        scope in {"values", "constraints", "past_decisions", "period_review", "journal"}
+        for scope in memory_scope
+    ):
+        return "reflective"
+    return "default"
+
+
+def resolve_context_limits(
+    memory_scope: list[str] | None = None,
+    *,
+    needs_memory: bool = False,
+    memory_mode: str | None = None,
+) -> ContextLimits:
+    """Per-scope caps for retrieved / injected context blocks."""
+    if memory_mode == "full":
+        base = ContextLimits(retrieve_total=10, soul_profile=7, work_items=5, project_events=3)
+    elif memory_mode == "conservative":
+        base = ContextLimits(retrieve_total=3, soul_profile=3, work_items=3, project_events=2)
+    elif needs_memory:
+        base = ContextLimits(retrieve_total=7, soul_profile=6, work_items=5, project_events=3)
+    else:
+        base = ContextLimits()
+
+    if not memory_scope:
+        return base
+
+    profile_limits = {
+        "writing": ContextLimits(
+            retrieve_total=3, soul_profile=3, work_items=0, project_events=0,
+        ),
+        "emotional": ContextLimits(
+            retrieve_total=5, soul_profile=5, work_items=0, project_events=0,
+        ),
+        "project": ContextLimits(
+            retrieve_total=6, soul_profile=4, work_items=5, project_events=3,
+        ),
+        "knowledge": ContextLimits(
+            retrieve_total=4, soul_profile=2, work_items=0, project_events=0,
+        ),
+        "reflective": ContextLimits(
+            retrieve_total=6, soul_profile=6, work_items=0, project_events=2,
+        ),
+        "default": ContextLimits(retrieve_total=5, soul_profile=5, work_items=3, project_events=2),
+    }[_scope_profile(memory_scope)]
+
+    if memory_mode == "full":
+        return ContextLimits(
+            retrieve_total=max(profile_limits.retrieve_total, base.retrieve_total),
+            soul_profile=max(profile_limits.soul_profile, base.soul_profile),
+            work_items=max(profile_limits.work_items, base.work_items),
+            project_events=max(profile_limits.project_events, base.project_events),
+        )
+    return profile_limits
+
+
 # ── 主构建函数 ─────────────────────────────────────────────────────────────────
 
 def build_system_prompt(
@@ -170,6 +255,11 @@ def build_system_prompt(
     thread_hint: dict | None = None,
     writing_profile: str | None = None,
     writing_query: str = "",
+    memory_scope: list[str] | None = None,
+    task_plan_block: str = "",
+    mode_constraint_block: str = "",
+    needs_project_context: bool | None = None,
+    context_limits: ContextLimits | None = None,
 ) -> str:
     """
     按灵魂三层注入顺序构建 System Prompt：
@@ -184,12 +274,25 @@ def build_system_prompt(
     Layer 7: Retrieved Memories（外部传入时）
     """
     mode_prompt = _get_mode_prompt(cfg, mode_override)
+    limits = context_limits or resolve_context_limits(
+        memory_scope,
+        needs_memory=heavy,
+    )
 
     # 加载灵魂三层文件
     covenant_text = _load_file(cfg["persona"].get("covenant_path", ""))
     presence_text = _load_file(cfg["persona"].get("presence_path", ""))
 
+    _SOUL_MD_SCOPES = {"soul", "emotion", "values", "period_review", "journal"}
+    _SOUL_PROFILE_SCOPES = {
+        "soul", "emotion", "patterns", "values", "constraints",
+        "past_decisions", "period_review", "journal",
+    }
+    _PROJECT_SCOPES = {"project", "work", "subtask"}
+
     needs_soul = intent in ("decision", "emotional", "reflection") if intent else heavy
+    if memory_scope is not None:
+        needs_soul = needs_soul and any(scope in _SOUL_MD_SCOPES for scope in memory_scope)
 
     runtime_info = (
         f"[运行时信息]\n"
@@ -250,40 +353,68 @@ def build_system_prompt(
     if needs_soul:
         soul = _load_file(cfg["persona"].get("soul_path", ""))
         if soul:
-            parts.append(f"[灵魂档案（SOUL.md）]\n{soul}")
+            parts.append(tag_context_block("soul_md", f"[灵魂档案（SOUL.md）]\n{soul}"))
 
     # Layer 4.5: Soul Profile（紧凑结构化摘要，不注入完整档案）
-    try:
-        from memory.soul_profile import load_soul_profile, format_soul_profile_for_prompt
-        soul_profile = load_soul_profile(cfg["persona"].get("soul_profile_path", ""))
-        soul_profile_text = format_soul_profile_for_prompt(
-            soul_profile,
-            intent=intent,
-            user_input=user_input,
-            limit=7,
-        )
-        if soul_profile_text:
-            parts.append(soul_profile_text)
-    except Exception:
-        pass
+    include_soul_profile = True
+    if memory_scope is not None:
+        include_soul_profile = any(scope in _SOUL_PROFILE_SCOPES for scope in memory_scope)
+    if include_soul_profile:
+        try:
+            from memory.soul_profile import load_soul_profile, format_soul_profile_for_prompt
+            soul_profile = load_soul_profile(cfg["persona"].get("soul_profile_path", ""))
+            soul_profile_text = format_soul_profile_for_prompt(
+                soul_profile,
+                intent=intent,
+                user_input=user_input,
+                limit=limits.soul_profile,
+            )
+            if soul_profile_text:
+                parts.append(tag_context_block("soul_profile", soul_profile_text))
+        except Exception:
+            pass
 
-    # Layer 5: MEMORY.md（heavy 时注入）
-    if heavy:
+    # Layer 5: MEMORY.md
+    #
+    # Backward compatible default: old callers still use ``heavy``.
+    # New orchestrated callers can pass memory_scope to avoid injecting the
+    # whole working memory for narrow scopes such as writing style.
+    include_memory_md = heavy
+    if memory_scope is not None:
+        include_memory_md = any(
+            scope in {"project", "work", "recent", "period_review", "journal"}
+            for scope in memory_scope
+        )
+    if include_memory_md:
         memory_text = _load_file(cfg["persona"].get("memory_path", ""))
+        if memory_text and limits.memory_md_max_chars:
+            memory_text = memory_text[: limits.memory_md_max_chars]
         if memory_text:
-            parts.append(f"[当前记忆与状态（MEMORY.md）]\n{memory_text}")
+            parts.append(tag_context_block(
+                "memory_md",
+                f"[当前记忆与状态（MEMORY.md）]\n{memory_text}",
+            ))
+
+    inject_project_work = needs_project_context
+    if inject_project_work is None:
+        inject_project_work = intent in ("project", "task") if intent else False
+    if memory_scope is not None:
+        inject_project_work = inject_project_work or any(
+            scope in _PROJECT_SCOPES for scope in memory_scope
+        )
 
     # Layer 6: 活跃项目
-    if project:
-        proj_ctx = _format_project_context(project, project_events)
-        parts.append(proj_ctx)
+    if project and inject_project_work:
+        proj_ctx = _format_project_context(
+            project, project_events, event_limit=limits.project_events,
+        )
+        parts.append(tag_context_block("project", proj_ctx))
 
-    # Layer 6.5: 进行中的 Work items（task/project intent 时注入）
-    needs_project = intent in ("project", "task") if intent else False
-    if needs_project:
-        work_ctx = _format_work_context()
+    # Layer 6.5: 进行中的 Work items（project/task 类请求时注入）
+    if inject_project_work:
+        work_ctx = _format_work_context(limit=limits.work_items)
         if work_ctx:
-            parts.append(work_ctx)
+            parts.append(tag_context_block("work", work_ctx))
 
     # Layer 6.8: 对峙提醒（当用户言行与过去矛盾时注入）
     if confrontation_hints:
@@ -293,7 +424,13 @@ def build_system_prompt(
 
     # Layer 7: Retrieved Memories
     if db_memories:
-        parts.append(db_memories)
+        parts.append(tag_context_block("memory.retrieve", db_memories))
+
+    if mode_constraint_block:
+        parts.append(tag_context_block("orchestration.mode", mode_constraint_block))
+
+    if task_plan_block:
+        parts.append(tag_context_block("orchestration.plan", task_plan_block))
 
     parts.append(
         "[能力边界]\n"
@@ -336,6 +473,11 @@ def build_messages(
     thread_hint: dict | None = None,
     writing_profile: str | None = None,
     writing_query: str = "",
+    memory_scope: list[str] | None = None,
+    task_plan_block: str = "",
+    mode_constraint_block: str = "",
+    needs_project_context: bool | None = None,
+    context_limits: ContextLimits | None = None,
 ) -> list[dict]:
     system = build_system_prompt(
         cfg,
@@ -352,6 +494,11 @@ def build_messages(
         thread_hint=thread_hint,
         writing_profile=writing_profile,
         writing_query=writing_query,
+        memory_scope=memory_scope,
+        task_plan_block=task_plan_block,
+        mode_constraint_block=mode_constraint_block,
+        needs_project_context=needs_project_context,
+        context_limits=context_limits,
     )
     return [
         {"role": "system", "content": system},
