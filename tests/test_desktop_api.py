@@ -86,6 +86,44 @@ def test_background_jobs_can_be_listed_and_fetched(tmp_path):
     assert missing_payload["error"] == "job_not_found"
 
 
+def test_background_job_spawn_creates_child_jobs(tmp_path):
+    from terminal.api import _routes as routes
+
+    _reset_background_jobs(routes, tmp_path / "background_jobs.json")
+    _, created = routes.payload_post("/jobs", {
+        "title": "父任务",
+        "kind": "analysis",
+        "prompt": "拆分当前 Archer 优化任务",
+        "autoStart": False,
+    })
+    parent_id = created["job"]["id"]
+
+    status, payload = routes.payload_post(f"/jobs/{parent_id}/spawn", {
+        "children": [
+            {
+                "title": "检查计划入口",
+                "kind": "review",
+                "prompt": "检查计划卡是否可执行",
+                "autoStart": False,
+            },
+            {
+                "title": "检查记忆候选",
+                "kind": "analysis",
+                "prompt": "检查 project_update 是否进入 pending",
+                "autoStart": False,
+            },
+        ],
+    })
+    _, detail_payload = routes.payload_get(f"/jobs/{parent_id}")
+
+    assert status == 200
+    assert payload["ok"] is True
+    assert payload["spawned"] == 2
+    assert all(job["parentJobId"] == parent_id for job in payload["children"])
+    assert len(detail_payload["job"]["childJobIds"]) == 2
+    assert [child["status"] for child in detail_payload["job"]["children"]] == ["queued", "queued"]
+
+
 def test_background_job_runs_after_create(tmp_path, monkeypatch):
     import time
     from terminal.api import _routes as routes
@@ -596,31 +634,10 @@ class TestApiSkillRouting:
         assert event["toolEvent"]["status"] == "complete"
         assert event["toolEvent"]["detail"] == "找到 1 篇笔记"
 
-    def test_iter_api_tool_events_creates_hugo_deploy_request(self, monkeypatch):
+    def test_iter_api_tool_events_skips_hugo_preflight_cards(self, monkeypatch):
         monkeypatch.setattr("archer_api._select_api_skills", lambda _query: {"hugo_blog": object()})
-
-        def fake_make(skill_name, args, **kwargs):
-            return {
-                "kind": "tool_request",
-                "eventId": kwargs["event_id"],
-                "skillName": skill_name,
-                "displayName": kwargs["display_name"],
-                "args": args,
-                "policy": {"decision": "allow", "risk": "low", "reason": ""},
-                "requiresApproval": True,
-                "blocked": False,
-                **(kwargs.get("extra") or {}),
-            }
-
-        monkeypatch.setattr("archer_api._make_api_tool_request", fake_make)
         events = list(_iter_api_tool_events("部署枫弋札记"))
-
-        assert len(events) == 1
-        tool_event = events[0]["toolEvent"]
-        assert tool_event["name"] == "hugo_blog"
-        assert tool_event["requiresApproval"] is True
-        assert tool_event["draft"]["skillName"] == "hugo_blog"
-        assert tool_event["draft"]["args"] == {"action": "deploy"}
+        assert events == []
 
     def test_plain_article_request_does_not_trigger_hugo_blog(self, monkeypatch):
         monkeypatch.setattr("archer_api._select_api_skills", lambda _query: {"hugo_blog": object()})
@@ -690,29 +707,79 @@ class TestApiSkillRouting:
         assert selected
         assert filtered == {}
 
-    def test_hugo_deploy_chat_stops_after_approval_card(self, monkeypatch):
+    def test_negated_web_search_does_not_survive_filter(self):
         from terminal.api import _tools as tools
 
-        monkeypatch.setattr(tools, "_select_api_skills", lambda _query: {"hugo_blog": object()})
-        monkeypatch.setattr(tools, "_run_desktop_tool_loop", lambda messages, _skills, _query: (messages, []))
+        selected = {
+            "web_search": object(),
+            "web_fetch": object(),
+            "file_ops": object(),
+            "hugo_blog": object(),
+        }
+        filtered = tools._filter_api_skills_for_intent(
+            "不要搜索资料，也不要保存文件，直接帮我写一篇文章",
+            selected,
+        )
 
-        def fake_make(skill_name, args, **kwargs):
-            return {
-                "kind": "tool_request",
-                "eventId": kwargs["event_id"],
-                "skillName": skill_name,
-                "displayName": kwargs["display_name"],
-                "args": args,
-                "policy": {"decision": "allow", "risk": "low", "reason": ""},
-                "requiresApproval": True,
-                "blocked": False,
-                **(kwargs.get("extra") or {}),
-            }
+        assert filtered == {}
+
+    def test_negated_file_write_with_path_does_not_survive_filter(self):
+        from terminal.api import _tools as tools
+
+        selected = {"file_ops": object(), "web_search": object()}
+        filtered = tools._filter_api_skills_for_intent(
+            "不要保存到 /tmp/archer-note.md，只在聊天里帮我润色",
+            selected,
+        )
+
+        assert filtered == {}
+
+    def test_explicit_web_search_still_survives_filter(self):
+        from terminal.api import _tools as tools
+
+        selected = {"web_search": object(), "file_ops": object()}
+        filtered = tools._filter_api_skills_for_intent(
+            "帮我搜索最新的 Python 3.14 发布资料",
+            selected,
+        )
+
+        assert set(filtered) == {"web_search"}
+
+    def test_explicit_file_write_still_survives_filter(self):
+        from terminal.api import _tools as tools
+
+        selected = {"file_ops": object(), "web_search": object()}
+        filtered = tools._filter_api_skills_for_intent(
+            "把结果保存到 /tmp/archer-note.md",
+            selected,
+        )
+
+        assert set(filtered) == {"file_ops"}
+
+    def test_hugo_deploy_chat_uses_agent_turn_without_stream_chat(self, monkeypatch):
+        from terminal.api import _tools as tools
+        from types import SimpleNamespace
+
+        monkeypatch.setattr(tools, "_select_api_skills", lambda _query: {"hugo_blog": object()})
+
+        def fake_agent(messages, query, **kwargs):
+            return messages, [{
+                "type": "tool_event",
+                "toolEvent": {
+                    "id": "hugo-agent-test",
+                    "name": "hugo_blog",
+                    "status": "complete",
+                    "risk": "low",
+                    "summary": "hugo_blog · deploy",
+                    "detail": "部署成功！\n单页验证成功：HTTP 200",
+                    "requiresApproval": False,
+                },
+            }], "枫弋札记已部署上线。"
 
         def fail_stream_chat(_messages):
-            raise AssertionError("direct hugo deploy approval must not call the model")
+            raise AssertionError("hugo deploy must use agent turn, not stream_chat")
 
-        monkeypatch.setattr(tools, "_make_api_tool_request", fake_make)
+        monkeypatch.setattr(tools, "_run_hugo_agent_turn", fake_agent)
         monkeypatch.setattr("core.llm.stream_chat", fail_stream_chat)
 
         events = list(tools._iter_chat_chunks(
@@ -724,11 +791,87 @@ class TestApiSkillRouting:
 
         assert any(
             event.get("toolEvent", {}).get("name") == "hugo_blog"
-            and event.get("toolEvent", {}).get("requiresApproval") is True
+            and event.get("toolEvent", {}).get("status") == "complete"
+            and event.get("toolEvent", {}).get("requiresApproval") is False
             for event in events
         )
-        assert any("部署确认卡" in event.get("text", "") for event in events)
+        assert any("枫弋札记已部署上线" in event.get("text", "") for event in events)
+        assert not any("部署确认卡" in event.get("text", "") for event in events)
         assert events[-1] == {"type": "done", "done": True}
+
+    def test_parse_markdown_for_hugo_from_obsidian_note(self):
+        from terminal.api._tools import _parse_markdown_for_hugo
+
+        parsed = _parse_markdown_for_hugo(
+            "# 明知比无知更像是枷锁\n\n这是一篇读书笔记。",
+            source_path="/Users/Yivxer/Library/Mobile Documents/读书笔记/明知比无知更像是枷锁.md",
+        )
+        assert parsed is not None
+        assert parsed["title"] == "明知比无知更像是枷锁"
+        assert parsed["category"] == "阅读"
+        assert "读书笔记" in parsed["body"]
+
+    def test_direct_hugo_publish_from_attachment(self, monkeypatch, tmp_path):
+        from terminal.api import _tools as tools
+
+        note = tmp_path / "note.md"
+        note.write_text("# 测试发布\n\n正文内容。", encoding="utf-8")
+
+        calls = []
+
+        def fake_hugo_run(args):
+            calls.append(args)
+            if args["action"] == "new":
+                return "文章已创建：/Users/Yivxer/yivxer-blog/content/posts/ce-shi-fa-bu.md"
+            return "部署成功！\n单页验证成功：HTTP 200"
+
+        monkeypatch.setattr("skills.hugo_blog.run", fake_hugo_run)
+        monkeypatch.setattr(tools, "_select_api_skills", lambda _query: {"hugo_blog": object()})
+
+        events = list(tools._iter_chat_chunks(
+            [{"role": "user", "content": "把这篇发到枫弋札记"}],
+            memory_mode="off",
+            obsidian_mode="off",
+            file_refs=[{"path": str(note), "name": note.name, "size": note.stat().st_size}],
+        ))
+
+        assert calls[0]["action"] == "new"
+        assert calls[1]["action"] == "deploy"
+        assert any("已从《测试发布》发布到枫弋札记" in event.get("text", "") for event in events)
+
+    def test_hugo_followup_deploy_uses_conversation_frontmatter(self, monkeypatch, tmp_path):
+        from terminal.api import _tools as tools
+        from skills.hugo_blog import POSTS_DIR
+
+        slug = "from-claude-to-codex-cursor"
+        existing = POSTS_DIR / f"{slug}.md"
+        existing.write_text(
+            '---\ntitle: "从 Claude 到 Codex + Cursor"\nslug: "from-claude-to-codex-cursor"\n---\n\n正文',
+            encoding="utf-8",
+        )
+
+        calls = []
+
+        def fake_hugo_run(args):
+            calls.append(args)
+            return "部署成功！\n单页验证成功：HTTP 200"
+
+        monkeypatch.setattr("skills.hugo_blog.run", fake_hugo_run)
+        monkeypatch.setattr(tools, "_select_api_skills", lambda _query: {"hugo_blog": object()})
+
+        events = list(tools._iter_chat_chunks(
+            [
+                {"role": "user", "content": "title: 从 Claude 到 Codex + Cursor\nslug: from-claude-to-codex-cursor"},
+                {"role": "assistant", "content": "frontmatter 看起来没问题。"},
+                {"role": "user", "content": "你部署一下我看看"},
+            ],
+            memory_mode="off",
+            obsidian_mode="off",
+            file_refs=[],
+        ))
+
+        assert calls == [{"action": "deploy", "filename": f"{slug}.md"}]
+        assert any("已部署" in event.get("text", "") for event in events)
 
     def test_hugo_new_approval_runs_deploy_after_create(self, monkeypatch):
         PENDING_TOOL_DRAFTS.clear()

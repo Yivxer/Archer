@@ -36,6 +36,14 @@ def test_chat_page_pins_approval_cards_above_composer():
     assert "defaultExpanded={event.name === 'hugo_blog'}" in source
 
 
+def test_runtime_activity_prevents_empty_home_state():
+    source = CHAT_PAGE.read_text()
+
+    assert "hasRuntimeActivity" in source
+    assert "runtimePlans.length > 0" in source
+    assert "messages.length === 0 && !isTyping && !isSending && !activeSession && !hasRuntimeActivity" in source
+
+
 def test_chat_styles_keep_conversation_chrome_quiet():
     css = CHAT_CSS.read_text()
 

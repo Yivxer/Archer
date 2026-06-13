@@ -40,6 +40,7 @@ from core.desktop_tool_router import (
     should_trigger_shell as _should_trigger_shell,
     wants_hugo_creation as _wants_hugo_creation,
     wants_hugo_deploy as _wants_hugo_deploy,
+    wants_hugo_publish as _wants_hugo_publish,
 )
 
 
@@ -200,6 +201,488 @@ _AUTO_EXEC_SKILLS = {
     "image_analysis", "image_ocr", "whisper_transcribe",
     "weekly_review", "rss_reader", "apple_reminders",
 }
+
+
+def _extract_md_path_from_query(query: str) -> str:
+    match = re.search(r"(/Users/[^\s`']+\.md)", query)
+    return match.group(1) if match else ""
+
+
+def _extract_md_paths_from_text(text: str) -> list[str]:
+    return list(dict.fromkeys(re.findall(r"(/Users/[^\s`'\"]+\.md)", text)))
+
+
+def _read_md_source(path_value: str) -> tuple[str, str] | None:
+    path = Path(path_value).expanduser()
+    if not path.exists() or not path.is_file() or path.suffix.lower() != ".md":
+        return None
+    try:
+        return str(path), path.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return None
+
+
+def _collect_hugo_markdown_sources(
+    messages: list[dict],
+    query: str,
+    file_refs: list[dict] | None,
+) -> list[tuple[str, str]]:
+    """从附件、消息路径、对话历史回收 Markdown 原文（多轮会话）。"""
+    sources: list[tuple[str, str]] = []
+    seen_labels: set[str] = set()
+
+    def add(label: str, text: str) -> None:
+        clean = text.strip()
+        if not clean or label in seen_labels:
+            return
+        seen_labels.add(label)
+        sources.append((label, clean))
+
+    for ref in file_refs or []:
+        loaded = _read_md_source(str(ref.get("path", "")).strip())
+        if loaded:
+            add(loaded[0], loaded[1])
+
+    for path_value in _extract_md_paths_from_text(query):
+        loaded = _read_md_source(path_value)
+        if loaded:
+            add(loaded[0], loaded[1])
+
+    for msg in messages:
+        role = str(msg.get("role", ""))
+        content = str(msg.get("content", ""))
+        if not content.strip():
+            continue
+
+        if role == "system" and "以下是用户在桌面端明确选择并引用的本地文本文件内容" in content:
+            for block in re.split(r"\n---\n", content):
+                path_match = re.search(r"^path:\s*(/Users/.+)$", block, re.MULTILINE)
+                if not path_match:
+                    continue
+                body = re.sub(r"^###\s*.+\npath:.*\ntruncated:.*\n\n", "", block, flags=re.MULTILINE).strip()
+                if body:
+                    add(path_match.group(1).strip(), body)
+
+        for path_value in _extract_md_paths_from_text(content):
+            loaded = _read_md_source(path_value)
+            if loaded:
+                add(loaded[0], loaded[1])
+
+        if role in ("user", "assistant") and re.search(r"(?m)^title:\s*.+", content):
+            add(f"conversation:{hash(content) & 0xfffffff}", content)
+
+    return sources
+
+
+def _extract_frontmatter_hints(text: str) -> dict[str, str]:
+    hints: dict[str, str] = {}
+    for line in text.splitlines():
+        match = re.match(r"^(title|slug|category|description):\s*(.+)$", line.strip(), re.IGNORECASE)
+        if match:
+            hints[match.group(1).lower()] = match.group(2).strip().strip('"').strip("'")
+    return hints
+
+
+def _format_hugo_chat_summary(
+    title: str,
+    deploy_result: str,
+    *,
+    deploy_ok: bool,
+    prefix: str | None = None,
+) -> str:
+    """给用户看的枫弋札记结果，不贴 Hugo/SSH 原始终端输出。"""
+    lines = [prefix or f"已部署《{title}》到枫弋札记。"]
+    deploy_text = str(deploy_result)
+    url_match = re.search(r"https://iver\.yivxer\.com/posts/[^\s/]+/", deploy_text)
+    for line in deploy_text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("线上地址："):
+            lines.append(stripped)
+            url_match = None
+        elif stripped.startswith("验证："):
+            lines.append(stripped)
+    if url_match and not any(line.startswith("线上地址：") for line in lines):
+        lines.append(f"线上地址：{url_match.group(0)}")
+    if deploy_ok:
+        if not any(line.startswith("验证：") for line in lines):
+            verify_match = re.search(r"验证：.+", deploy_text)
+            if verify_match:
+                lines.append(verify_match.group(0))
+        lines.append("部署已完成。")
+    elif deploy_text and not deploy_ok:
+        lines.append(deploy_text)
+    return "\n".join(lines)
+
+
+def _try_direct_hugo_deploy_existing(
+    messages: list[dict],
+    query: str,
+) -> tuple[list[dict], str] | None:
+    """对话里已有 slug/title 且博客目录有对应文件 → 直接 deploy。"""
+    slug = ""
+    title = ""
+    for msg in reversed(messages):
+        hints = _extract_frontmatter_hints(str(msg.get("content", "")))
+        slug = slug or hints.get("slug", "")
+        title = title or hints.get("title", "")
+        if slug and title:
+            break
+
+    if not slug and not title:
+        return None
+
+    from skills.hugo_blog import POSTS_DIR, run as hugo_run, _safe_slug, _slug_from_post
+
+    target: Path | None = None
+    if slug:
+        safe = _safe_slug(slug)
+        direct = POSTS_DIR / f"{safe}.md"
+        if direct.exists():
+            target = direct
+        else:
+            for path in POSTS_DIR.glob("*.md"):
+                if _slug_from_post(path) == safe or path.stem == safe:
+                    target = path
+                    break
+
+    if target is None and title:
+        for path in POSTS_DIR.glob("*.md"):
+            text = path.read_text(encoding="utf-8", errors="ignore")[:2000]
+            if f'title: "{title}"' in text or f"title: {title}" in text:
+                target = path
+                break
+
+    if target is None:
+        return None
+
+    deploy_event_id = f"hugo-direct-deploy-{uuid4().hex[:8]}"
+    deploy_result = hugo_run({"action": "deploy", "filename": target.name})
+    deploy_ok = "部署成功" in str(deploy_result)
+    event = _tool_event_from_result(
+        deploy_event_id,
+        "hugo_blog",
+        {
+            "ok": deploy_ok,
+            "executed": deploy_ok,
+            "output": deploy_result,
+            "summary": "部署枫弋札记",
+            "policy": {"risk": "low"},
+        },
+        summary="部署枫弋札记",
+    )
+    summary = _format_hugo_chat_summary(
+        title or target.stem,
+        deploy_result,
+        deploy_ok=deploy_ok,
+    )
+    return [event], summary
+
+
+def _parse_markdown_for_hugo(text: str, *, source_path: str = "") -> dict | None:
+    """从 Obsidian/本地 Markdown 提取 hugo_blog new 所需字段。"""
+    raw = text.strip()
+    if not raw:
+        return None
+
+    fm: dict[str, str] = {}
+    body = raw
+    if raw.startswith("---"):
+        parts = raw.split("---", 2)
+        if len(parts) >= 3:
+            for line in parts[1].splitlines():
+                if ":" not in line:
+                    continue
+                key, value = line.split(":", 1)
+                fm[key.strip()] = value.strip().strip('"').strip("'")
+            body = parts[2].strip()
+
+    title = fm.get("title", "").strip()
+    if not title:
+        for pat in (r"^#\s+(.+)$", r"^##\s+(.+)$"):
+            match = re.search(pat, body, re.MULTILINE)
+            if match:
+                title = match.group(1).strip()
+                break
+    if not title and source_path:
+        title = Path(source_path).stem
+
+    category = "阅读" if "读书笔记" in source_path else "系统"
+    cats_raw = fm.get("categories", fm.get("category", "")).strip().strip("[]")
+    if cats_raw:
+        for valid in ("系统", "健身", "复盘", "阅读", "产品", "写作", "技术"):
+            if valid in cats_raw:
+                category = valid
+                break
+
+    description = fm.get("description", fm.get("summary", "")).strip().strip('"')
+    if not description:
+        for line in body.splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith(("#", "```", "- ", "* ", ">")):
+                continue
+            description = stripped[:200]
+            break
+    if not description:
+        description = title[:120] if title else "无摘要"
+
+    clean_body = body
+    if title:
+        clean_body = re.sub(rf"^#{{1,2}}\s+{re.escape(title)}\s*\n+", "", clean_body, count=1, flags=re.MULTILINE)
+
+    if not title or len(title) < 2:
+        return None
+
+    return {
+        "title": title[:120],
+        "category": category,
+        "description": description[:200],
+        "body": clean_body.strip(),
+    }
+
+
+def _try_direct_hugo_publish(
+    query: str,
+    file_refs: list[dict] | None,
+    *,
+    messages: list[dict] | None = None,
+) -> tuple[list[dict], str] | None:
+    """附件、路径或对话历史 → hugo new + deploy，无需用户再操作。"""
+    sources = _collect_hugo_markdown_sources(messages or [], query, file_refs)
+    if not sources:
+        return None
+
+    from skills.hugo_blog import run as hugo_run
+
+    label, text = sources[0]
+    parsed = _parse_markdown_for_hugo(text, source_path=label)
+    if not parsed:
+        return None
+
+    hints = _extract_frontmatter_hints(text)
+    if hints.get("slug"):
+        parsed["slug"] = hints["slug"]
+    if hints.get("title") and not parsed.get("title"):
+        parsed["title"] = hints["title"][:120]
+    if hints.get("category"):
+        for valid in ("系统", "健身", "复盘", "阅读", "产品", "写作", "技术"):
+            if valid in hints["category"]:
+                parsed["category"] = valid
+                break
+    if hints.get("description"):
+        parsed["description"] = hints["description"][:200]
+
+    if len(parsed.get("body", "")) < 40:
+        merged_body = ""
+        for _, alt_text in sources:
+            alt_parsed = _parse_markdown_for_hugo(alt_text, source_path=label)
+            if alt_parsed and len(alt_parsed.get("body", "")) > len(merged_body):
+                merged_body = alt_parsed["body"]
+        if len(merged_body) >= 40:
+            parsed["body"] = merged_body
+        elif not parsed.get("body"):
+            return None
+
+    tool_events: list[dict] = []
+    new_args = {
+        "action": "new",
+        "title": parsed["title"],
+        "category": parsed["category"],
+        "description": parsed["description"],
+        "body": parsed["body"],
+    }
+    if parsed.get("slug"):
+        new_args["slug"] = parsed["slug"]
+    new_event_id = f"hugo-direct-new-{uuid4().hex[:8]}"
+    new_result = hugo_run(new_args)
+    new_ok = not str(new_result).startswith("错误")
+    tool_events.append(_tool_event_from_result(
+        new_event_id,
+        "hugo_blog",
+        {
+            "ok": new_ok,
+            "executed": new_ok,
+            "output": new_result,
+            "summary": "创建博客文章",
+            "policy": {"risk": "low"},
+        },
+        summary="创建博客文章",
+    ))
+    if not new_ok:
+        return tool_events, new_result
+
+    filename = ""
+    created = re.search(r"文章已创建：(.+?\.md)", str(new_result))
+    if created:
+        filename = Path(created.group(1)).name
+
+    deploy_event_id = f"hugo-direct-deploy-{uuid4().hex[:8]}"
+    deploy_args: dict = {"action": "deploy"}
+    if filename:
+        deploy_args["filename"] = filename
+    deploy_result = hugo_run(deploy_args)
+    deploy_ok = "部署成功" in str(deploy_result)
+    tool_events.append(_tool_event_from_result(
+        deploy_event_id,
+        "hugo_blog",
+        {
+            "ok": deploy_ok,
+            "executed": deploy_ok,
+            "output": deploy_result,
+            "summary": "部署枫弋札记",
+            "policy": {"risk": "low"},
+        },
+        summary="部署枫弋札记",
+    ))
+
+    summary = _format_hugo_chat_summary(
+        parsed["title"],
+        deploy_result,
+        deploy_ok=deploy_ok,
+        prefix=f"已从《{parsed['title']}》发布到枫弋札记。",
+    )
+    return tool_events, summary
+
+
+_HUGO_AGENT_SYSTEM_PROMPT = """你是 Archer 的枫弋札记（博客）工作流执行器。
+
+枫弋札记是用户的 Hugo 静态博客：
+- 本地目录：/Users/Yivxer/yivxer-blog
+- 文章目录：content/posts/
+- 线上站点：https://iver.yivxer.com
+- 合法分类：系统、健身、复盘、阅读、产品、写作、技术
+
+你只能调用 hugo_blog 工具，必须根据工具返回的真实输出决定下一步，不要编造结果。
+禁止让用户手动复制正文、禁止让用户自己去终端执行命令、禁止说「我手里没有文章内容」。
+
+若系统消息或对话历史中已有附件 Markdown、title/slug frontmatter 或正文片段，必须优先使用；
+用户说「部署一下」时，先 action=list，再按 slug/title 匹配已有文章；匹配到则直接 action=deploy。
+
+若对话里只有 frontmatter 而本地 posts 目录已有同 slug 文件，直接 action=deploy，不要要求用户重贴正文。
+
+当用户要部署时：
+1. 先用 action=list 查看最近文章，判断要部署哪篇（未指定则部署全站）
+2. 若对话里已有正文或用户指定了文章，用 action=read 检查 frontmatter 与 Markdown 结构
+3. 结构不合规时用 action=edit 修正 title、description、category、body
+4. 最后用 action=deploy 构建并同步上线
+
+当用户要写新文章并发布时：
+1. 从对话整理 title、category、description、body（Markdown 正文）
+2. 用 action=new 创建，再 action=deploy
+
+完成后用简短中文告诉用户：做了什么、文章标题、是否部署成功、可访问地址。"""
+
+
+def _run_hugo_agent_turn(
+    messages: list[dict],
+    query: str,
+    *,
+    file_refs: list[dict] | None = None,
+) -> tuple[list[dict], list[dict], str]:
+    """LLM 驱动枫弋札记工作流；ALLOW 操作自动执行，不弹确认卡。"""
+    if not _wants_hugo_publish(query, file_refs):
+        return messages, [], ""
+
+    from core.llm import call_with_tools
+    from core.policy import check as policy_check, Decision
+    from core.tool_runtime import invoke as runtime_invoke
+    from skills.loader import load_skills, get_tools
+
+    all_skills = load_skills()
+    if "hugo_blog" not in all_skills:
+        return messages, [], ""
+
+    hugo_only = {"hugo_blog": all_skills["hugo_blog"]}
+    tools = get_tools(hugo_only)
+    if not tools:
+        return messages, [], ""
+
+    agent_messages: list[dict] = [
+        {"role": "system", "content": _HUGO_AGENT_SYSTEM_PROMPT},
+        *messages,
+    ]
+    tool_events: list[dict] = []
+    final_text = ""
+
+    for _ in range(8):
+        try:
+            msg = call_with_tools(agent_messages, tools)
+        except Exception as exc:
+            final_text = f"枫弋札记工作流中断：{exc}"
+            break
+
+        if not msg.tool_calls:
+            final_text = (msg.content or "").strip()
+            break
+
+        agent_messages.append(msg)
+
+        for tc in msg.tool_calls:
+            fn_name = tc.function.name
+            if fn_name != "hugo_blog":
+                agent_messages.append({
+                    "role": "tool",
+                    "tool_call_id": tc.id,
+                    "content": "[不可用] 本轮仅允许 hugo_blog",
+                })
+                continue
+
+            try:
+                fn_args = json.loads(tc.function.arguments)
+            except json.JSONDecodeError:
+                fn_args = {}
+
+            pr = policy_check(fn_name, fn_args, all_skills, cfg=_load_config())
+            event_id = f"hugo-agent-{uuid4().hex[:8]}"
+            action = str(fn_args.get("action", "") or "…")
+
+            if pr.decision == Decision.DENY:
+                tool_events.append({
+                    "type": "tool_event",
+                    "toolEvent": {
+                        "id": event_id,
+                        "name": "hugo_blog",
+                        "status": "blocked",
+                        "risk": pr.risk,
+                        "summary": f"hugo_blog {action} 被策略拒绝",
+                        "detail": pr.reason,
+                        "requiresApproval": False,
+                    },
+                })
+                agent_messages.append({
+                    "role": "tool",
+                    "tool_call_id": tc.id,
+                    "content": f"[策略拒绝] {pr.reason}",
+                })
+                continue
+
+            tr = runtime_invoke(fn_name, fn_args, all_skills)
+            tool_events.append(_tool_event_from_result(
+                event_id,
+                "hugo_blog",
+                {
+                    "ok": tr.ok,
+                    "executed": tr.ok,
+                    "output": tr.content_preview or tr.summary,
+                    "summary": tr.summary,
+                    "policy": {"risk": pr.risk},
+                },
+                summary=f"hugo_blog · {action}",
+            ))
+            agent_messages.append({
+                "role": "tool",
+                "tool_call_id": tc.id,
+                "content": tr.to_message_content() if tr.ok else f"[执行失败] {tr.summary}\n{tr.content_preview or ''}",
+            })
+
+    if not final_text:
+        for event in reversed(tool_events):
+            tool_event = event.get("toolEvent", {})
+            if tool_event.get("status") in ("complete", "blocked"):
+                final_text = str(tool_event.get("detail") or tool_event.get("summary") or "").strip()
+                if final_text:
+                    break
+
+    return messages, tool_events, final_text
 
 
 def _run_desktop_tool_loop(
@@ -496,53 +979,9 @@ _HUGO_CAPABILITY_TERMS = ("能不能", "可以吗", "还能不能", "是否", "�
 
 
 def _iter_hugo_blog_events(query: str):
-    """预检测博客发布/创建意图，告知 LLM 其拥有博客管理能力。
-
-    明确的部署/上线请求会直接生成 hugo_blog(action=deploy) 确认卡；
-    写新文章请求则先做能力宣告，让 LLM 生成合格 Markdown 内容，随后
-    在 AI 回复完成后创建 hugo_blog(action=new) 确认卡。
-    """
-    lowered = query.lower()
-    wants_deploy = _wants_hugo_deploy(query)
-    wants_creation = _wants_hugo_creation(query)
-    asks_capability = any(term in lowered for term in _HUGO_CAPABILITY_TERMS)
-
-    if not wants_deploy and not wants_creation:
-        return
-
-    if wants_deploy and not wants_creation:
-        draft_event_id = f"hugo-blog-deploy-{uuid4().hex[:8]}"
-        request = _make_api_tool_request(
-            "hugo_blog",
-            {"action": "deploy"},
-            event_id=draft_event_id,
-            display_name="hugo_blog",
-            extra={"action": "deploy", "title": "部署枫弋札记"},
-        )
-        if not request.get("blocked"):
-            set_tool_draft(draft_event_id, request)
-        yield _tool_event_from_request(
-            request,
-            summary="确认部署枫弋札记",
-            detail_prefix="action: deploy",
-        )
-        return
-
-    # 直接用 skill_router 检测（已在 _iter_api_tool_events 中过滤）
-    yield _tool_event(
-        f"hugo-blog-ready-{uuid4().hex[:8]}",
-        "hugo_blog",
-        "waiting",
-        "low",
-        "博客管理能力已就绪",
-        f"query: {query[:200]}\n"
-        "你的回复将作为撰写博客的基础内容。请自然地在聊天回复中撰写文章正文（Markdown），"
-        "客户端会将其提取为工具草稿并在 UI 上生成确认卡片供用户点击「写入」。"
-        "点击「写入」后会自动：1) 写入文件 2) 运行 hugo 构建 3) rsync 部署到服务器。"
-        "如有分步需求（仅新建/仅部署/新建+部署），请直接在回复中说明。",
-        False,
-        {"status": "ready", "mode": "blog_ready"},
-    )
+    """枫弋札记请求改由 _run_hugo_agent_turn 处理，此处不再生成确认卡。"""
+    return
+    yield
 
 
 def _generate_hugo_draft_from_reply(ai_reply: str) -> dict | None:
@@ -669,7 +1108,6 @@ _API_TOOL_EVENT_BUILDERS = {
     "obsidian_search": _iter_obsidian_search_events,
     "shell": _iter_shell_events,
     "github_ops": _iter_github_events,
-    "hugo_blog": _iter_hugo_blog_events,
 }
 
 
@@ -696,10 +1134,7 @@ def _iter_api_tool_events(
     for skill_name, builder in _API_TOOL_EVENT_BUILDERS.items():
         if skill_name not in selected:
             continue
-        if skill_name == "hugo_blog":
-            yield from builder(query)
-        else:
-            yield from builder(query, tool_plan)
+        yield from builder(query, tool_plan)
 
 
 # ---------------------------------------------------------------------------
@@ -748,6 +1183,27 @@ def _latest_user_text(messages: list[dict]) -> str:
         if message.get("role") == "user":
             return str(message.get("content", "")).strip()
     return ""
+
+
+def _plan_event_from_task_plan(plan, query: str = "") -> dict | None:
+    if plan is None:
+        return None
+    return {
+        "id": f"plan-{uuid4().hex[:8]}",
+        "title": plan.task_title,
+        "status": "proposed",
+        "detail": "先按计划处理；涉及写入、保存或发布的步骤需要用户确认。",
+        "prompt": query.strip(),
+        "steps": [
+            {
+                "id": step.id,
+                "action": step.action,
+                "tool": step.tool,
+                "requiresApproval": step.requires_approval,
+            }
+            for step in plan.steps
+        ],
+    }
 
 
 def _clean_file_refs(raw: object) -> list[dict]:
@@ -898,9 +1354,31 @@ def _do_extract_api(history: list[dict]) -> None:
     if len(history) < 2:
         return
     try:
+        from core.orchestrator import (
+            build_memory_candidate_policy,
+            format_memory_candidate_reason,
+            orchestrate_user_input,
+        )
+        latest_user = _latest_user_text(history)
+        policy = None
+        suggest_reason = ""
+        if latest_user:
+            policy = build_memory_candidate_policy(
+                orchestrate_user_input(latest_user, history=history[:-1])
+            )
+            if not policy.should_extract:
+                logger.info("[memory] desktop extract skipped: no candidate policy")
+                return
+            suggest_reason = format_memory_candidate_reason(policy, latest_user)
         from memory.extract import extract
         from memory.store import add_pending, is_duplicate_pending, is_low_quality_memory
-        mems, _ = extract(history)
+        extract_kwargs = {}
+        if policy:
+            extract_kwargs = {
+                "candidate_types": policy.candidate_types,
+                "sensitive": policy.sensitive,
+            }
+        mems, _ = extract(history, **extract_kwargs)
         staged = 0
         skipped_dup = 0
         skipped_low = 0
@@ -923,6 +1401,7 @@ def _do_extract_api(history: list[dict]) -> None:
                 source="desktop",
                 confidence=m.get("confidence", 0.7),
                 depth=m.get("depth", 3),
+                suggest_reason=suggest_reason,
             )
             staged += 1
         logger.info(
@@ -960,8 +1439,36 @@ def _iter_chat_chunks(
     # 历史（不含当前这条用户消息），用于历史感知意图与检索改写
     prior_history = messages[:-1] if (messages and messages[-1].get("role") == "user") else messages
     intent_info = classify_query_intent(query, history=prior_history, llm_fallback=False)
+    try:
+        from core.orchestrator import (
+            build_task_plan,
+            format_mode_constraints_for_prompt,
+            format_task_plan_for_prompt,
+            orchestrate_user_input,
+            orchestration_to_event_dict,
+        )
+        orchestration = orchestrate_user_input(query, history=prior_history)
+        memory_scope = orchestration.memory_scope
+        task_plan = build_task_plan(query, orchestration)
+        task_plan_block = format_task_plan_for_prompt(task_plan)
+        mode_constraint_block = format_mode_constraints_for_prompt(orchestration)
+        plan_event = _plan_event_from_task_plan(task_plan, query)
+        orchestration_event = orchestration_to_event_dict(orchestration)
+    except Exception:
+        orchestration = None
+        memory_scope = None
+        task_plan_block = ""
+        mode_constraint_block = ""
+        plan_event = None
+        orchestration_event = None
     intent = intent_info["intent"]
     needs_tools = bool(intent_info.get("needs_tools"))
+    from core.context import resolve_context_limits
+    context_limits = resolve_context_limits(
+        memory_scope,
+        needs_memory=intent_info["needs_memory"],
+        memory_mode=memory_mode,
+    )
     _turn_plan = _plan_desktop_turn(
         query,
         intent=intent,
@@ -970,17 +1477,16 @@ def _iter_chat_chunks(
     )
     _selected_tools = _turn_plan.filtered_skills
     _tool_plan = _turn_plan.tool_plan
-    # 动态对话姿态：桌面端也按当轮内容选 mode（与终端共用选择器）
-    active_stance = None
+    # 动态对话姿态：优先使用 orchestrator 的 mode；手动锁定时让位
+    active_stance = orchestration.mode if orchestration else None
     stance_prompt = ""
     try:
-        from core.stance import resolve_active_stance, available_modes
         from core.context import _get_mode_prompt
         _cfg = _load_config()
-        active_stance, _ = resolve_active_stance(
-            _cfg, query, intent, available=available_modes(_cfg),
-        )
-        stance_prompt = _get_mode_prompt(_cfg, active_stance)
+        if not _cfg["persona"].get("mode_auto", True):
+            active_stance = _cfg["persona"].get("current_mode") or active_stance
+        if active_stance:
+            stance_prompt = _get_mode_prompt(_cfg, active_stance)
     except Exception:
         active_stance = None
         stance_prompt = ""
@@ -993,6 +1499,10 @@ def _iter_chat_chunks(
             {"role": "system", "content": file_context},
             *enriched_messages,
         ]
+    if orchestration_event:
+        yield {"type": "orchestrationEvent", "orchestrationEvent": orchestration_event}
+    if plan_event:
+        yield {"type": "planEvent", "planEvent": plan_event}
     if memory_mode == "off":
         yield _tool_event(
             "memory-retrieve", "memory.retrieve", "complete", "low",
@@ -1005,7 +1515,7 @@ def _iter_chat_chunks(
             f"mode: {memory_mode}, intent: {intent}, needs_memory: False",
         )
     else:
-        limit = 10 if memory_mode == "full" else (7 if intent_info["needs_memory"] else 5)
+        limit = context_limits.retrieve_total
         yield _tool_event(
             "memory-retrieve", "memory.retrieve", "running", "low",
             "检索与当前输入相关的本地记忆",
@@ -1190,26 +1700,31 @@ def _iter_chat_chunks(
                     "抓取失败", str(exc)[:240],
                 )
 
-    # ── 预检工具事件。显式 Hugo 部署请求必须先于模型工具循环处理，
-    # 避免用户只想确认部署时仍卡在“思考中”。
-    api_tool_events = list(_iter_api_tool_events(query, turn_plan=_turn_plan))
-    direct_hugo_deploy_approval = any(
-        isinstance(event, dict)
-        and event.get("toolEvent", {}).get("name") == "hugo_blog"
-        and event.get("toolEvent", {}).get("requiresApproval")
-        and event.get("toolEvent", {}).get("draft", {}).get("args", {}).get("action") == "deploy"
-        for event in api_tool_events
-    )
-    if direct_hugo_deploy_approval:
-        for event in api_tool_events:
+    # ── 枫弋札记：附件/路径直发 或 LLM 工具链，自动执行，不弹确认卡
+    if _wants_hugo_publish(query, file_refs) and "hugo_blog" in _selected_tools:
+        direct = _try_direct_hugo_deploy_existing(enriched_messages, query)
+        if not direct:
+            direct = _try_direct_hugo_publish(query, file_refs, messages=enriched_messages)
+        if direct:
+            hugo_events, hugo_summary = direct
+        else:
+            _, hugo_events, hugo_summary = _run_hugo_agent_turn(
+                enriched_messages, query, file_refs=file_refs,
+            )
+        for event in hugo_events:
             yield event
         yield {"type": "ready", "ready": True}
-        yield {
-            "type": "token",
-            "text": "部署确认卡已出现在输入框上方，点 **发布** 后会执行 Hugo 构建、同步上线并验证页面可访问。",
-        }
+        if hugo_summary:
+            yield {"type": "token", "text": hugo_summary}
+        else:
+            yield {
+                "type": "token",
+                "text": "未能完成枫弋札记操作。请用附件添加 .md 文件，或说明要部署哪篇文章。",
+            }
         yield {"type": "done", "done": True}
         return
+
+    api_tool_events = list(_iter_api_tool_events(query, turn_plan=_turn_plan))
 
     # ── Desktop Tool Loop：让 LLM 通过 function calling 自主调用未被专用 builder 覆盖的技能 ──
     _all_selected = _selected_tools
@@ -1314,6 +1829,13 @@ def _iter_chat_chunks(
             mode_override=active_stance,
             emotion_hint=emotion_hint,
             thread_hint=thread_hint,
+            memory_scope=memory_scope,
+            task_plan_block=task_plan_block,
+            mode_constraint_block=mode_constraint_block,
+            needs_project_context=(
+                orchestration.needs_project_context if orchestration else None
+            ),
+            context_limits=context_limits,
         )
     except Exception:
         try:
@@ -1462,10 +1984,13 @@ def _iter_chat_chunks(
                 False,
             )
 
-    # ── AI 回复完成后：生成 Hugo 博客写入草稿 ──
-    hugo_blog_triggered = any(
-        isinstance(e, dict) and e.get("toolEvent", {}).get("name") == "hugo_blog"
-        for e in api_tool_events
+    # ── AI 回复完成后：生成 Hugo 博客写入草稿（枫弋札记专向请求已在 agent 阶段处理） ──
+    hugo_blog_triggered = (
+        not _wants_hugo_publish(query, file_refs)
+        and any(
+            isinstance(e, dict) and e.get("toolEvent", {}).get("name") == "hugo_blog"
+            for e in api_tool_events
+        )
     )
     if hugo_blog_triggered and ai_reply:
         try:

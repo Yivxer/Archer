@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 import sys
 from pathlib import Path
@@ -24,21 +25,66 @@ import threading
 
 PENDING_TOOL_DRAFTS: dict[str, dict] = {}
 _DRAFT_LOCK = threading.Lock()
+TOOL_DRAFTS_DIR = Path.home() / "Library/Application Support/archer-desktop/tool-drafts"
+
+
+def _draft_path(event_id: str) -> Path:
+    safe = re.sub(r"[^a-zA-Z0-9._-]", "_", event_id)
+    return TOOL_DRAFTS_DIR / f"{safe}.json"
+
+
+def _persist_tool_draft(event_id: str, request: dict) -> None:
+    try:
+        TOOL_DRAFTS_DIR.mkdir(parents=True, exist_ok=True)
+        _draft_path(event_id).write_text(
+            json.dumps(request, ensure_ascii=False),
+            encoding="utf-8",
+        )
+    except OSError:
+        pass
+
+
+def _load_persisted_tool_draft(event_id: str) -> dict | None:
+    path = _draft_path(event_id)
+    if not path.exists():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else None
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def _delete_persisted_tool_draft(event_id: str) -> None:
+    try:
+        _draft_path(event_id).unlink(missing_ok=True)
+    except OSError:
+        pass
 
 
 def set_tool_draft(event_id: str, request: dict) -> None:
     with _DRAFT_LOCK:
         PENDING_TOOL_DRAFTS[event_id] = request
+    _persist_tool_draft(event_id, request)
 
 
 def get_tool_draft(event_id: str) -> dict | None:
     with _DRAFT_LOCK:
-        return PENDING_TOOL_DRAFTS.get(event_id)
+        draft = PENDING_TOOL_DRAFTS.get(event_id)
+    if draft:
+        return draft
+    draft = _load_persisted_tool_draft(event_id)
+    if draft:
+        with _DRAFT_LOCK:
+            PENDING_TOOL_DRAFTS[event_id] = draft
+    return draft
 
 
 def pop_tool_draft(event_id: str) -> dict | None:
     with _DRAFT_LOCK:
-        return PENDING_TOOL_DRAFTS.pop(event_id, None)
+        draft = PENDING_TOOL_DRAFTS.pop(event_id, None)
+    _delete_persisted_tool_draft(event_id)
+    return draft
 
 # ---------------------------------------------------------------------------
 # Constants

@@ -38,7 +38,9 @@ def test_hugo_blog_deploy_verifies_target_post_url(monkeypatch):
         assert commands[0][0] == ["hugo", "--cleanDestinationDir", "--minify"]
         assert commands[1][0] == ["bash", str(blog / "deploy.sh")]
         assert verified == ["https://iver.yivxer.com/posts/test-post/"]
-        assert "单页验证成功" in result
+        assert "部署成功" in result
+        assert "线上地址：https://iver.yivxer.com/posts/test-post/" in result
+        assert "构建输出" not in result
 
 
 def test_hugo_blog_deploy_rejects_external_verify_url(monkeypatch):

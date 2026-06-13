@@ -11,6 +11,8 @@ import json
 import re
 from dataclasses import dataclass, field
 
+from core.orchestrator import keyword_is_negated
+
 _PREFLIGHT_SKILLS = frozenset({
     "shell", "github_ops", "obsidian_read", "obsidian_search", "obsidian_write",
 })
@@ -238,9 +240,9 @@ def score_obsidian_write(query: str) -> tuple[float, dict]:
         "写个笔记", "写进", "放到笔记", "存到", "备忘", "添加到笔记",
         "mark", "note this", "save this",
     )
-    if any(k in lowered for k in strong):
+    if any(_term_is_active(query, k) for k in strong):
         score = 0.86
-    elif any(k in lowered for k in medium):
+    elif any(_term_is_active(query, k) for k in medium):
         score = 0.70
     path = extract_obsidian_target_path(query)
     return score, {"path": path, "mode": "append"}
@@ -295,7 +297,7 @@ def has_hugo_blog_target(query: str) -> bool:
 
 def wants_hugo_deploy(query: str) -> bool:
     lowered = query.lower()
-    if not any(term in lowered for term in _HUGO_DEPLOY_TERMS):
+    if not any(_term_is_active(query, term) for term in _HUGO_DEPLOY_TERMS):
         return False
     if has_hugo_blog_target(query):
         return True
@@ -307,11 +309,41 @@ def wants_hugo_creation(query: str) -> bool:
     return has_hugo_blog_target(query) and any(term in lowered for term in _HUGO_CREATE_TERMS)
 
 
+_HUGO_PUBLISH_HINT_TERMS = (
+    "枫弋札记", "枫弋博客", "札记", "博文", "文章", "笔记", "读书",
+    "发到", "发布", "部署", "上线", "投稿", "同步",
+)
+
+
+def wants_hugo_publish(query: str, file_refs: list | None = None) -> bool:
+    """是否应走枫弋札记发布/部署工作流（含附件 Markdown）。"""
+    if wants_hugo_deploy(query) or wants_hugo_creation(query):
+        return True
+    lowered = query.lower()
+    if has_hugo_blog_target(query) and any(term in lowered for term in _HUGO_PUBLISH_HINT_TERMS):
+        return True
+    if re.search(r"/Users/[^\s`']+\.md", query) and any(
+        term in lowered for term in (*_HUGO_BLOG_TARGET_TERMS, "发布", "部署", "上线", "文章", "笔记")
+    ):
+        return True
+    if file_refs:
+        has_md = any(str(ref.get("path", "")).lower().endswith(".md") for ref in file_refs if isinstance(ref, dict))
+        if has_md and any(term in lowered for term in _HUGO_PUBLISH_HINT_TERMS + _HUGO_BLOG_TARGET_TERMS):
+            return True
+    return False
+
+
 # ── 技能意图过滤（自 _tools.py 迁入，与 skill_router 串联）────────────────────
+
+def _term_is_active(query: str, term: str) -> bool:
+    return term in query and not keyword_is_negated(query, term)
+
 
 def has_explicit_web_search_intent(query: str) -> bool:
     lowered = query.lower()
-    return bool(re.search(r"https?://", query)) or any(term in lowered for term in (
+    if re.search(r"https?://", query):
+        return True
+    return any(_term_is_active(lowered, term) for term in (
         "搜索", "搜一下", "查一下", "查找", "联网", "上网", "网上", "网页",
         "最新", "新闻", "资料", "调研", "检索", "search", "google",
     ))
@@ -323,7 +355,14 @@ def has_explicit_file_write_intent(query: str) -> bool:
         r"(?:^|\s)(?:~|/Users/|\.{1,2}/)[^\s]+|\b[\w.-]+\.(?:md|txt|json|py|ts|tsx|js|css|html)\b",
         query,
     ))
-    return has_path or any(term in lowered for term in (
+    if has_path and any(_term_is_active(query, term) for term in (
+        "保存到", "写入", "写到", "创建", "新建", "生成文件", "另存", "保存为",
+        "放到", "修改", "编辑", "覆盖", "追加", "save", "write",
+    )):
+        return True
+    if has_path:
+        return False
+    return has_path or any(_term_is_active(query, term) for term in (
         "保存到", "写入文件", "写到文件", "创建文件", "新建文件", "生成文件",
         "另存", "保存为", "放到", "写到路径", "修改文件", "编辑文件",
         "覆盖文件", "追加到", "append to", "save to", "write file",
@@ -350,12 +389,12 @@ def filter_skills_for_intent(
         is_plain_content_request(query)
         and not has_explicit_web_search_intent(query)
         and not has_explicit_file_write_intent(query)
-        and not (wants_hugo_deploy(query) or wants_hugo_creation(query))
+        and not wants_hugo_publish(query)
     ):
         return {}
 
     filtered = dict(selected)
-    if "hugo_blog" in filtered and not (wants_hugo_deploy(query) or wants_hugo_creation(query)):
+    if "hugo_blog" in filtered and not wants_hugo_publish(query):
         filtered.pop("hugo_blog", None)
     if not has_explicit_web_search_intent(query):
         filtered.pop("web_search", None)
@@ -452,6 +491,8 @@ def plan_desktop_tools(
     write_conf, write_args = score_obsidian_write(query)
     plan.obsidian_write_confidence = write_conf
     plan.obsidian_write = write_conf >= _CONFIDENCE_RUN_THRESHOLD
+    if wants_hugo_publish(query):
+        plan.obsidian_write = False
 
     if "shell" in skill_set:
         conf, args = score_shell_intent(query)

@@ -665,6 +665,7 @@ def _memory(limit: int = 50, include_rejected: bool = False) -> list[dict]:
             "confidence": f"{float(item.get('confidence') or 0):.2f}",
             "source": item.get("source", ""),
             "depth": int(item.get("depth") or item.get("importance") or 3),
+            "suggestReason": item.get("suggest_reason", ""),
         }
         for item in list_pending(limit=limit, include_rejected=include_rejected)
     ]
@@ -1172,6 +1173,19 @@ def _tool_approval(payload: dict) -> dict:
         raise ValueError("decision must be approved or denied")
 
     draft = get_tool_draft(event_id)
+    if not draft and event_id.startswith("hugo-blog-deploy-"):
+        from core.api_tool_service import make_tool_request
+        from skills.loader import load_skills
+        draft = make_tool_request(
+            "hugo_blog",
+            {"action": "deploy"},
+            load_skills(),
+            cfg=_load_config(),
+            event_id=event_id,
+            display_name="hugo_blog",
+            extra={"action": "deploy", "title": "部署枫弋札记"},
+            force_approval=False,
+        )
     if draft:
         pop_tool_draft(event_id)
         executed = False
@@ -1248,7 +1262,10 @@ def _tool_approval(payload: dict) -> dict:
     return {
         "ok": True, "eventId": event_id, "decision": decision,
         "executed": False,
-        "message": "approval recorded; tool execution is not connected in this phase",
+        "message": (
+            "未找到待执行草稿（可能 API 已重启或确认卡已过期）。"
+            "请重新说「部署枫弋札记」，或直接点当前确认卡上的发布按钮。"
+        ),
     }
 
 

@@ -1,5 +1,7 @@
-import subprocess
+import os
 import re
+import shutil
+import subprocess
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -151,13 +153,40 @@ def _target_url(args: dict) -> str:
     return f"{_site_base_url()}/posts/{slug}/"
 
 
+def _resolve_hugo_bin() -> str:
+    extra_path = os.pathsep.join((
+        "/opt/homebrew/bin",
+        "/opt/homebrew/sbin",
+        "/usr/local/bin",
+        os.environ.get("PATH", ""),
+    ))
+    found = shutil.which("hugo", path=extra_path)
+    if found:
+        return found
+    for candidate in ("/opt/homebrew/bin/hugo", "/usr/local/bin/hugo"):
+        if Path(candidate).exists():
+            return candidate
+    return "hugo"
+
+
 def _run_command(cmd: list[str], timeout: int) -> subprocess.CompletedProcess:
+    argv = list(cmd)
+    if argv and argv[0] == "hugo":
+        argv[0] = _resolve_hugo_bin()
+    env = os.environ.copy()
+    env["PATH"] = os.pathsep.join(filter(None, (
+        "/opt/homebrew/bin",
+        "/opt/homebrew/sbin",
+        "/usr/local/bin",
+        env.get("PATH", ""),
+    )))
     return subprocess.run(
-        cmd,
+        argv,
         capture_output=True,
         text=True,
         timeout=timeout,
         cwd=str(BLOG_DIR),
+        env=env,
     )
 
 
@@ -184,6 +213,35 @@ def _verify_url(url: str, timeout: int = 20) -> tuple[bool, str]:
     if 200 <= status < 400:
         return True, f"HTTP {status} {url}"
     return False, f"HTTP {status} {url}"
+
+
+def _strip_deploy_noise(text: str) -> str:
+    """去掉 Hugo 统计表、SSH 警告等不适合聊天展示的终端噪音。"""
+    kept: list[str] = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        lowered = stripped.lower()
+        if "post-quantum" in lowered or stripped.startswith("** WARNING"):
+            continue
+        if re.fullmatch(r"[-+|=\s…]+", stripped):
+            continue
+        if re.match(r"^(Pages|Paginator pages|Non-page files|Static files|Processed images|Aliases|Cleaned|Total in)\b", stripped):
+            continue
+        if stripped.startswith("Start building sites") or stripped.startswith("hugo v"):
+            continue
+        kept.append(stripped)
+    return "\n".join(kept[-8:])
+
+
+def _format_deploy_success(target_url: str, verify_msg: str) -> str:
+    lines = ["部署成功。"]
+    if target_url:
+        lines.append(f"线上地址：{target_url}")
+    if verify_msg and verify_msg != "未指定单篇文章 URL，跳过单页验证":
+        lines.append(f"验证：{verify_msg}")
+    return "\n".join(lines)
 
 
 def _new_post(args: dict) -> str:
@@ -232,9 +290,7 @@ def _new_post(args: dict) -> str:
         f"标题：{title}\n"
         f"分类：{category}\n"
         f"slug：{slug}\n"
-        f"URL（发布后）：https://iver.yivxer.com/posts/{slug}/\n\n"
-        f"本地预览：hugo server\n"
-        f"部署：bash {BLOG_DIR}/deploy.sh"
+        f"URL（发布后）：https://iver.yivxer.com/posts/{slug}/"
     )
 
 
@@ -334,17 +390,20 @@ def _deploy(args: dict) -> str:
         build = _run_command(["hugo", "--cleanDestinationDir", "--minify"], timeout=120)
         build_out = (build.stdout + build.stderr).strip()
         if build.returncode != 0:
-            return f"构建失败（exit {build.returncode}）：\n\n{build_out}"
+            detail = _strip_deploy_noise(build_out) or build_out[-1200:]
+            return f"构建失败（exit {build.returncode}）：\n{detail}"
 
         result = _run_command(["bash", str(deploy_sh)], timeout=180)
         out = (result.stdout + result.stderr).strip()
         if result.returncode != 0:
-            return f"部署失败（exit {result.returncode}）：\n\n{out}"
+            detail = _strip_deploy_noise(out) or out[-1200:]
+            return f"部署失败（exit {result.returncode}）：\n{detail}"
 
         verified, verify_msg = _verify_url(target_url)
         if verified:
-            return f"部署成功！\n单页验证成功：{verify_msg}\n\n构建输出：\n{build_out}\n\n部署输出：\n{out}"
-        return f"部署完成但单页验证失败：{verify_msg}\n\n构建输出：\n{build_out}\n\n部署输出：\n{out}"
+            return _format_deploy_success(target_url, verify_msg)
+        detail = _strip_deploy_noise(out)
+        return f"部署完成但单页验证失败：{verify_msg}" + (f"\n{detail}" if detail else "")
     except subprocess.TimeoutExpired:
         return "部署超时"
     except Exception as e:

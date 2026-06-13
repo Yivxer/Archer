@@ -420,22 +420,41 @@ def run():
         intent_info = classify_query_intent(
             user_text, history=session.history, llm_fallback=True,
         )
+        from core.orchestrator import (
+            build_task_plan,
+            format_mode_constraints_for_prompt,
+            format_task_plan_for_prompt,
+            orchestrate_user_input,
+        )
+        orchestration = orchestrate_user_input(
+            user_text,
+            manual_mode=None if cfg["persona"].get("mode_auto", True) else cfg["persona"].get("current_mode"),
+            active_project_id=get_state().active_project_id,
+            history=session.history,
+        )
+        task_plan_block = format_task_plan_for_prompt(
+            build_task_plan(user_text, orchestration)
+        )
+        mode_constraint_block = format_mode_constraints_for_prompt(orchestration)
         heavy       = intent_info["needs_memory"]
         intent      = intent_info["intent"]
-        memory_limit = 7 if heavy else cfg["memory"]["max_context_memories"]
+        from core.context import resolve_context_limits
+        context_limits = resolve_context_limits(
+            orchestration.memory_scope,
+            needs_memory=heavy,
+        )
+        memory_limit = context_limits.retrieve_total
         retrieval_query = augment_retrieval_query(user_text, session.history)
         core_mems, related_mems = for_context(retrieval_query, limit=memory_limit, intent=intent)
         mem_block = format_for_prompt(core_mems, related_mems)
         project     = get_project(get_state().active_project_id) if get_state().active_project_id else None
-        proj_evts   = get_project_events(get_state().active_project_id, limit=3) if get_state().active_project_id else []
-        # 动态对话姿态：按当轮内容自动选 mode（用户 /mode 锁定时让位）
-        from core.stance import resolve_active_stance, available_modes
-        active_stance, stance_reason = resolve_active_stance(
-            cfg, user_text, intent,
-            available=available_modes(cfg), prev_stance=last_stance,
-        )
-        if cfg["persona"].get("mode_auto", True) and active_stance != last_stance:
-            console.print(f"[dim]· 姿态 → {active_stance}（{stance_reason}）[/dim]")
+        proj_evts   = get_project_events(get_state().active_project_id, limit=context_limits.project_events) if get_state().active_project_id else []
+        # 动态对话姿态：优先 orchestrator mode；/mode 锁定时让位
+        active_stance = orchestration.mode
+        if not cfg["persona"].get("mode_auto", True):
+            active_stance = cfg["persona"].get("current_mode") or active_stance
+        elif active_stance != last_stance:
+            console.print(f"[dim]· 姿态 → {active_stance}（orchestrator）[/dim]")
         last_stance = active_stance
         # P6: 对峙检测
         from memory.narrative import confrontation_hook
@@ -453,6 +472,11 @@ def run():
             emotion_hint=emotion_hint,
             thread_hint=thread_hint,
             writing_query=user_text,
+            memory_scope=orchestration.memory_scope,
+            task_plan_block=task_plan_block,
+            mode_constraint_block=mode_constraint_block,
+            needs_project_context=orchestration.needs_project_context,
+            context_limits=context_limits,
         )
 
         has_images = any(r["type"] == "image" for r in refs)
@@ -473,6 +497,10 @@ def run():
                     emotion_hint=emotion_hint,
                     thread_hint=thread_hint,
                     writing_query=user_text,
+                    memory_scope=orchestration.memory_scope,
+                    task_plan_block=task_plan_block,
+                    mode_constraint_block=mode_constraint_block,
+                    needs_project_context=orchestration.needs_project_context,
                 )
             else:
                 active_model = vision_model
