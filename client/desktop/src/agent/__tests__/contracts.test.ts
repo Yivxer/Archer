@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { AgentEvent, ApprovalResultEvent, ToolRequestEvent } from '../contracts'
+import type { AgentEvent, ApprovalResultEvent, PlanEvent, ToolRequestEvent } from '../contracts'
 
 describe('agent contracts', () => {
   it('represents a tool request event with stable approval fields', () => {
@@ -47,5 +47,23 @@ describe('agent contracts', () => {
       text: '完成。',
     }
     expect(event.type).toBe('text.delta')
+  })
+
+  it('represents task plans as non-executing runtime events', () => {
+    const event: PlanEvent = {
+      type: 'plan.event',
+      id: 'plan-1',
+      sessionId: 'session-1',
+      createdAt: '2026-06-11T10:00:00.000Z',
+      title: '提炼内容并写入 Obsidian',
+      status: 'proposed',
+      detail: '先整理，再请求写入确认',
+      steps: [
+        { id: 1, action: 'read_source', tool: 'input_context', requiresApproval: false },
+        { id: 2, action: 'write_obsidian', tool: 'obsidian_write', requiresApproval: true },
+      ],
+    }
+    expect(event.type).toBe('plan.event')
+    expect(event.steps[1].requiresApproval).toBe(true)
   })
 })

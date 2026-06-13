@@ -1,5 +1,6 @@
 import { app, BrowserWindow, desktopCapturer, dialog, ipcMain, Menu, nativeImage, shell, systemPreferences } from 'electron'
 import { join } from 'node:path'
+import { env as processEnv } from 'node:process'
 import { spawn } from 'node:child_process'
 import type { ChildProcess } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
@@ -91,10 +92,24 @@ function attachApiProcessHandlers(child: ChildProcess) {
   })
 }
 
+function apiChildEnv(): NodeJS.ProcessEnv {
+  const pathParts = [
+    '/opt/homebrew/bin',
+    '/opt/homebrew/sbin',
+    '/usr/local/bin',
+    processEnv.PATH || '',
+  ]
+  return {
+    ...processEnv,
+    PATH: pathParts.filter(Boolean).join(':'),
+  }
+}
+
 function spawnApiProcess(): ChildProcess | null {
   desktopApiToken = desktopApiToken || getOrCreateDesktopApiToken()
   const child = spawn(PYTHON_BIN, [API_SCRIPT, '--token', desktopApiToken], {
     cwd: ARCHER_ROOT,
+    env: apiChildEnv(),
     stdio: 'ignore',
     detached: false,
   })

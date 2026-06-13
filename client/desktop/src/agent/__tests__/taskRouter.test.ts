@@ -36,4 +36,24 @@ describe('task router', () => {
 
     expect(route.mode).toBe('background')
   })
+
+  it('keeps hugo blog publish with attachment in the foreground', () => {
+    const route = routeTaskForRuntime({
+      text: '部署这篇文章到枫弋札记上',
+      fileCount: 1,
+    })
+
+    expect(route.mode).toBe('foreground')
+    expect(route.reason).toBe('hugo blog publish uses attachments and tool stream')
+  })
+
+  it('keeps approval-first Obsidian writes in the foreground', () => {
+    const route = routeTaskForRuntime({
+      text: '帮我把这篇文章提炼成方法论，并写入 Obsidian',
+      fileCount: 1,
+    })
+
+    expect(route.mode).toBe('foreground')
+    expect(route.reason).toBe('approval-first task')
+  })
 })

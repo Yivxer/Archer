@@ -59,4 +59,40 @@ describe('contract schemas', () => {
 
     expect(parsed.type).toBe('job.event')
   })
+
+  it('accepts a valid plan event', () => {
+    const parsed = parseAgentEvent({
+      type: 'plan.event',
+      id: 'plan-1',
+      sessionId: 'session-1',
+      createdAt: '2026-06-11T10:00:00.000Z',
+      title: '提炼内容并写入 Obsidian',
+      status: 'proposed',
+      detail: '先整理，再请求写入确认',
+      steps: [
+        { id: 1, action: 'read_source', tool: 'input_context', requiresApproval: false },
+        { id: 2, action: 'write_obsidian', tool: 'obsidian_write', requiresApproval: true },
+      ],
+    })
+
+    expect(parsed.type).toBe('plan.event')
+  })
+
+  it('accepts a valid orchestration event', () => {
+    const parsed = parseAgentEvent({
+      type: 'orchestration.event',
+      id: 'orch-1',
+      sessionId: 'session-1',
+      createdAt: '2026-06-11T10:00:00.000Z',
+      intent: 'project',
+      subIntent: 'project_planning',
+      mode: 'builder',
+      depth: 'deep',
+      labels: ['项目规划', '构建'],
+      needsMemory: true,
+      needsJob: false,
+    })
+
+    expect(parsed.type).toBe('orchestration.event')
+  })
 })

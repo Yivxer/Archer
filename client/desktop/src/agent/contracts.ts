@@ -66,6 +66,36 @@ export type JobEvent = AgentEventBase & {
   }
 }
 
+export type PlanStatus = 'proposed' | 'accepted' | 'dismissed'
+
+export type PlanStep = {
+  id: number
+  action: string
+  tool: string
+  requiresApproval: boolean
+}
+
+export type PlanEvent = AgentEventBase & {
+  type: 'plan.event'
+  title: string
+  status: PlanStatus
+  detail: string
+  steps: PlanStep[]
+  /** Original user request that produced this plan. */
+  prompt?: string
+}
+
+export type OrchestrationEvent = AgentEventBase & {
+  type: 'orchestration.event'
+  intent: string
+  subIntent: string
+  mode: string
+  depth: string
+  labels: string[]
+  needsMemory: boolean
+  needsJob: boolean
+}
+
 export type ErrorEvent = AgentEventBase & {
   type: 'runtime.error'
   scope: 'stream' | 'approval' | 'job' | 'adapter'
@@ -80,6 +110,8 @@ export type AgentEvent =
   | ToolResultEvent
   | ApprovalResultEvent
   | JobEvent
+  | PlanEvent
+  | OrchestrationEvent
   | ErrorEvent
 
 export type RuntimeMessage = {

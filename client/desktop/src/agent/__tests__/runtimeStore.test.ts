@@ -95,4 +95,52 @@ describe('runtime store reducer', () => {
     expect(complete.status).toBe('idle')
     expect(complete.jobs['job-1']?.status).toBe('complete')
   })
+
+  it('tracks proposed plan events without changing active status', () => {
+    const state = createInitialRuntimeState('session-1')
+    const next = reduceRuntimeEvent(state, {
+      type: 'plan.event',
+      id: 'plan-1',
+      sessionId: 'session-1',
+      createdAt: '2026-06-11T10:00:00.000Z',
+      title: '提炼内容并写入 Obsidian',
+      status: 'proposed',
+      detail: '先整理，再请求写入确认',
+      prompt: '帮我把这篇文章提炼成方法论，并写入 Obsidian',
+      steps: [
+        { id: 1, action: 'read_source', tool: 'input_context', requiresApproval: false },
+        { id: 2, action: 'write_obsidian', tool: 'obsidian_write', requiresApproval: true },
+      ],
+    })
+
+    expect(next.status).toBe('idle')
+    expect(next.plans['plan-1']?.steps).toHaveLength(2)
+
+    const accepted = reduceRuntimeEvent(next, {
+      ...next.plans['plan-1'],
+      status: 'accepted',
+      createdAt: '2026-06-11T10:01:00.000Z',
+    })
+    expect(accepted.plans['plan-1']?.status).toBe('accepted')
+  })
+
+  it('tracks orchestration events for status chips', () => {
+    const state = createInitialRuntimeState('session-1')
+    const next = reduceRuntimeEvent(state, {
+      type: 'orchestration.event',
+      id: 'orch-1',
+      sessionId: 'session-1',
+      createdAt: '2026-06-11T10:00:00.000Z',
+      intent: 'project',
+      subIntent: 'project_planning',
+      mode: 'builder',
+      depth: 'deep',
+      labels: ['项目规划', '构建'],
+      needsMemory: true,
+      needsJob: false,
+    })
+
+    expect(next.status).toBe('idle')
+    expect(next.orchestrations['orch-1']?.labels).toContain('项目规划')
+  })
 })

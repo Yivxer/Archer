@@ -1,4 +1,4 @@
-import type { AgentEvent, ApprovalDecision, RiskLevel, ToolStatus } from './contracts'
+import type { AgentEvent, ApprovalDecision, PlanStatus, RiskLevel, ToolStatus } from './contracts'
 
 type PythonToolEvent = {
   id: string
@@ -24,6 +24,31 @@ type PythonApprovalResult = {
   executed: boolean
   output?: string
   message: string
+}
+
+type PythonPlanEvent = {
+  id: string
+  title: string
+  status: PlanStatus
+  detail: string
+  prompt?: string
+  steps: Array<{
+    id: number
+    action: string
+    tool: string
+    requiresApproval: boolean
+  }>
+}
+
+type PythonOrchestrationEvent = {
+  id: string
+  intent: string
+  subIntent: string
+  mode: string
+  depth: string
+  labels: string[]
+  needsMemory: boolean
+  needsJob: boolean
 }
 
 function nowIso(): string {
@@ -69,5 +94,38 @@ export function pythonApprovalToAgentEvent(sessionId: string, result: PythonAppr
     ok: result.ok,
     output: result.output || '',
     message: result.message,
+  }
+}
+
+export function pythonPlanToAgentEvent(sessionId: string, plan: PythonPlanEvent): AgentEvent {
+  return {
+    type: 'plan.event',
+    id: plan.id,
+    sessionId,
+    createdAt: nowIso(),
+    title: plan.title,
+    status: plan.status,
+    detail: plan.detail,
+    prompt: plan.prompt,
+    steps: plan.steps,
+  }
+}
+
+export function pythonOrchestrationToAgentEvent(
+  sessionId: string,
+  snapshot: PythonOrchestrationEvent,
+): AgentEvent {
+  return {
+    type: 'orchestration.event',
+    id: snapshot.id,
+    sessionId,
+    createdAt: nowIso(),
+    intent: snapshot.intent,
+    subIntent: snapshot.subIntent,
+    mode: snapshot.mode,
+    depth: snapshot.depth,
+    labels: snapshot.labels,
+    needsMemory: snapshot.needsMemory,
+    needsJob: snapshot.needsJob,
   }
 }

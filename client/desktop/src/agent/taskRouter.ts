@@ -40,6 +40,15 @@ const QUICK_QUESTION_PREFIXES = [
   '你觉得',
 ]
 
+const APPROVAL_TARGETS = [
+  'obsidian',
+  '写入',
+  '保存',
+  '修改文件',
+  '生成文档',
+  '导出',
+]
+
 function compactTitle(text: string): string {
   return text.replace(/\s+/g, ' ').trim().slice(0, 42) || '后台任务'
 }
@@ -58,6 +67,22 @@ function isQuickQuestion(text: string): boolean {
   return compact.length < 180 && QUICK_QUESTION_PREFIXES.some((prefix) => compact.startsWith(prefix))
 }
 
+/** 枫弋札记发布/部署必须走前台流式聊天，才能带上 fileRefs 并执行 hugo_blog。 */
+function isHugoBlogPublishRequest(text: string): boolean {
+  if (isQuickQuestion(text)) {
+    return false
+  }
+  const lowered = text.toLowerCase()
+  const blogTarget = /枫弋|札记|yivxer-blog|iver\.yivxer|枫弋博客/.test(lowered)
+  const publishAction = /部署|发布|上线|发到|投稿/.test(lowered)
+  return blogTarget && publishAction
+}
+
+function isApprovalFirstRequest(text: string): boolean {
+  const lowered = text.toLowerCase()
+  return APPROVAL_TARGETS.some((keyword) => lowered.includes(keyword.toLowerCase()))
+}
+
 export function routeTaskForRuntime(input: RuntimeTaskRouteInput): RuntimeTaskRoute {
   const text = input.text.trim()
   const fileCount = input.fileCount ?? 0
@@ -65,10 +90,28 @@ export function routeTaskForRuntime(input: RuntimeTaskRouteInput): RuntimeTaskRo
   const hasSignal = hasImplementationSignal(text)
   const hasPathOrCode = looksLikePathOrCode(text)
 
+  if (isHugoBlogPublishRequest(text)) {
+    return {
+      mode: 'foreground',
+      reason: 'hugo blog publish uses attachments and tool stream',
+      title: compactTitle(text),
+      timeoutSeconds: 300,
+    }
+  }
+
   if (!text || isQuickQuestion(text)) {
     return {
       mode: 'foreground',
       reason: 'short conversational request',
+      title: compactTitle(text),
+      timeoutSeconds: 300,
+    }
+  }
+
+  if (isApprovalFirstRequest(text)) {
+    return {
+      mode: 'foreground',
+      reason: 'approval-first task',
       title: compactTitle(text),
       timeoutSeconds: 300,
     }
@@ -84,6 +127,14 @@ export function routeTaskForRuntime(input: RuntimeTaskRouteInput): RuntimeTaskRo
   }
 
   if (hasSignal && (text.length >= 80 || fileCount > 0 || hasPathOrCode)) {
+    if (fileCount > 0 && /部署|发布|上线/.test(text) && text.length < 240) {
+      return {
+        mode: 'foreground',
+        reason: 'attached publish request should not lose fileRefs in background jobs',
+        title: compactTitle(text),
+        timeoutSeconds: 300,
+      }
+    }
     return {
       mode: 'background',
       reason: 'implementation-style request',

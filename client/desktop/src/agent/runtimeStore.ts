@@ -1,10 +1,12 @@
-import type { AgentEvent, ApprovalResultEvent, JobEvent, RuntimeSession, ToolRequestEvent } from './contracts'
+import type { AgentEvent, ApprovalResultEvent, JobEvent, OrchestrationEvent, PlanEvent, RuntimeSession, ToolRequestEvent } from './contracts'
 
 export type RuntimeState = RuntimeSession & {
   streamingText: string
   pendingApprovals: ToolRequestEvent[]
   toolResults: Record<string, ApprovalResultEvent>
   jobs: Record<string, JobEvent>
+  plans: Record<string, PlanEvent>
+  orchestrations: Record<string, OrchestrationEvent>
 }
 
 export function createInitialRuntimeState(sessionId: string): RuntimeState {
@@ -17,6 +19,8 @@ export function createInitialRuntimeState(sessionId: string): RuntimeState {
     pendingApprovals: [],
     toolResults: {},
     jobs: {},
+    plans: {},
+    orchestrations: {},
   }
 }
 
@@ -86,6 +90,28 @@ export function reduceRuntimeEvent(state: RuntimeState, event: AgentEvent): Runt
       jobs: {
         ...state.jobs,
         [event.jobId]: event,
+      },
+    }
+  }
+
+  if (event.type === 'plan.event') {
+    return {
+      ...state,
+      events,
+      plans: {
+        ...state.plans,
+        [event.id]: event,
+      },
+    }
+  }
+
+  if (event.type === 'orchestration.event') {
+    return {
+      ...state,
+      events,
+      orchestrations: {
+        ...state.orchestrations,
+        [event.id]: event,
       },
     }
   }

@@ -3,10 +3,11 @@ export type { ApprovalQueue } from './approvalQueue'
 export { agentEventSchema, parseAgentEvent } from './contractSchemas'
 export { createEventLog, createPersistentEventLog } from './eventLog'
 export type { EventLog, EventLogStorage } from './eventLog'
+export { buildPlanExecutionPrompt, planWithStatus } from './planBridge'
 export { jobSnapshotToAgentEvent } from './jobBridge'
 export type { RuntimeJobSnapshot } from './jobBridge'
 export { createJobRunner } from './jobRunner'
-export { pythonApprovalToAgentEvent, pythonToolEventToAgentEvent } from './pythonBridge'
+export { pythonApprovalToAgentEvent, pythonOrchestrationToAgentEvent, pythonPlanToAgentEvent, pythonToolEventToAgentEvent } from './pythonBridge'
 export { createInitialRuntimeState, reduceRuntimeEvent } from './runtimeStore'
 export type { RuntimeState } from './runtimeStore'
 export { routeTaskForRuntime } from './taskRouter'
@@ -20,6 +21,10 @@ export type {
   ErrorEvent,
   JobEvent,
   JobStatus,
+  OrchestrationEvent,
+  PlanEvent,
+  PlanStatus,
+  PlanStep,
   RiskLevel,
   RuntimeMessage,
   RuntimeSession,

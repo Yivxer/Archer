@@ -10,6 +10,7 @@ const base = z.object({
 const riskLevelSchema = z.enum(['low', 'medium', 'high', 'critical'])
 const toolStatusSchema = z.enum(['running', 'waiting_approval', 'complete', 'blocked', 'denied'])
 const jobStatusSchema = z.enum(['queued', 'running', 'waiting_approval', 'complete', 'failed', 'cancelled'])
+const planStatusSchema = z.enum(['proposed', 'accepted', 'dismissed'])
 
 export const textDeltaEventSchema = base.extend({
   type: z.literal('text.delta'),
@@ -67,6 +68,31 @@ export const jobEventSchema = base.extend({
   }).optional(),
 })
 
+export const planEventSchema = base.extend({
+  type: z.literal('plan.event'),
+  title: z.string(),
+  status: planStatusSchema,
+  detail: z.string(),
+  prompt: z.string().optional(),
+  steps: z.array(z.object({
+    id: z.number().int().positive(),
+    action: z.string().min(1),
+    tool: z.string().min(1),
+    requiresApproval: z.boolean(),
+  })),
+})
+
+export const orchestrationEventSchema = base.extend({
+  type: z.literal('orchestration.event'),
+  intent: z.string(),
+  subIntent: z.string(),
+  mode: z.string(),
+  depth: z.string(),
+  labels: z.array(z.string()),
+  needsMemory: z.boolean(),
+  needsJob: z.boolean(),
+})
+
 export const errorEventSchema = base.extend({
   type: z.literal('runtime.error'),
   scope: z.enum(['stream', 'approval', 'job', 'adapter']),
@@ -81,6 +107,8 @@ export const agentEventSchema = z.discriminatedUnion('type', [
   toolResultEventSchema,
   approvalResultEventSchema,
   jobEventSchema,
+  planEventSchema,
+  orchestrationEventSchema,
   errorEventSchema,
 ])
 
