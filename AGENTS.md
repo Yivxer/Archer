@@ -24,6 +24,22 @@
 - Run broader tests only when the touched surface justifies it.
 - Use one real API/UI smoke test after tests pass, unless the user explicitly asks for deeper validation.
 - If a real verification may consume model/API quota, say so before running it unless it is clearly tiny.
+- Low-cost smoke order for Desktop/API work:
+  1. focused unit or route test for the touched behavior
+  2. broader local suite only if the touched surface is shared
+  3. `npm run build` only for Desktop TypeScript/renderer/main changes
+  4. real Electron/API smoke only when UI/runtime behavior changed or tests cannot prove it
+- Real model/API smoke must use the shortest prompt that proves the behavior; avoid long user text, repeated live streams, or quota-heavy checks unless explicitly approved.
+
+## Desktop Runtime Status
+
+- After Desktop changes, state the strongest verification level reached:
+  - `dev verified`: checked through `npm run dev` or Electron dev smoke.
+  - `build verified`: `cd client/desktop && npm run build` passed, but no packaged app was installed.
+  - `packaged`: DMG/app package was built.
+  - `installed`: the packaged app was installed/replaced on the user's machine.
+- Do not imply an installed app changed when only source, dev server, tests, or build output changed.
+- If only tests/build ran, say that explicitly and leave manual installed-app verification as a separate item.
 
 ## Documentation
 

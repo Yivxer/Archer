@@ -51,6 +51,8 @@ history/
 # ── Editor ────────────────────────────────────────────────────────────────────
 .idea/
 .vscode/
+.codebuddy/
+.workbuddy/
 *.swp
 *.swo
 *.bak
