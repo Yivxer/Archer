@@ -3,6 +3,7 @@ import { createSkillRegistry } from './types'
 import { obsidianReadSkill } from './obsidianRead'
 import { obsidianWriteSkill } from './obsidianWrite'
 import { fileOpsReadSkill } from './fileOpsRead'
+import { fileSearchSkill } from './fileSearch'
 
 /** Shared singleton skill registry with all TS-implemented skills registered */
 let _registry: SkillRegistry | null = null
@@ -13,6 +14,7 @@ export function getSkillRegistry(): SkillRegistry {
     _registry.register(obsidianReadSkill)
     _registry.register(obsidianWriteSkill)
     _registry.register(fileOpsReadSkill)
+    _registry.register(fileSearchSkill)
   }
   return _registry
 }
