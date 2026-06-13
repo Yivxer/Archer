@@ -5,8 +5,8 @@ import { pickChatGreeting } from '../lib/chatGreetings'
 import { extendedConversationModes, PERSONA_PRESETS, personaIdFromMode } from '../lib/conversationPersona'
 import type { ArcherAdapter, ChatMessage, FileRef, MemoryContextMode, ObsidianContextMode, SessionDetail, ToolEvent } from '../types'
 import { ArcherRing, MarkdownMessage, ThinkingDots } from '../components/common'
-import { createInitialRuntimeState, createPersistentEventLog, reduceRuntimeEvent, routeTaskForRuntime, jobSnapshotToAgentEvent } from '../../../agent'
-import type { AgentEvent, EventLog, JobEvent } from '../../../agent'
+import { createInitialRuntimeState, createPersistentEventLog, reduceRuntimeEvent, routeTaskForRuntime, jobSnapshotToAgentEvent, buildPlanExecutionPrompt, planWithStatus } from '../../../agent'
+import type { AgentEvent, EventLog, JobEvent, OrchestrationEvent, PlanEvent } from '../../../agent'
 
 const CHAT_STARTERS = [
   { label: '先听我说', prompt: '我先说一段，你不用急着给方案。' },
@@ -55,6 +55,7 @@ export function ChatPage({
   const abortControllerRef = React.useRef<AbortController | null>(null)
   const backgroundJobAbortRef = React.useRef<AbortController | null>(null)
   const composingRef = React.useRef(false)
+  const lastAttachedFilesRef = React.useRef<FileRef[]>([])
   const [isSending, setIsSending] = React.useState(false)
   const [isBackgrounding, setIsBackgrounding] = React.useState(false)
   const [chatError, setChatError] = React.useState('')
@@ -82,6 +83,10 @@ export function ChatPage({
   }
   const [runtimeState, setRuntimeState] = React.useState(() => restoreRuntimeState(runtimeSessionId, eventLogRef.current))
   const runtimeJobs = Object.values(runtimeState.jobs).sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+  const runtimePlans = Object.values(runtimeState.plans).sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+  const runtimeOrchestration = Object.values(runtimeState.orchestrations).sort(
+    (a, b) => b.createdAt.localeCompare(a.createdAt),
+  )[0] as OrchestrationEvent | undefined
 
   function recordAgentEvent(event: AgentEvent) {
     eventLogRef.current?.append(event)
@@ -134,7 +139,7 @@ export function ChatPage({
 
   React.useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages, toolEvents, runtimeJobs.length, isTyping])
+  }, [messages, toolEvents, runtimeJobs.length, runtimePlans.length, isTyping])
 
   React.useEffect(() => {
     if (!activeComposerMenu) return
@@ -227,7 +232,10 @@ export function ChatPage({
   async function sendMessage() {
     const text = draft.trim()
     if (!text || isSending || isBackgrounding) return
-    const sentFileRefs = fileRefs
+    let sentFileRefs = fileRefs
+    if (!sentFileRefs.length && lastAttachedFilesRef.current.length && messageWantsHugoPublish(text)) {
+      sentFileRefs = lastAttachedFilesRef.current
+    }
     if (data.status.adapter === 'local') {
       const route = routeTaskForRuntime({ text, fileCount: sentFileRefs.length })
       if (route.mode === 'background') {
@@ -247,13 +255,31 @@ export function ChatPage({
     setMessages(nextMessages)
     setDraft('')
     setDraftCollapsed(false)
-    setFileRefs([])
+    setFileRefs((current) => current.map((file) => ({ ...file, attachStatus: 'reading' as const, attachDetail: '上传中…' })))
     setChatError('')
     setSaveState('')
-    setToolEvents([])
-    setToolNotice('')
+    setToolEvents((current) => current.filter((event) => (
+      event.requiresApproval
+      && event.status === 'waiting'
+      && !event.id.startsWith('mock-')
+      && !event.id.startsWith('local-')
+    )))
+    const reused = !fileRefs.length && sentFileRefs.length > 0
+    setToolNotice(
+      sentFileRefs.length
+        ? (reused
+          ? `沿用上轮 ${sentFileRefs.length} 个附件，正在读取…`
+          : `已附带 ${sentFileRefs.length} 个文件，正在读取…`)
+        : ''
+    )
     eventLogRef.current?.clearSession(runtimeSessionId)
-    setRuntimeState(createInitialRuntimeState(runtimeSessionId))
+    setRuntimeState((current) => ({
+      ...createInitialRuntimeState(runtimeSessionId),
+      pendingApprovals: current.pendingApprovals.filter((req) => req.requiresApproval),
+      toolResults: Object.fromEntries(
+        Object.entries(current.toolResults).filter(([, value]) => value.decision === undefined)
+      ),
+    }))
     setIsSending(true)
 
     if (data.status.adapter !== 'local') {
@@ -286,6 +312,24 @@ export function ChatPage({
           setMessages([...nextMessages, { id: assistantId, role: 'assistant', text: reply }])
         },
         (event) => {
+          if (event.name === 'file.reference' && event.draft?.path) {
+            const refPath = String(event.draft.path)
+            setFileRefs((current) => current.map((file) => {
+              if (file.path !== refPath) return file
+              if (event.status === 'complete') {
+                const chars = event.draft?.injectedChars
+                return {
+                  ...file,
+                  attachStatus: 'ok',
+                  attachDetail: typeof chars === 'number' ? `已读取 ${chars} 字` : '已读取',
+                }
+              }
+              if (event.status === 'blocked') {
+                return { ...file, attachStatus: 'failed', attachDetail: event.summary || '读取失败' }
+              }
+              return { ...file, attachStatus: 'reading', attachDetail: event.summary || '读取中…' }
+            }))
+          }
           setToolEvents((current) => {
             const existing = current.findIndex((item) => item.id === event.id)
             if (existing === -1) return [...current, event]
@@ -293,7 +337,8 @@ export function ChatPage({
           })
         },
         recordAgentEvent,
-        controller.signal
+        controller.signal,
+        runtimeSessionId
       )
       if (!reply) {
         setMessages([...nextMessages, { id: assistantId, role: 'assistant', text: '（模型无回复）' }])
@@ -347,11 +392,103 @@ export function ChatPage({
       if (abortControllerRef.current === controller) abortControllerRef.current = null
       setIsTyping(false)
       setIsSending(false)
+      setFileRefs((current) => {
+        if (!current.length) return current
+        const failed = current.filter((file) => file.attachStatus === 'failed')
+        const ok = current.filter((file) => file.attachStatus === 'ok')
+        if (failed.length) {
+          setToolNotice(`附件读取失败：${failed.map((file) => file.name).join('、')}`)
+        } else if (ok.length) {
+          setToolNotice(`附件已读取：${ok.map((file) => file.name).join('、')}`)
+        }
+        return []
+      })
     }
   }
 
   function stopSending() {
     abortControllerRef.current?.abort()
+  }
+
+  async function executeConfirmedPlan(plan: PlanEvent) {
+    if (plan.status !== 'proposed' || isBackgrounding || data.status.adapter !== 'local') return
+    const prompt = buildPlanExecutionPrompt(plan)
+    recordAgentEvent(planWithStatus(plan, 'accepted'))
+
+    const assistantId = messages.length + 1
+    const pendingAssistant: ChatMessage = {
+      id: assistantId,
+      role: 'assistant',
+      text: '已按计划放入后台执行，完成后会把结果贴回来。',
+    }
+    const nextMessages = [...messages, pendingAssistant]
+    const controller = new AbortController()
+
+    backgroundJobAbortRef.current?.abort()
+    backgroundJobAbortRef.current = controller
+    setMessages(nextMessages)
+    setChatError('')
+    setSaveState('')
+    setToolNotice('')
+    setIsBackgrounding(true)
+
+    try {
+      const { result, event } = await createBackgroundJobEvent(runtimeSessionId, {
+        title: plan.title || '任务计划',
+        kind: 'chat',
+        prompt,
+        timeoutSeconds: 600,
+      })
+      recordAgentEvent(event)
+      const finalJob = await pollBackgroundJobEvents(
+        runtimeSessionId,
+        result.job.id,
+        recordAgentEvent,
+        { signal: controller.signal },
+      )
+      const reply = finalJob.status === 'complete'
+        ? finalJob.result || '后台任务已完成，但没有返回内容。'
+        : `后台任务${finalJob.status === 'failed' ? '失败' : '结束'}：${finalJob.error || finalJob.result || finalJob.status}`
+      setMessages((current) => current.map((message) =>
+        message.id === assistantId ? { ...message, text: reply } : message,
+      ))
+      try {
+        if (activeSession) {
+          await appendLocalSession(activeSession.id, [{ role: 'assistant', content: reply }])
+          onSessionAppended?.(nextMessages.map((message) =>
+            message.id === assistantId ? { ...message, text: reply } : message,
+          ))
+          setSaveState('计划任务结果已续写当前会话')
+        } else {
+          const requestMessages = messages.map((message) => ({ role: message.role, content: message.text }))
+          await saveLocalSession([...requestMessages, { role: 'assistant', content: reply }])
+          setSaveState('计划任务结果已保存到历史会话')
+        }
+        await onRefresh?.()
+      } catch (error) {
+        setSaveState('保存失败')
+        setChatError(error instanceof Error ? error.message : '保存失败')
+      }
+    } catch (error) {
+      const aborted = (error instanceof DOMException && error.name === 'AbortError')
+        || (error instanceof Error && error.name === 'AbortError')
+      if (!aborted) {
+        const message = error instanceof Error ? error.message : '计划任务失败'
+        setChatError(message)
+        setMessages((current) => current.map((item) =>
+          item.id === assistantId ? { ...item, text: `计划任务创建或执行失败：${message}` } : item,
+        ))
+      }
+    } finally {
+      if (backgroundJobAbortRef.current === controller) backgroundJobAbortRef.current = null
+      setIsBackgrounding(false)
+    }
+  }
+
+  function dismissPlan(plan: PlanEvent) {
+    if (plan.status !== 'proposed') return
+    recordAgentEvent(planWithStatus(plan, 'dismissed'))
+    setToolNotice('已忽略此计划')
   }
 
   async function sendBackgroundJob(textOverride?: string, options: {
@@ -499,6 +636,7 @@ export function ChatPage({
   async function decideTool(eventId: string, decision: 'approved' | 'denied') {
     setToolNotice('')
     if (data.status.adapter !== 'local') return
+    const pendingEvent = toolEvents.find((item) => item.id === eventId)
     try {
       const { result, event: approvalEvent } = await submitToolApprovalEvent(runtimeSessionId, eventId, decision)
       // Runtime state is the single source of truth for approval decisions.
@@ -547,17 +685,36 @@ export function ChatPage({
           }
         })
       )
-      setToolNotice(result.message)
+      const notice = result.executed
+        ? (result.output?.trim() || result.message)
+        : `未执行：${result.message}`
+      setToolNotice(notice)
+      if (pendingEvent?.name === 'hugo_blog') {
+        const followUp = result.executed
+          ? (result.output?.trim() || result.message || '枫弋札记部署已完成。')
+          : `部署未完成：${result.message}`
+        setMessages((current) => [
+          ...current,
+          { id: current.length + 1, role: 'assistant', text: followUp },
+        ])
+      }
     } catch (error) {
       setToolNotice(error instanceof Error ? error.message : '审批失败')
     }
   }
 
-  const isHome = messages.length === 0 && !isTyping && !isSending && !activeSession
+  const hasRuntimeActivity = runtimePlans.length > 0 || runtimeJobs.length > 0 || runtimeState.pendingApprovals.length > 0 || toolEvents.length > 0
+  const isHome = messages.length === 0 && !isTyping && !isSending && !activeSession && !hasRuntimeActivity
   const approvalToolEvents = React.useMemo(() => {
     const merged = new Map<string, ToolEvent>()
     for (const event of toolEvents) {
-      if (event.requiresApproval) merged.set(event.id, event)
+      if (
+        event.requiresApproval
+        && !event.id.startsWith('mock-')
+        && !event.id.startsWith('local-')
+      ) {
+        merged.set(event.id, event)
+      }
     }
     for (const req of runtimeState.pendingApprovals) {
       if (!merged.has(req.id)) merged.set(req.id, toolEventFromRuntimeRequest(req))
@@ -591,16 +748,23 @@ export function ChatPage({
     try {
       const picked = await window.archerDesktop.pickFiles()
       if (!picked.length) return
+      let added = 0
       setFileRefs((current) => {
         const known = new Set(current.map((item) => item.path))
         const next = [...current]
         for (const item of picked) {
           if (known.has(item.path)) continue
-          next.push(item)
+          next.push({ ...item, attachStatus: 'ready', attachDetail: '待发送' })
           known.add(item.path)
+          added += 1
         }
-        return next.slice(0, 5)
+        const merged = next.slice(0, 5)
+        lastAttachedFilesRef.current = merged
+        return merged
       })
+      if (added > 0) {
+        setToolNotice(`已添加 ${added} 个附件，发送后将自动读取内容`)
+      }
     } catch (error) {
       setToolNotice(error instanceof Error ? error.message : '选择文件失败')
     }
@@ -808,7 +972,8 @@ export function ChatPage({
           })
         },
         recordAgentEvent,
-        controller.signal
+        controller.signal,
+        runtimeSessionId
       )
       const finalMessages: ChatMessage[] = [
         ...baseMessages,
@@ -850,11 +1015,24 @@ export function ChatPage({
         : '继续说…'
 
   const composerEl = (
+    <>
+      {runtimeOrchestration && runtimeOrchestration.labels.length > 0 && (
+        <div className="orchestration-status-row" aria-label="当前对话判断">
+          {runtimeOrchestration.labels.map((label) => (
+            <span key={label} className="orchestration-chip">{label}</span>
+          ))}
+        </div>
+      )}
     <div className="composer" ref={composerRef}>
       {fileRefs.length > 0 && (
         <div className="file-ref-row" aria-label="已引用文件">
           {fileRefs.map((file) => (
-            <span className={`file-ref-chip${file.previewDataUrl ? ' has-preview' : ''}`} key={file.path} title={file.path}>
+            <span
+              className={`file-ref-chip${file.previewDataUrl ? ' has-preview' : ''}`}
+              data-status={file.attachStatus || 'ready'}
+              key={file.path}
+              title={file.attachDetail ? `${file.path}\n${file.attachDetail}` : file.path}
+            >
               {file.previewDataUrl ? (
                 <img src={file.previewDataUrl} alt="" />
               ) : (
@@ -862,7 +1040,7 @@ export function ChatPage({
               )}
               <span>
                 <strong>{file.name}</strong>
-                <em>{formatFileSize(file.size)}</em>
+                <em>{fileAttachLabel(file)}</em>
               </span>
               <button type="button" onClick={() => removeFileRef(file.path)} aria-label={`移除 ${file.name}`}>
                 <X size={12} />
@@ -1137,6 +1315,7 @@ export function ChatPage({
         </div>
       </div>
     </div>
+    </>
   )
 
   if (isHome) {
@@ -1250,6 +1429,16 @@ export function ChatPage({
             onCancel={() => void cancelRuntimeJob(job)}
             onRetry={() => void retryRuntimeJob(job)}
             onApprove={(decision) => void decideJobTool(job, decision)}
+          />
+        ))}
+
+        {runtimePlans.map((plan) => (
+          <PlanEventCard
+            key={plan.id}
+            plan={plan}
+            busy={isBackgrounding}
+            onAccept={() => void executeConfirmedPlan(plan)}
+            onDismiss={() => dismissPlan(plan)}
           />
         ))}
 
@@ -1370,6 +1559,48 @@ function JobEventCard({
       {needsApproval && job.detail && (
         <div className="approval-actions compact">
           <span className="approval-hint">此任务需要您确认后才能继续</span>
+        </div>
+      )}
+    </article>
+  )
+}
+
+function PlanEventCard({
+  plan,
+  busy = false,
+  onAccept,
+  onDismiss,
+}: {
+  plan: PlanEvent
+  busy?: boolean
+  onAccept?: () => void
+  onDismiss?: () => void
+}) {
+  const isProposed = plan.status === 'proposed'
+  return (
+    <article className={`plan-event-card ${plan.status}`}>
+      <div className="plan-event-summary">
+        <FileText size={14} />
+        <span>{plan.title || '任务计划'}</span>
+        <em>{plan.status === 'proposed' ? '待确认' : plan.status === 'accepted' ? '已确认' : '已忽略'}</em>
+      </div>
+      {plan.detail && <div className="plan-event-detail">{plan.detail}</div>}
+      <ol className="plan-event-steps">
+        {plan.steps.map((step) => (
+          <li key={step.id}>
+            <span>{step.action}</span>
+            <em>{step.tool}{step.requiresApproval ? ' · 需确认' : ''}</em>
+          </li>
+        ))}
+      </ol>
+      {isProposed && onAccept && onDismiss && (
+        <div className="plan-event-actions">
+          <button className="quiet-button" type="button" disabled={busy} onClick={onDismiss}>
+            忽略
+          </button>
+          <button className="quiet-button strong" type="button" disabled={busy} onClick={onAccept}>
+            按计划执行
+          </button>
         </div>
       )}
     </article>
@@ -1541,6 +1772,19 @@ function backgroundRouteReasonLabel(reason: string): string {
   if (reason === 'large request') return '内容较长，适合后台持续处理'
   if (reason === 'implementation-style request') return '这是实现/修改类任务，适合后台执行'
   return '适合后台执行'
+}
+
+function messageWantsHugoPublish(text: string): boolean {
+  const lowered = text.toLowerCase()
+  return /部署|上线|发布|枫弋|札记|博客|iver\.yivxer|yivxer-blog/.test(lowered)
+}
+
+function fileAttachLabel(file: FileRef): string {
+  if (file.attachStatus === 'reading') return file.attachDetail || '读取中…'
+  if (file.attachStatus === 'ok') return file.attachDetail || '已读取'
+  if (file.attachStatus === 'failed') return file.attachDetail || '读取失败'
+  if (file.attachStatus === 'ready') return file.attachDetail || '待发送'
+  return formatFileSize(file.size)
 }
 
 function formatFileSize(size?: number): string {

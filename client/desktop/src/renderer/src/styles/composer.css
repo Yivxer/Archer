@@ -98,6 +98,14 @@
   font-style: normal;
 }
 
+.file-ref-chip[data-status='ok'] {
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+.file-ref-chip[data-status='failed'] {
+  border-color: color-mix(in srgb, #d14343 55%, transparent);
+}
+
 .file-ref-chip button {
   display: inline-flex;
   align-items: center;

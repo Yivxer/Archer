@@ -1,8 +1,9 @@
 import React from 'react'
-import { Check, ChevronRight, Clock3, Loader2, RotateCcw, X } from 'lucide-react'
-import { cancelBackgroundJob, listBackgroundJobs, retryBackgroundJob } from '../adapters/localArcher'
+import { Check, ChevronRight, Clock3, Loader2, Plus, RotateCcw, X } from 'lucide-react'
+import { cancelBackgroundJob, listBackgroundJobs, retryBackgroundJob, spawnChildJobs } from '../adapters/localArcher'
 import { EmptyDetail, SearchBox } from '../components/common'
 import type { ArcherAdapter, BackgroundJob } from '../types'
+import type { SpawnChildSpec } from '../adapters/localArcher'
 
 type LoadState = 'idle' | 'loading' | 'error'
 
@@ -52,6 +53,16 @@ export function TasksPage({ data }: { data: ArcherAdapter }) {
       window.setTimeout(() => void refreshJobs(), 600)
     } catch (error) {
       setNotice(error instanceof Error ? error.message : '重试失败')
+    }
+  }
+
+  async function spawnChildJob(job: BackgroundJob, spec: SpawnChildSpec) {
+    try {
+      const result = await spawnChildJobs(job.id, [spec])
+      setNotice(`已创建 ${result.spawned} 个子任务`)
+      await refreshJobs()
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : '子任务创建失败')
     }
   }
 
@@ -117,7 +128,13 @@ export function TasksPage({ data }: { data: ArcherAdapter }) {
       </div>
 
       {selected ? (
-        <TaskDetail job={selected} notice={notice} onCancel={() => void cancelJob(selected)} onRetry={() => void retryJob(selected)} />
+        <TaskDetail
+          job={selected}
+          notice={notice}
+          onCancel={() => void cancelJob(selected)}
+          onRetry={() => void retryJob(selected)}
+          onSpawnChild={(spec) => spawnChildJob(selected, spec)}
+        />
       ) : (
         <EmptyDetail icon={Clock3} title="暂无任务" text="后台 jobs 记录为空。" />
       )}
@@ -130,15 +147,40 @@ function TaskDetail({
   notice,
   onCancel,
   onRetry,
+  onSpawnChild,
 }: {
   job: BackgroundJob
   notice: string
   onCancel: () => void
   onRetry: () => void
+  onSpawnChild: (spec: SpawnChildSpec) => Promise<void>
 }) {
   const isActive = job.status === 'queued' || job.status === 'running' || job.status === 'waiting_approval'
   const canRetry = job.status === 'failed' || job.status === 'cancelled'
   const StatusIcon = isActive ? Loader2 : job.status === 'complete' ? Check : X
+  const [showChildForm, setShowChildForm] = React.useState(false)
+  const [childTitle, setChildTitle] = React.useState('')
+  const [childKind, setChildKind] = React.useState('analysis')
+  const [childPrompt, setChildPrompt] = React.useState('')
+  const [childAutoStart, setChildAutoStart] = React.useState(false)
+
+  async function handleSpawnChild(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const title = childTitle.trim()
+    const prompt = childPrompt.trim()
+    if (!title || !prompt) return
+    await onSpawnChild({
+      title,
+      kind: childKind,
+      prompt,
+      autoStart: childAutoStart,
+    })
+    setChildTitle('')
+    setChildPrompt('')
+    setChildKind('analysis')
+    setChildAutoStart(false)
+    setShowChildForm(false)
+  }
 
   return (
     <div className="session-detail task-detail">
@@ -151,6 +193,10 @@ function TaskDetail({
           <p>{job.id} · {jobStatusLabel(job.status)} · {formatDate(job.updatedAt)}</p>
         </div>
         <div className="task-actions">
+          <button className="quiet-button" type="button" onClick={() => setShowChildForm((value) => !value)}>
+            <Plus size={14} />
+            拆分子任务
+          </button>
           {isActive && <button className="quiet-button" type="button" onClick={onCancel}>取消</button>}
           {canRetry && <button className="quiet-button strong" type="button" onClick={onRetry}>重试</button>}
         </div>
@@ -171,10 +217,51 @@ function TaskDetail({
       </dl>
       {notice && <p className="detail-muted">{notice}</p>}
       {job.error && <p className="detail-error">{job.error}</p>}
+      {showChildForm && (
+        <form className="task-child-form" onSubmit={(event) => void handleSpawnChild(event)}>
+          <label>
+            <span>标题</span>
+            <input value={childTitle} onChange={(event) => setChildTitle(event.target.value)} />
+          </label>
+          <label>
+            <span>类型</span>
+            <select value={childKind} onChange={(event) => setChildKind(event.target.value)}>
+              <option value="analysis">analysis</option>
+              <option value="review">review</option>
+              <option value="work">work</option>
+            </select>
+          </label>
+          <label className="task-child-prompt">
+            <span>Prompt</span>
+            <textarea value={childPrompt} onChange={(event) => setChildPrompt(event.target.value)} />
+          </label>
+          <label className="task-child-autostart">
+            <input type="checkbox" checked={childAutoStart} onChange={(event) => setChildAutoStart(event.target.checked)} />
+            <span>立即开始</span>
+          </label>
+          <div className="task-child-form-actions">
+            <button className="quiet-button" type="button" onClick={() => setShowChildForm(false)}>取消</button>
+            <button className="quiet-button strong" type="submit" disabled={!childTitle.trim() || !childPrompt.trim()}>创建</button>
+          </div>
+        </form>
+      )}
       <section className="task-section">
         <h3>请求</h3>
         <p>{job.prompt}</p>
       </section>
+      {job.children?.length ? (
+        <section className="task-section">
+          <h3>子任务</h3>
+          <div className="task-child-list">
+            {job.children.map((child) => (
+              <div className="task-child-row" key={child.id}>
+                <strong>{child.title || child.id}</strong>
+                <span>{jobStatusLabel(child.status)} · {formatDate(child.createdAt)}</span>
+              </div>
+            ))}
+          </div>
+        </section>
+      ) : null}
       <section className="task-section">
         <h3>结果</h3>
         <p>{job.result || '暂无结果'}</p>

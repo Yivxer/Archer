@@ -22,7 +22,7 @@ import type {
   ToolApprovalResult,
   ToolEvent
 } from '../types'
-import { jobSnapshotToAgentEvent, pythonApprovalToAgentEvent, pythonToolEventToAgentEvent } from '../../../agent'
+import { jobSnapshotToAgentEvent, pythonApprovalToAgentEvent, pythonOrchestrationToAgentEvent, pythonPlanToAgentEvent, pythonToolEventToAgentEvent } from '../../../agent'
 import type { AgentEvent } from '../../../agent'
 
 const BASE_URL = 'http://127.0.0.1:8765'
@@ -188,15 +188,6 @@ export async function loadLocalArcher(): Promise<ArcherAdapter> {
           summary: '聊天完成后写入本地 Sessions',
           detail: 'target: memory/sessions/*.json'
         },
-        {
-          id: 'local-tool-approval',
-          name: 'tool.approval',
-          status: 'waiting',
-          risk: 'high',
-          summary: '未来真实工具调用前在这里确认',
-          detail: 'allow / deny / inspect arguments',
-          requiresApproval: true
-        }
       ],
       mockReply: '本地 API 已连接。当前聊天会走纯模型回复，还没有工具调用。'
     },
@@ -456,7 +447,8 @@ export async function streamLocalChat(
   onText: (text: string) => void,
   onToolEvent?: (event: ToolEvent) => void,
   onAgentEvent?: (event: AgentEvent) => void,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  runtimeSessionId = 'desktop-session'
 ): Promise<void> {
   const response = await apiFetch('/chat/stream', {
     method: 'POST',
@@ -490,11 +482,35 @@ export async function streamLocalChat(
         done?: boolean
         error?: string
         toolEvent?: ToolEvent
+        planEvent?: {
+          id: string
+          title: string
+          status: 'proposed' | 'accepted' | 'dismissed'
+          detail: string
+          prompt?: string
+          steps: Array<{ id: number; action: string; tool: string; requiresApproval: boolean }>
+        }
+        orchestrationEvent?: {
+          id: string
+          intent: string
+          subIntent: string
+          mode: string
+          depth: string
+          labels: string[]
+          needsMemory: boolean
+          needsJob: boolean
+        }
       }
       if (payload.error) throw new Error(`[server] ${payload.error}`)
       if (payload.toolEvent) {
         onToolEvent?.(payload.toolEvent)
-        onAgentEvent?.(pythonToolEventToAgentEvent('desktop-session', payload.toolEvent))
+        onAgentEvent?.(pythonToolEventToAgentEvent(runtimeSessionId, payload.toolEvent))
+      }
+      if (payload.orchestrationEvent) {
+        onAgentEvent?.(pythonOrchestrationToAgentEvent(runtimeSessionId, payload.orchestrationEvent))
+      }
+      if (payload.planEvent) {
+        onAgentEvent?.(pythonPlanToAgentEvent(runtimeSessionId, payload.planEvent))
       }
       if (payload.text) onText(payload.text)
       if (payload.done) return

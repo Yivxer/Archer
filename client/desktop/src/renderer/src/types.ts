@@ -35,6 +35,8 @@ export type FileRef = {
   name: string
   size?: number
   previewDataUrl?: string
+  attachStatus?: 'ready' | 'reading' | 'ok' | 'failed'
+  attachDetail?: string
 }
 
 export type ToolProgress = {
@@ -185,6 +187,7 @@ export type MemoryItem = {
   content: string
   confidence: string
   source: string
+  suggestReason?: string
   depth?: number
 }
 

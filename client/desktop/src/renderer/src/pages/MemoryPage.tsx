@@ -265,7 +265,7 @@ function MemoryCard({
         <div className="memory-card-top">
           <span className={`memory-type-tag ${item.type}`}>{typeLabel}</span>
           <span className="memory-card-meta">
-            {item.source === 'soul-import' ? 'Soul 导入' : item.source === 'auto' ? '自动提取' : item.source || ''}
+            {memorySourceLabel(item)}
           </span>
           {item.status === 'confirmed' && onEditStart && (
             <button className="memory-edit-btn" type="button" onClick={onEditStart} title="编辑此记忆">
@@ -273,6 +273,9 @@ function MemoryCard({
             </button>
           )}
         </div>
+        {item.suggestReason && item.status === 'pending' && (
+          <p className="memory-suggest-reason">{item.suggestReason}</p>
+        )}
         <p className="memory-card-content">{item.content}</p>
       </div>
       {item.status === 'pending' && onResolve && (
@@ -283,6 +286,13 @@ function MemoryCard({
       )}
     </article>
   )
+}
+
+function memorySourceLabel(item: MemoryItem): string {
+  if (item.source === 'soul-import') return 'Soul 导入'
+  if (item.source === 'desktop') return 'Desktop 对话'
+  if (item.source === 'auto') return '自动提取'
+  return item.source || ''
 }
 
 function memoryTypeLabel(mtype: string): string {
