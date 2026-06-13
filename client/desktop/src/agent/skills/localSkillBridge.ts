@@ -2,6 +2,7 @@ import type { SkillArgs, SkillRegistry } from './types'
 import { createSkillRegistry } from './types'
 import { obsidianReadSkill } from './obsidianRead'
 import { obsidianWriteSkill } from './obsidianWrite'
+import { fileOpsReadSkill } from './fileOpsRead'
 
 /** Shared singleton skill registry with all TS-implemented skills registered */
 let _registry: SkillRegistry | null = null
@@ -11,6 +12,7 @@ export function getSkillRegistry(): SkillRegistry {
     _registry = createSkillRegistry()
     _registry.register(obsidianReadSkill)
     _registry.register(obsidianWriteSkill)
+    _registry.register(fileOpsReadSkill)
   }
   return _registry
 }
@@ -29,7 +31,9 @@ export async function tryExecuteLocalSkill(
 ): Promise<{ ok: boolean; output: string; error?: string } | null> {
   const registry = getSkillRegistry()
   if (!registry.has(name)) return null
-  return registry.run(name, args)
+  const result = await registry.run(name, args)
+  if (result.error === '__fallback_python__') return null
+  return result
 }
 
 /**

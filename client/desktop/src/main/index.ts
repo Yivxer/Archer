@@ -7,6 +7,7 @@ import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'no
 import { randomBytes } from 'node:crypto'
 import { execFile } from 'node:child_process'
 import { probeExistingApi, verifyApiToken, waitForHealthyApi } from './apiProcess'
+import { listLocalSkills, tryExecuteLocalSkill } from '../agent/skills/localSkillBridge'
 
 const isDev = !app.isPackaged
 
@@ -102,6 +103,7 @@ function apiChildEnv(): NodeJS.ProcessEnv {
   return {
     ...processEnv,
     PATH: pathParts.filter(Boolean).join(':'),
+    ARCHER_ROOT: ARCHER_ROOT,
   }
 }
 
@@ -429,6 +431,16 @@ ipcMain.handle('archer:get-api-token', async () => {
 })
 
 ipcMain.handle('archer:ensure-api', async () => ensureApiProcess())
+
+ipcMain.handle('archer:execute-local-skill', async (_event, name: string, args: Record<string, unknown> = {}) => {
+  if (!name || typeof name !== 'string') {
+    return { handled: false, result: null }
+  }
+  const result = await tryExecuteLocalSkill(name, args)
+  return { handled: result !== null, result }
+})
+
+ipcMain.handle('archer:list-local-skills', async () => listLocalSkills())
 
 app.whenReady().then(async () => {
   app.setName('Archer Desktop')

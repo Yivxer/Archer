@@ -7,7 +7,10 @@ export default defineConfig({
   main: {
     build: {
       rollupOptions: {
-        input: resolve(__dirname, 'src/main/index.ts')
+        input: {
+          index: resolve(__dirname, 'src/main/index.ts'),
+          runLocalSkill: resolve(__dirname, 'src/main/runLocalSkill.ts'),
+        }
       }
     }
   },

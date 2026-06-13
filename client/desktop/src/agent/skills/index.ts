@@ -3,5 +3,6 @@ export type { Skill, SkillArgs, SkillDef, SkillRegistry, SkillResult } from './t
 
 export { obsidianReadSkill } from './obsidianRead'
 export { obsidianWriteSkill } from './obsidianWrite'
+export { fileOpsReadSkill } from './fileOpsRead'
 
 export { getSkillRegistry, hasLocalSkill, listLocalSkills, resetSkillRegistry, tryExecuteLocalSkill } from './localSkillBridge'
