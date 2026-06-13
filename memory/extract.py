@@ -52,6 +52,56 @@ depth: 1=事实,5=精神母题。拿不准时用 3。
 没有值得记住的内容返回 {"memories": []}。\
 """
 
+_CANDIDATE_FOCUS: dict[str, str] = {
+    "project_update": (
+        "项目进展、下一步决策、路线图或优先级变化"
+        "；允许把已完成里程碑和明确下一步整理成项目记忆草稿，待用户确认后再保存"
+        "（type 优先 project / decision / insight / project_mythology）"
+    ),
+    "writing_preference": (
+        "写作与改稿偏好、语气、结构习惯"
+        "（type 优先 preference / creative_identity）"
+    ),
+    "emotional_pattern": (
+        "反复出现的情绪模式或内在拉扯，仅限用户明确表达"
+        "（type 优先 emotion_pattern / value / self_narrative）"
+    ),
+    "life_theme": (
+        "人生主题、长期方向、价值原则变化"
+        "（type 优先 life_theme / value / reflection_anchor）"
+    ),
+    "reflection_anchor": (
+        "值得下次复盘的一句话或阶段标记"
+        "（type 优先 reflection_anchor / growth_marker）"
+    ),
+    "task_result": (
+        "本轮任务的关键结论或待跟进事项"
+        "（type 优先 decision / todo / insight，importance 至少 3）"
+    ),
+}
+
+
+def build_extract_focus_block(
+    candidate_types: list[str] | None,
+    *,
+    sensitive: bool = False,
+) -> str:
+    """Narrow the extract prompt when orchestrator already picked candidate types."""
+    if not candidate_types:
+        return ""
+    lines = [
+        "【本轮提炼范围】只提炼以下类别；无关内容必须返回 {\"memories\": []}：",
+    ]
+    for item in candidate_types:
+        hint = _CANDIDATE_FOCUS.get(item)
+        if hint:
+            lines.append(f"- {item}：{hint}")
+    if sensitive:
+        lines.append(
+            "- 敏感内容：不要诊断或夸大；仅记录用户原话支持的长期模式。"
+        )
+    return "\n".join(lines)
+
 _VALID_TYPES = {
     "identity", "preference", "project", "decision",
     "todo", "insight", "risk", "context", "reflection",
@@ -109,7 +159,12 @@ def _clean_memory(m: dict) -> dict | None:
         "obsidian_hint": str(m.get("obsidian_hint", "")).strip(),
     }
 
-def extract(history: list[dict]) -> tuple[list[dict], list[dict]]:
+def extract(
+    history: list[dict],
+    *,
+    candidate_types: list[str] | None = None,
+    sensitive: bool = False,
+) -> tuple[list[dict], list[dict]]:
     """
     返回 (memories, obsidian_suggestions)
     obsidian_suggestions: [{"file": "SOUL.md|MEMORY.md", "content": "..."}]
@@ -125,8 +180,11 @@ def extract(history: list[dict]) -> tuple[list[dict], list[dict]]:
         for m in recent if m["role"] in ("user", "assistant")
     )
 
+    focus = build_extract_focus_block(candidate_types, sensitive=sensitive)
+    system_prompt = _PROMPT if not focus else f"{_PROMPT}\n\n{focus}"
+
     messages = [
-        {"role": "system", "content": _PROMPT},
+        {"role": "system", "content": system_prompt},
         {"role": "user", "content": f"对话内容:\n\n{turns}"},
     ]
 

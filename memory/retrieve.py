@@ -194,7 +194,9 @@ def format_for_prompt(core: list, related: list) -> str:
         lines = ["## 核心记忆（必读）\n"]
         for m in core:
             stars = "★" * min(m.get("importance", 3), 5)
-            line = f"- [{stars}] {m['content']}"
+            mem_type = m.get("type", "insight")
+            mem_id = m.get("id", "?")
+            line = f"- [src=memory.db:{mem_type}:id={mem_id}] [{stars}] {m['content']}"
             if m.get("tags"):
                 line += f"  #{m['tags'].replace(',', ' #')}"
             line += _time_ago(m.get("created_at"))
@@ -205,7 +207,9 @@ def format_for_prompt(core: list, related: list) -> str:
         lines = ["## 相关记忆\n"]
         for m in related:
             stars = "★" * min(m.get("importance", 3), 5)
-            line = f"- [{stars}] {m['content']}"
+            mem_type = m.get("type", "insight")
+            mem_id = m.get("id", "?")
+            line = f"- [src=memory.db:{mem_type}:id={mem_id}] [{stars}] {m['content']}"
             if m.get("tags"):
                 line += f"  #{m['tags'].replace(',', ' #')}"
             line += _time_ago(m.get("created_at"))

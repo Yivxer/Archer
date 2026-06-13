@@ -121,6 +121,10 @@ def init_db():
         conn.execute("ALTER TABLE pending_memories ADD COLUMN status TEXT DEFAULT 'pending'")
     except Exception:
         pass
+    try:
+        conn.execute("ALTER TABLE pending_memories ADD COLUMN suggest_reason TEXT DEFAULT ''")
+    except Exception:
+        pass
     # themes：跨会话行为模式归纳
     conn.execute("""
         CREATE TABLE IF NOT EXISTS themes (
@@ -490,7 +494,7 @@ def update_last_used(mid: int):
 
 def add_pending(content: str, type: str = "insight", importance: int = 3,
                 tags: str = "", source: str = "auto", confidence: float = 0.7,
-                depth: int = 3) -> int:
+                depth: int = 3, suggest_reason: str = "") -> int:
     """将候选记忆写入 pending_memories 表，返回 ID。"""
     content = content.strip()
     if type not in MEMORY_TYPES:
@@ -506,9 +510,9 @@ def add_pending(content: str, type: str = "insight", importance: int = 3,
 
     conn = sqlite3.connect(DB_PATH)
     cur = conn.execute(
-        "INSERT INTO pending_memories (content, type, importance, depth, tags, source, confidence, created_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        (content, type, importance, depth, tags.strip(), source, float(confidence), _now()),
+        "INSERT INTO pending_memories (content, type, importance, depth, tags, source, confidence, created_at, suggest_reason) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (content, type, importance, depth, tags.strip(), source, float(confidence), _now(), suggest_reason.strip()),
     )
     conn.commit()
     pid = cur.lastrowid
@@ -521,13 +525,13 @@ def list_pending(limit: int = 50, include_rejected: bool = False) -> list[dict]:
     conn = sqlite3.connect(DB_PATH)
     if include_rejected:
         rows = conn.execute(
-            "SELECT id, content, type, importance, depth, tags, source, confidence, created_at, status "
+            "SELECT id, content, type, importance, depth, tags, source, confidence, created_at, status, suggest_reason "
             "FROM pending_memories ORDER BY id LIMIT ?",
             (limit,),
         ).fetchall()
     else:
         rows = conn.execute(
-            "SELECT id, content, type, importance, depth, tags, source, confidence, created_at, status "
+            "SELECT id, content, type, importance, depth, tags, source, confidence, created_at, status, suggest_reason "
             "FROM pending_memories WHERE status = 'pending' ORDER BY id LIMIT ?",
             (limit,),
         ).fetchall()
@@ -538,6 +542,7 @@ def list_pending(limit: int = 50, include_rejected: bool = False) -> list[dict]:
             "importance": r[3], "depth": r[4], "tags": r[5],
             "source": r[6], "confidence": r[7], "created_at": r[8],
             "status": r[9] if len(r) > 9 and r[9] else "pending",
+            "suggest_reason": r[10] if len(r) > 10 and r[10] else "",
         }
         for r in rows
     ]

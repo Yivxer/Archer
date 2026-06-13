@@ -105,6 +105,38 @@ def test_extract_prompt_mentions_a4_memory_types_and_depth():
     assert "5=精神母题" in prompt
 
 
+def test_build_extract_focus_block_scopes_by_candidate_types():
+    from memory.extract import build_extract_focus_block
+
+    block = build_extract_focus_block(
+        ["writing_preference", "task_result"],
+        sensitive=False,
+    )
+    assert "writing_preference" in block
+    assert "preference" in block
+    assert "task_result" in block
+    assert "敏感内容" not in block
+
+
+def test_build_extract_focus_block_allows_project_update_drafts():
+    from memory.extract import build_extract_focus_block
+
+    block = build_extract_focus_block(["project_update"], sensitive=False)
+
+    assert "project_update" in block
+    assert "项目进展" in block
+    assert "项目记忆草稿" in block
+    assert "待用户确认" in block
+
+
+def test_build_extract_focus_block_marks_sensitive_emotional():
+    from memory.extract import build_extract_focus_block
+
+    block = build_extract_focus_block(["emotional_pattern"], sensitive=True)
+    assert "emotional_pattern" in block
+    assert "敏感内容" in block
+
+
 def test_retrieve_uses_a4_policy_for_reflection_anchor(monkeypatch):
     import memory.retrieve as retrieve
 
