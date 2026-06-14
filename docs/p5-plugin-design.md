@@ -33,6 +33,8 @@ my-bundle/
 ## CLI
 
 - `/plugin install <目录路径>` — 校验、冲突检测、复制安装
+- `/plugin install <path.zip>` — 解压后安装
+- `/plugin install <https://…/bundle.zip>` — 下载 zip 后安装（上限 20MB）
 - `/plugin list` — 已安装插件与 bundled skills/modes 数量
 - `/plugin remove <name>` — 卸载
 

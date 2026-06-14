@@ -2,7 +2,10 @@
 from __future__ import annotations
 
 import json
+import shutil
 import textwrap
+import zipfile
+from pathlib import Path
 
 import pytest
 
@@ -12,6 +15,7 @@ from core.plugin import (
     install_plugin,
     list_installed,
     load_plugin_hook_definitions,
+    materialize_plugin_source,
     remove_plugin,
     resolve_plugin_root,
 )
@@ -138,3 +142,32 @@ def test_plugin_hooks_merge_into_registry(plugin_home, tmp_path):
 
     reg = HookRegistry.from_config({"hooks": {"enabled": True}})
     assert len(reg.for_event("SessionStart")) >= 1
+
+
+def test_install_from_zip_archive(plugin_home, tmp_path):
+    source = tmp_path / "src"
+    _write_demo_plugin(source)
+    zip_base = tmp_path / "bundle"
+    shutil.make_archive(str(zip_base), "zip", root_dir=source)
+    zip_path = Path(f"{zip_base}.zip")
+
+    record = install_plugin(zip_path, base=plugin_home)
+    assert record["name"] == "demo-plugin"
+    assert list_installed(plugin_home)
+
+
+def test_zip_slip_is_rejected(plugin_home, tmp_path):
+    zip_path = tmp_path / "evil.zip"
+    with zipfile.ZipFile(zip_path, "w") as archive:
+        archive.writestr("../escape/plugin.json", '{"name":"x","version":"1.0.0"}')
+
+    with pytest.raises(ValueError, match="越界"):
+        install_plugin(zip_path, base=plugin_home)
+
+
+def test_materialize_local_directory(tmp_path):
+    source = tmp_path / "src"
+    _write_demo_plugin(source)
+    path, cleanup = materialize_plugin_source(source)
+    assert resolve_plugin_root(path).name == "src"
+    assert cleanup is None

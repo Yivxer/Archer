@@ -4,9 +4,14 @@ from __future__ import annotations
 import json
 import re
 import shutil
+import tempfile
+import urllib.request
+import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+MAX_PLUGIN_ZIP_BYTES = 20_000_000
 
 from core.hooks import HOOK_EVENTS, HookDefinition
 from core.paths import ROOT
@@ -47,6 +52,66 @@ def _load_registry(base: Path | None = None) -> dict[str, Any]:
 def _save_registry(data: dict[str, Any], base: Path | None = None) -> None:
     path = _registry_path(base)
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _is_plugin_url(source: str) -> bool:
+    lowered = source.strip().lower()
+    return lowered.startswith("http://") or lowered.startswith("https://")
+
+
+def _safe_extract_zip(zip_path: Path, dest: Path) -> None:
+    dest.mkdir(parents=True, exist_ok=True)
+    dest_root = dest.resolve()
+    with zipfile.ZipFile(zip_path) as archive:
+        for member in archive.infolist():
+            target = (dest / member.filename).resolve()
+            if not str(target).startswith(str(dest_root)):
+                raise ValueError(f"zip 路径越界：{member.filename}")
+        archive.extractall(dest)
+
+
+def _download_url(url: str, dest: Path, *, max_bytes: int = MAX_PLUGIN_ZIP_BYTES) -> None:
+    request = urllib.request.Request(url, headers={"User-Agent": "Archer-Plugin/1.0"})
+    with urllib.request.urlopen(request, timeout=60) as response:
+        total = 0
+        chunks: list[bytes] = []
+        while True:
+            block = response.read(65536)
+            if not block:
+                break
+            total += len(block)
+            if total > max_bytes:
+                raise ValueError(f"下载过大（>{max_bytes} bytes）")
+            chunks.append(block)
+    dest.write_bytes(b"".join(chunks))
+
+
+def materialize_plugin_source(source: str | Path) -> tuple[Path, tempfile.TemporaryDirectory[str] | None]:
+    """Resolve local dir, .zip file, or http(s) .zip URL to an extract/install root."""
+    raw = str(source).strip()
+    if _is_plugin_url(raw):
+        if ".zip" not in raw.split("?")[0].lower():
+            raise ValueError("URL 安装目前仅支持 .zip 插件包")
+        tmp = tempfile.TemporaryDirectory(prefix="archer-plugin-")
+        zip_path = Path(tmp.name) / "bundle.zip"
+        _download_url(raw, zip_path)
+        extract_dir = Path(tmp.name) / "extract"
+        _safe_extract_zip(zip_path, extract_dir)
+        return extract_dir, tmp
+
+    path = Path(raw).expanduser().resolve()
+    if not path.exists():
+        raise FileNotFoundError(f"路径不存在：{source}")
+    if path.is_file() and path.suffix.lower() == ".zip":
+        if path.stat().st_size > MAX_PLUGIN_ZIP_BYTES:
+            raise ValueError(f"zip 过大（>{MAX_PLUGIN_ZIP_BYTES} bytes）")
+        tmp = tempfile.TemporaryDirectory(prefix="archer-plugin-")
+        extract_dir = Path(tmp.name) / "extract"
+        _safe_extract_zip(path, extract_dir)
+        return extract_dir, tmp
+    if path.is_file():
+        raise ValueError("plugin install 需要目录或 .zip 包，不是单个文件")
+    return path, None
 
 
 def resolve_plugin_root(source: str | Path) -> Path:
@@ -199,10 +264,29 @@ def detect_conflicts(
 
 
 def install_plugin(source: str | Path, *, force: bool = False, base: Path | None = None) -> dict[str, Any]:
-    plugin_root = resolve_plugin_root(source)
+    materialized, tmp = materialize_plugin_source(source)
+    try:
+        plugin_root = resolve_plugin_root(materialized)
+        return _install_plugin_root(plugin_root, force=force, base=base)
+    finally:
+        if tmp is not None:
+            tmp.cleanup()
+
+
+def _install_plugin_root(
+    plugin_root: Path,
+    *,
+    force: bool,
+    base: Path | None,
+) -> dict[str, Any]:
     manifest = validate_manifest(load_manifest(plugin_root))
     name = manifest["name"]
-    conflicts = detect_conflicts(manifest, plugin_root, base=base, replacing=name if force else None)
+    conflicts = detect_conflicts(
+        manifest,
+        plugin_root,
+        base=base,
+        replacing=name if force else None,
+    )
     if conflicts and not force:
         raise ValueError("安装冲突：\n- " + "\n- ".join(conflicts))
 

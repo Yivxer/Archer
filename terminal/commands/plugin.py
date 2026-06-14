@@ -19,7 +19,7 @@ def _handle_plugin(parts: list[str]) -> None:
     if sub == "install":
         source = arg.replace("--force", "").strip()
         if not source:
-            console.print("[yellow]用法：/plugin install <插件目录路径> [--force][/yellow]")
+            console.print("[yellow]用法：/plugin install <目录路径|zip路径|zip-url> [--force][/yellow]")
             return
         try:
             record = install_plugin_bundle(source, force=force)
