@@ -10,6 +10,7 @@
     "api": "cd ../.. && .venv/bin/python terminal/archer_api.py --port 8765 --token ${ARCHER_DESKTOP_TOKEN:?Set ARCHER_DESKTOP_TOKEN first}",
     "test": "vitest run",
     "test:watch": "vitest",
+    "run-local-skill": "tsx src/main/runLocalSkill.ts",
     "build": "tsc --noEmit && electron-vite build",
     "build:mac": "npm run build && electron-builder --mac dmg",
     "sign:local": "bash scripts/sign-local-mac.sh",
@@ -35,6 +36,7 @@
     "electron-builder": "^26.0.12",
     "electron-vite": "^4.0.0",
     "tailwindcss": "^4.1.17",
+    "tsx": "^4.22.4",
     "typescript": "^5.9.3",
     "vite": "^7.2.4",
     "vitest": "^4.1.8"

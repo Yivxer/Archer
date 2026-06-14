@@ -150,4 +150,5 @@ def _build_meta(started_str: str, started_at: float) -> dict:
         "started_at": started_str,
         "finished_at": _fmt_ts(finished_at),
         "duration_ms": int((finished_at - started_at) * 1000),
+        "runtime": "py",
     }

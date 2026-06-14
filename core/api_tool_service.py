@@ -96,6 +96,8 @@ def _tool_result_payload(skill_name: str, tr: ToolResult, pr) -> dict:
         "output": output,
         "artifactPath": str(tr.artifact_path) if tr.artifact_path else "",
         "truncated": tr.truncated,
+        "runtime": tr.meta.get("runtime", "py"),
+        "runner": tr.meta.get("runner", ""),
         "policy": {"decision": pr.decision.value, "risk": pr.risk, "reason": pr.reason},
         "error": tr.error,
     }
