@@ -1,7 +1,7 @@
 # P5.1 Memory Blocks — 设计文档
 
 日期：2026-06-13  
-状态：阶段一（设计方案）
+状态：阶段二（实现完成，待验收）
 
 ## 问题
 
@@ -83,10 +83,10 @@
 
 ## 验收标准（阶段二）
 
-- [ ] 保存/检索/按 block_type 筛选单测通过
-- [ ] extract 推断 block_type 单测通过
-- [ ] MemoryPage 可按 block 筛选
-- [ ] 现有 `test_memory_a4.py` 等回归全绿
+- [x] 保存/检索/按 block_type 筛选单测通过
+- [x] extract 推断 block_type 单测通过
+- [x] MemoryPage 可按 block 筛选
+- [x] 现有 `test_memory_a4.py` 等回归全绿
 
 ## 推荐实现顺序（阶段二）
 

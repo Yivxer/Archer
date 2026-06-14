@@ -1,0 +1,209 @@
+# archer.toml 配置参考
+
+Archer 的主配置文件位于项目根目录 `archer.toml`（gitignore，不提交）。模板见 `templates/archer.example.toml`。
+
+加载入口：`core/llm._load_config()` / `terminal/api/_config._load_config()`。修改后 CLI 支持热加载（`pop_config_reloaded()`）；Desktop API 路径类字段保存后需重启 API。
+
+---
+
+## `[api]` — LLM 与网络
+
+| 键 | 类型 | 默认值 | 说明 |
+|----|------|--------|------|
+| `base_url` | string | — | OpenAI 兼容 API 根地址，如 `https://api.deepseek.com/v1` |
+| `api_key` | string | — | 服务商密钥 |
+| `model` | string | — | 默认聊天模型 |
+| `model_auto` | bool | `true` | `true` 时按意图从 `models[]` 自动选型；`/model <名>` 锁定后置 `false` |
+| `vision_model` | string | 同 `model` | 带图片附件时使用的模型 |
+| `models` | string[] | `[model]` | 候选模型列表；通常 `[0]` 快聊、`[1]` 重推理/工具 |
+| `timeout_s` | number | `45` | 单次 LLM 请求超时（秒） |
+| `max_retries` | number | `1` | LLM 失败重试次数 |
+
+**示例**
+
+```toml
+[api]
+base_url     = "https://api.deepseek.com/v1"
+api_key      = "sk-..."
+model        = "deepseek-chat"
+model_auto   = true
+vision_model = "deepseek-chat"
+models       = ["deepseek-chat", "deepseek-reasoner"]
+timeout_s    = 45
+max_retries  = 1
+```
+
+---
+
+## `[persona]` — 人格、模式、灵魂文件
+
+| 键 | 类型 | 默认值 | 说明 |
+|----|------|--------|------|
+| `name` | string | `"Archer"` | 显示名 |
+| `soul_path` | path | — | `SOUL.md` 路径（长期自我叙事） |
+| `soul_profile_path` | path | — | `SOUL_PROFILE.json`（结构化画像） |
+| `memory_path` | path | — | `MEMORY.md`（当前状态快照，注入 system prompt） |
+| `covenant_path` | path | — | `COVENANT.md`（根约定，不自动改写） |
+| `presence_path` | path | — | `PRESENCE.md`（交互风格） |
+| `default_mode` | string | `"listener"` | 默认对话姿态 id |
+| `current_mode` | string | 同 default | 当前锁定姿态（`/mode` 或 Desktop 切换写入） |
+| `mode_auto` | bool | `true` | `true` 时每轮由 orchestrator 选姿态；`false` 时用 `current_mode` |
+| `modes_dir` | path | — | 额外 `.md` 模式文件目录（文件名 stem = mode id） |
+| `project_root` | path | `cwd` | 项目根；也可用环境变量 `ARCHER_PROJECT_ROOT` |
+| `modes.<id>.name` | string | id | TOML 内嵌模式显示名 |
+| `modes.<id>.prompt` | string | — | 模式 system 片段 |
+
+**子表 `[persona.history]`**
+
+| 键 | 类型 | 说明 |
+|----|------|------|
+| `covenant_dir` | path | 约定修订提案历史目录 |
+| `presence_dir` | path | presence 变更历史目录 |
+
+**示例**
+
+```toml
+[persona]
+name          = "Archer"
+soul_path     = "~/.archer/SOUL.md"
+memory_path   = "~/.archer/MEMORY.md"
+covenant_path = "~/.archer/COVENANT.md"
+presence_path = "~/.archer/PRESENCE.md"
+default_mode  = "coach"
+current_mode  = "coach"
+mode_auto     = true
+modes_dir     = "modes"
+
+[persona.modes.coach]
+name   = "Coach"
+prompt = "Current mode: coach. Drive toward action."
+```
+
+---
+
+## `[obsidian]` — 笔记库
+
+| 键 | 类型 | 默认值 | 说明 |
+|----|------|--------|------|
+| `vault_path` | path | — | Obsidian vault 根目录；空则跳过笔记检索/写入 |
+
+Desktop 聊天可通过 `obsidianMode` 控制注入强度：`off` / `summary` / `full`（见 API 契约）。
+
+**示例**
+
+```toml
+[obsidian]
+vault_path = "/Users/me/Obsidian/Vault"
+```
+
+---
+
+## `[mcp]` — Model Context Protocol
+
+| 键 | 类型 | 默认值 | 说明 |
+|----|------|--------|------|
+| `enabled` | bool | `false` | 是否启动 MCP 管理器 |
+| `schema_policy` | string | `"capability_aware"` | 工具 schema 注入策略 |
+| `recent_window_turns` | number | `10` | 最近 N 轮内用过的 MCP 服务仍视为 active |
+| `reconnect_attempts` | number | `2` | 远程 MCP 断线重连次数 |
+
+**`[[mcp.servers]]` 每项**
+
+| 键 | 类型 | 默认 | 说明 |
+|----|------|------|------|
+| `name` | string | 必填 | 服务 id，工具名前缀 |
+| `transport` | string | `"stdio"` | `stdio` 或 `streamable_http` |
+| `command` | string | — | stdio：启动命令 |
+| `args` | string[] | `[]` | stdio：命令参数 |
+| `env` | map | — | stdio：子进程环境 |
+| `url` | string | — | HTTP：MCP 端点 |
+| `auth_type` | string | `"none"` | `none` / `bearer` / `header` |
+| `auth_token_env` | string | — | 从环境变量读 token |
+| `auth_token` | string | — | 内联 token（不推荐提交） |
+| `auth_header` | string | `"Authorization"` | header 模式下的头名 |
+| `headers` | map | — | 额外 HTTP 头 |
+| `reconnect` | bool | `true` | 调用失败时是否重连 |
+| `timeout_s` | number | `45` | 连接/调用超时 |
+
+**示例**
+
+```toml
+[mcp]
+enabled = true
+reconnect_attempts = 2
+
+[[mcp.servers]]
+name    = "fetch"
+command = "uvx"
+args    = ["mcp-server-fetch"]
+
+[[mcp.servers]]
+name             = "remote"
+transport        = "streamable_http"
+url              = "https://mcp.example.com/mcp"
+auth_type        = "bearer"
+auth_token_env   = "ARCHER_MCP_TOKEN"
+```
+
+---
+
+## `[hooks]` — 生命周期钩子
+
+| 键 | 类型 | 默认值 | 说明 |
+|----|------|--------|------|
+| `enabled` | bool | `true` | 全局开关 |
+
+**`[[hooks.<EventName>]]` 每项**（Event：`PreToolUse` / `PostToolUse` / `PreCompact` / `PostCompact` / `SessionStart` / `SessionStop`）
+
+| 键 | 类型 | 说明 |
+|----|------|------|
+| `type` | string | `python` / `command` / `prompt`（prompt 预留） |
+| `handler` | string | python：`module:function` |
+| `command` | string | command：shell 命令，stdin 收 JSON context |
+| `matcher` | string | 可选，限制工具名 |
+
+Hook 返回 JSON：`continue`（false 阻断）、`tool_input`（PreToolUse 改参）、`message`（提示文案）。详见 `docs/p5-hooks-design.md`。
+
+**示例**
+
+```toml
+[hooks]
+enabled = true
+
+[[hooks.PreToolUse]]
+type    = "python"
+handler = "myhooks.audit:prepend_tag"
+matcher = "web_search"
+
+[[hooks.SessionStart]]
+type    = "command"
+command = "echo '{\"continue\": true}'"
+```
+
+插件安装的 `hooks.json` 会与 `[hooks]` 合并（见 `docs/p5-plugin-design.md`）。
+
+---
+
+## 其他常用段（简要）
+
+| 段 | 用途 |
+|----|------|
+| `[memory]` | `db_path`、`max_context_memories`（默认 5） |
+| `[context]` | `token_limit`（默认 1000000，压缩阈值） |
+| `[paths]` | `sessions_dir`、`artifacts_dir` |
+| `[ui]` | `stream`（CLI 流式输出） |
+| `[auth]` | Supabase / Magic Link：`supabase_url`、`supabase_key`、`access_token`、`archer_id` |
+| `[account]` | `name`（Desktop `/status` 展示） |
+| `[proactive]` | `enabled`（默认 true） |
+| `[critique]` | 自动自我批判频率与上限 |
+| `[security]` | `shell_risk_scoring`、`strong_confirm` |
+| `[tools]` | `max_rounds`（工具循环轮数） |
+| `[writing]` | 写作辅助相关开关 |
+
+---
+
+## 相关文档
+
+- 分层 Markdown 合并：`docs/p5-layered-config-design.md`
+- MCP 细节：`docs/p5-mcp-integration-design.md`
+- Hooks 细节：`docs/p5-hooks-design.md`
