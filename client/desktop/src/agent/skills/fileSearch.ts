@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, statSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import type { Skill } from './types'
@@ -43,8 +43,8 @@ function* walkFiles(root: string): Generator<string> {
 export const fileSearchSkill: Skill = {
   def: {
     name: 'file_search',
-    description: '在本地磁盘按文件名搜索（TS name 模式；content 模式 fallback Python）',
-    version: '1.0.0-ts-name',
+    description: '在本地磁盘搜索文件（TS：name + content 模式）',
+    version: '1.0.0-ts',
     author: 'archer-builtin',
     risk: 'low',
   },
@@ -63,7 +63,7 @@ export const fileSearchSkill: Skill = {
       return { ok: false, output: '', error: '错误：keyword 不能为空' }
     }
 
-    if (mode !== 'name') {
+    if (mode !== 'name' && mode !== 'content') {
       return { ok: false, output: '', error: '__fallback_python__' }
     }
 
@@ -83,21 +83,39 @@ export const fileSearchSkill: Skill = {
     }
 
     const needle = keyword.toLowerCase()
-    const suffix = ext ? `.${ext.toLowerCase()}` : ''
     const lines: string[] = []
 
-    for (const path of walkFiles(directoryPath)) {
-      const name = path.split(/[/\\]/).pop()?.toLowerCase() || ''
-      if (!name.includes(needle)) continue
-      if (suffix && !name.endsWith(suffix)) continue
-      lines.push(path)
-      if (lines.length >= limit) break
+    if (mode === 'name') {
+      const suffix = ext ? `.${ext.toLowerCase()}` : ''
+      for (const path of walkFiles(directoryPath)) {
+        const name = path.split(/[/\\]/).pop()?.toLowerCase() || ''
+        if (!name.includes(needle)) continue
+        if (suffix && !name.endsWith(suffix)) continue
+        lines.push(path)
+        if (lines.length >= limit) break
+      }
+    } else {
+      const allowedExts = ext
+        ? new Set([`.${ext.toLowerCase()}`])
+        : new Set(['.md', '.txt', '.py'])
+      for (const path of walkFiles(directoryPath)) {
+        const suffix = path.slice(path.lastIndexOf('.')).toLowerCase()
+        if (!allowedExts.has(suffix)) continue
+        try {
+          const text = readFileSync(path, 'utf8')
+          if (!text.toLowerCase().includes(needle)) continue
+          lines.push(path)
+          if (lines.length >= limit) break
+        } catch {
+          continue
+        }
+      }
     }
 
     if (lines.length === 0) {
       return {
         ok: true,
-        output: `未找到文件名包含「${keyword}」的文件。`,
+        output: `未找到${mode === 'name' ? '文件名' : '内容'}包含「${keyword}」的文件。`,
       }
     }
 

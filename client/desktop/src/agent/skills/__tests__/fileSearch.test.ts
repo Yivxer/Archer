@@ -10,9 +10,26 @@ describe('fileSearchSkill', () => {
     expect(fileSearchSkill.def.risk).toBe('low')
   })
 
-  it('falls back to python for content mode', async () => {
-    const result = await fileSearchSkill.run({ keyword: 'hello', mode: 'content' })
+  it('falls back to python for unknown mode', async () => {
+    const result = await fileSearchSkill.run({ keyword: 'hello', mode: 'regex' })
     expect(result.error).toBe('__fallback_python__')
+  })
+
+  it('finds files by content', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'archer-file-search-content-'))
+    writeFileSync(join(dir, 'alpha.txt'), 'needle in haystack')
+    writeFileSync(join(dir, 'beta.txt'), 'nothing here')
+
+    const result = await fileSearchSkill.run({
+      keyword: 'needle',
+      mode: 'content',
+      directory: dir,
+      limit: 10,
+    })
+
+    expect(result.ok).toBe(true)
+    expect(result.output).toContain('alpha.txt')
+    expect(result.output).not.toContain('beta.txt')
   })
 
   it('finds files by name', async () => {
