@@ -23,3 +23,45 @@ export function planWithStatus(plan: PlanEvent, status: PlanStatus): PlanEvent {
     createdAt: new Date().toISOString(),
   }
 }
+
+export type PlanChildJobSpec = {
+  title: string
+  kind: string
+  prompt: string
+  autoStart?: boolean
+  timeoutSeconds?: number
+}
+
+export function buildPlanCoordinatorPrompt(plan: PlanEvent): string {
+  const context = plan.prompt?.trim() || plan.detail?.trim() || plan.title
+  const stepLines = plan.steps.map(
+    (step) => `${step.id}. ${step.action} (tool=${step.tool}${step.requiresApproval ? ', 需确认' : ''})`,
+  )
+  return [
+    context,
+    '',
+    '[计划协调任务]',
+    plan.title,
+    ...stepLines,
+    '',
+    '这是父任务：子任务会按步骤并行/顺序执行。你只需在全部子任务完成后汇总结果，不要在此重复执行各步骤。',
+  ].join('\n')
+}
+
+export function buildPlanChildJobSpecs(plan: PlanEvent): PlanChildJobSpec[] {
+  const context = plan.prompt?.trim() || plan.detail?.trim() || plan.title
+  return plan.steps.map((step) => ({
+    title: `${plan.title || '任务计划'} · 步骤 ${step.id}`,
+    kind: step.requiresApproval ? 'tool' : 'analysis',
+    prompt: [
+      `原始请求：${context}`,
+      '',
+      `当前步骤 ${step.id}：${step.action}`,
+      `预期工具：${step.tool}${step.requiresApproval ? '（需用户确认后再执行副作用）' : ''}`,
+      '',
+      '只完成这一步；完成后简要汇报结果，不要跳过后续步骤声称全部完成。',
+    ].join('\n'),
+    autoStart: !step.requiresApproval,
+    timeoutSeconds: step.requiresApproval ? 900 : 600,
+  }))
+}

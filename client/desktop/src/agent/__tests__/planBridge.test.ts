@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildPlanExecutionPrompt, planWithStatus } from '../planBridge'
+import { buildPlanChildJobSpecs, buildPlanCoordinatorPrompt, buildPlanExecutionPrompt, planWithStatus } from '../planBridge'
 import type { PlanEvent } from '../contracts'
 
 const samplePlan: PlanEvent = {
@@ -40,5 +40,21 @@ describe('plan bridge', () => {
 
     expect(accepted.id).toBe('plan-1')
     expect(accepted.status).toBe('accepted')
+  })
+
+  it('builds child job specs with approval gating', () => {
+    const specs = buildPlanChildJobSpecs(samplePlan)
+
+    expect(specs).toHaveLength(2)
+    expect(specs[0]?.autoStart).toBe(true)
+    expect(specs[1]?.autoStart).toBe(false)
+    expect(specs[1]?.prompt).toContain('write_obsidian')
+  })
+
+  it('builds coordinator prompt for parent job', () => {
+    const prompt = buildPlanCoordinatorPrompt(samplePlan)
+
+    expect(prompt).toContain('[计划协调任务]')
+    expect(prompt).toContain('write_obsidian')
   })
 })

@@ -1,11 +1,11 @@
 import React from 'react'
 import { ArrowUp, Check, ChevronDown, Copy, CornerDownLeft, Crop, Edit3, FileText, Github, Infinity, Loader2, Mic, Monitor, Paperclip, RotateCcw, Send, Terminal, UserRoundCog, X } from 'lucide-react'
-import { appendLocalSession, approveJobToolEvent, cancelBackgroundJobEvent, createBackgroundJobEvent, fetchBackgroundJob, pollBackgroundJobEvents, retryBackgroundJobEvent, saveLocalSession, streamLocalChat, submitToolApprovalEvent, switchLocalMode } from '../adapters/localArcher'
+import { appendLocalSession, approveJobToolEvent, cancelBackgroundJobEvent, createBackgroundJobEvent, fetchBackgroundJob, pollBackgroundJobEvents, retryBackgroundJobEvent, saveLocalSession, spawnChildJobs, streamLocalChat, submitToolApprovalEvent, switchLocalMode } from '../adapters/localArcher'
 import { pickChatGreeting } from '../lib/chatGreetings'
 import { extendedConversationModes, PERSONA_PRESETS, personaIdFromMode, tokenUsageSummary } from '../lib/conversationPersona'
 import type { ArcherAdapter, ChatMessage, FileRef, MemoryContextMode, ObsidianContextMode, SessionDetail, ToolEvent } from '../types'
 import { ArcherRing, MarkdownMessage, ThinkingDots } from '../components/common'
-import { createInitialRuntimeState, createPersistentEventLog, reduceRuntimeEvent, routeTaskForRuntime, jobSnapshotToAgentEvent, buildPlanExecutionPrompt, planWithStatus } from '../../../agent'
+import { createInitialRuntimeState, createPersistentEventLog, reduceRuntimeEvent, routeTaskForRuntime, jobSnapshotToAgentEvent, buildPlanChildJobSpecs, buildPlanCoordinatorPrompt, buildPlanExecutionPrompt, planWithStatus } from '../../../agent'
 import type { AgentEvent, EventLog, JobEvent, OrchestrationEvent, PlanEvent } from '../../../agent'
 
 const CHAT_STARTERS = [
@@ -481,6 +481,54 @@ export function ChatPage({
       }
     } finally {
       if (backgroundJobAbortRef.current === controller) backgroundJobAbortRef.current = null
+      setIsBackgrounding(false)
+    }
+  }
+
+  async function executePlanAsChildJobs(plan: PlanEvent) {
+    if (plan.status !== 'proposed' || isBackgrounding || data.status.adapter !== 'local') return
+    const childSpecs = buildPlanChildJobSpecs(plan)
+    if (!childSpecs.length) return
+
+    recordAgentEvent(planWithStatus(plan, 'accepted'))
+    const assistantId = messages.length + 1
+    const pendingAssistant: ChatMessage = {
+      id: assistantId,
+      role: 'assistant',
+      text: `已拆分为 ${childSpecs.length} 个子任务，可在「任务」面板查看进度。`,
+    }
+    setMessages((current) => [...current, pendingAssistant])
+    setChatError('')
+    setSaveState('')
+    setToolNotice('')
+    setIsBackgrounding(true)
+
+    try {
+      const { result, event } = await createBackgroundJobEvent(runtimeSessionId, {
+        title: plan.title || '任务计划',
+        kind: 'plan',
+        prompt: buildPlanCoordinatorPrompt(plan),
+        autoStart: false,
+        timeoutSeconds: 600,
+      })
+      recordAgentEvent(event)
+      const spawn = await spawnChildJobs(result.job.id, childSpecs)
+      recordAgentEvent(jobSnapshotToAgentEvent(runtimeSessionId, result.job))
+      const notice = spawn.spawned > 0
+        ? `已创建 ${spawn.spawned} 个子任务（父任务 ${result.job.id}）。需确认的步骤请在任务面板批准。`
+        : '未能创建子任务，请检查计划步骤。'
+      setToolNotice(notice)
+      setMessages((current) => current.map((message) =>
+        message.id === assistantId ? { ...message, text: notice } : message,
+      ))
+      await onRefresh?.()
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '拆分子任务失败'
+      setChatError(message)
+      setMessages((current) => current.map((item) =>
+        item.id === assistantId ? { ...item, text: `拆分子任务失败：${message}` } : item,
+      ))
+    } finally {
       setIsBackgrounding(false)
     }
   }
@@ -1445,6 +1493,7 @@ export function ChatPage({
             plan={plan}
             busy={isBackgrounding}
             onAccept={() => void executeConfirmedPlan(plan)}
+            onSplit={plan.steps.length > 1 ? () => void executePlanAsChildJobs(plan) : undefined}
             onDismiss={() => dismissPlan(plan)}
           />
         ))}
@@ -1576,11 +1625,13 @@ function PlanEventCard({
   plan,
   busy = false,
   onAccept,
+  onSplit,
   onDismiss,
 }: {
   plan: PlanEvent
   busy?: boolean
   onAccept?: () => void
+  onSplit?: () => void
   onDismiss?: () => void
 }) {
   const isProposed = plan.status === 'proposed'
@@ -1605,8 +1656,13 @@ function PlanEventCard({
           <button className="quiet-button" type="button" disabled={busy} onClick={onDismiss}>
             忽略
           </button>
+          {onSplit && (
+            <button className="quiet-button" type="button" disabled={busy} onClick={onSplit}>
+              拆分子任务
+            </button>
+          )}
           <button className="quiet-button strong" type="button" disabled={busy} onClick={onAccept}>
-            按计划执行
+            {onSplit ? '整包执行' : '按计划执行'}
           </button>
         </div>
       )}

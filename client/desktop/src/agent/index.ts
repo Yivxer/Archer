@@ -3,7 +3,13 @@ export type { ApprovalQueue } from './approvalQueue'
 export { agentEventSchema, parseAgentEvent } from './contractSchemas'
 export { createEventLog, createPersistentEventLog } from './eventLog'
 export type { EventLog, EventLogStorage } from './eventLog'
-export { buildPlanExecutionPrompt, planWithStatus } from './planBridge'
+export {
+  buildPlanChildJobSpecs,
+  buildPlanCoordinatorPrompt,
+  buildPlanExecutionPrompt,
+  planWithStatus,
+} from './planBridge'
+export type { PlanChildJobSpec } from './planBridge'
 export { jobSnapshotToAgentEvent } from './jobBridge'
 export type { RuntimeJobSnapshot } from './jobBridge'
 export { createJobRunner } from './jobRunner'
