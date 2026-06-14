@@ -69,12 +69,25 @@ def estimate_history_tokens(history: list[dict]) -> int:
         chars += len(str(msg.get("role", ""))) + 4
     return max(1, chars // CHARS_PER_TOKEN_ESTIMATE)
 
-def compress(history: list[dict]) -> list[dict]:
+def compress(history: list[dict], *, cfg: dict | None = None) -> list[dict]:
     """
     压缩历史，返回新的 history 列表。
     结构：[system 摘要消息, ...最近 KEEP_RECENT 条]
     """
     if len(history) <= KEEP_RECENT:
+        return history
+
+    from core.hooks import HookContext, run_hooks
+
+    pre = run_hooks(
+        "PreCompact",
+        HookContext(
+            event="PreCompact",
+            metadata={"kind": "chat_history", "message_count": len(history)},
+        ),
+        cfg=cfg,
+    )
+    if not pre.continue_:
         return history
 
     old    = history[:-KEEP_RECENT]
@@ -87,7 +100,16 @@ def compress(history: list[dict]) -> list[dict]:
         "role": "system",
         "content": f"[对话历史摘要｜原始 {total_rounds} 轮，已压缩]\n\n{summary}",
     }
-    return [compressed_msg, *recent]
+    result = [compressed_msg, *recent]
+    run_hooks(
+        "PostCompact",
+        HookContext(
+            event="PostCompact",
+            metadata={"kind": "chat_history", "message_count": len(result)},
+        ),
+        cfg=cfg,
+    )
+    return result
 
 def _summarize(history: list[dict]) -> str:
     turns = "\n".join(

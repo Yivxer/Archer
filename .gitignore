@@ -23,6 +23,8 @@ SOUL.md
 MEMORY.md
 COVENANT.md
 PRESENCE.md
+*.local.md
+ARCHER.local.md
 
 # Runtime data
 *.db
@@ -30,10 +32,12 @@ PRESENCE.md
 *.db-wal
 learned_routes.json
 memory/background_jobs.json
+memory/schedules.json
 
 # Session & artifact storage
 sessions/
 memory/sessions/
+plugins/
 .artifacts/
 artifacts/
 logs/

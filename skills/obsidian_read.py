@@ -8,6 +8,14 @@ SKILL = {
     "author": "archer-builtin",
 }
 
+__meta__ = {
+    "name": "obsidian_read",
+    "description": "读取 Obsidian vault 笔记正文",
+    "keywords": ["obsidian", "笔记", "vault", "读笔记", "SOUL.md", "MEMORY.md"],
+    "risk": "low",
+    "auto_trigger": True,
+}
+
 def _vault() -> Path:
     cfg_path = Path(__file__).parent.parent / "archer.toml"
     with open(cfg_path, "rb") as f:

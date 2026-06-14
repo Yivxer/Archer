@@ -1,5 +1,6 @@
 """终端全局可变状态壳。"""
 from __future__ import annotations
+
 import threading
 
 
@@ -14,6 +15,12 @@ class State:
         self.mcp_last_used_turn: int = -999
         self.extract_thread: threading.Thread | None = None
         self.dsml_intercepted: bool = False
+
+    @property
+    def session_token_usage(self) -> dict:
+        from core.token_usage import get_session_usage
+
+        return get_session_usage()
 
 
 # 模块级单例（兼容旧代码逐步迁移）

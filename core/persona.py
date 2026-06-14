@@ -62,11 +62,20 @@ temperature 按模式调参:倾听/见证偏低,作家可略高,心理分析保�
 """
 
 
-def build_core_persona() -> str:
-    return "\n\n".join([
+def build_core_persona(*, cfg: dict | None = None) -> str:
+    base = "\n\n".join([
         SOUL_COMPANION_IDENTITY,
         CONVERSATION_RHYTHM_RULES,
         DEFAULT_MODE_BEHAVIOR,
         SKILL_SYSTEM_DOWNRANKING,
         MODEL_ADAPTATION_NOTES,
     ])
+    if not cfg:
+        return base
+
+    from core.layered_config import load_project_persona_layers, merge_layered_markdown
+
+    persona_layers = load_project_persona_layers(cfg=cfg)
+    if persona_layers:
+        return merge_layered_markdown(base, persona_layers, label="ARCHER.persona")
+    return base

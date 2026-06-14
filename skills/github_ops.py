@@ -11,6 +11,14 @@ SKILL = {
     "default_timeout": 20,
 }
 
+__meta__ = {
+    "name": "github_ops",
+    "description": "通过 gh CLI 操作 GitHub 仓库与 issue",
+    "keywords": ["github", "issue", "pull request", "pr", "仓库", "gh "],
+    "risk": "high",
+    "auto_trigger": True,
+}
+
 def schema() -> dict:
     return {
         "type": "function",

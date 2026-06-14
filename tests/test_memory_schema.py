@@ -27,7 +27,7 @@ def test_new_columns_exist():
         conn = sqlite3.connect(store.DB_PATH)
         cols = {row[1] for row in conn.execute("PRAGMA table_info(memories)")}
         conn.close()
-    for col in ("scope", "confidence", "last_used_at", "valid_until", "depth"):
+    for col in ("scope", "confidence", "last_used_at", "valid_until", "depth", "block_type", "label"):
         assert col in cols, f"缺少列: {col}"
 
 

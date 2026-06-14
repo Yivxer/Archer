@@ -1339,6 +1339,67 @@ class TestDesktopApiAuth:
         archer_api.DESKTOP_API_TOKEN = ""
 
 
+def test_schedules_api_list_add_disable_remove(tmp_path, monkeypatch):
+    from terminal.api import _routes as routes
+    import memory.store as store
+    import core.scheduler as sched
+
+    db = tmp_path / "archer.db"
+    conn = sqlite3.connect(db)
+    conn.execute(
+        """
+        CREATE TABLE scheduled_tasks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            skill_name TEXT NOT NULL,
+            label TEXT DEFAULT '',
+            interval_h INTEGER NOT NULL,
+            args_json TEXT DEFAULT '{}',
+            enabled INTEGER DEFAULT 1,
+            last_run_at TEXT,
+            next_run_at TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            catchup TEXT DEFAULT 'latest'
+        )
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    monkeypatch.setattr(store, "DB_PATH", db)
+    monkeypatch.setattr(sched, "DB_PATH", db)
+    monkeypatch.setattr(sched, "SCHEDULES_JSON_PATH", tmp_path / "schedules.json")
+
+    class FakeRegistry:
+        def __contains__(self, name):
+            return name == "weather"
+
+    monkeypatch.setattr("skills.loader.register_all_skills", lambda **kw: FakeRegistry())
+
+    list_status, list_payload = routes.payload_get("/schedules")
+    assert list_status == 200
+    assert list_payload["tasks"] == []
+
+    add_status, add_payload = routes.payload_post("/schedules", {
+        "skillName": "weather",
+        "interval": "daily",
+        "label": "morning",
+    })
+    assert add_status == 200
+    task_id = add_payload["task"]["id"]
+
+    _, list_payload = routes.payload_get("/schedules")
+    assert len(list_payload["tasks"]) == 1
+    assert list_payload["tasks"][0]["skillName"] == "weather"
+
+    disable_status, disable_payload = routes.payload_post(f"/schedules/{task_id}/disable", {})
+    assert disable_status == 200
+    assert disable_payload["task"]["enabled"] is False
+
+    remove_status, remove_payload = routes.payload_post(f"/schedules/{task_id}/remove", {})
+    assert remove_status == 200
+    assert remove_payload["ok"] is True
+
+
 if __name__ == "__main__":
     import pytest
     pytest.main([__file__, "-v"])

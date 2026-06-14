@@ -5,14 +5,12 @@ from openai import APIConnectionError, APITimeoutError, OpenAI
 from openai.types.chat import ChatCompletionMessage
 from typing import Generator
 
-_cfg:    dict | None = None
+from core.observability import trace_span
+from core.token_usage import get_last_call_usage, get_session_usage, record_call_usage, reset_session_usage
+
+_cfg: dict | None = None
 _client: OpenAI | None = None
 _client_key: tuple[str, str] | None = None
-
-# 最近一次 API 调用的 token 用量
-_last_usage: dict[str, int] = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
-# 本次会话累计
-_session_tokens: int = 0
 
 # 配置热加载
 _CONFIG_PATH = Path(__file__).parent.parent / "archer.toml"
@@ -123,77 +121,89 @@ def stream_chat(
     *,
     track_usage: bool = True,
 ) -> Generator[str, None, None]:
-    """流式输出，无 function calling。同时捕获 token 用量到 _last_usage。"""
-    global _last_usage, _session_tokens
+    """流式输出，无 function calling。同时捕获 token 用量到 session state。"""
     client, cfg = _get_client()
     m = model or cfg["api"]["model"]
     base_url = cfg["api"]["base_url"]
 
-    try:
-        response = client.chat.completions.create(
-            model=m,
-            messages=messages,
-            stream=True,
-            stream_options={"include_usage": True},
-        )
-    except TypeError:
-        # 部分旧版 SDK 或 provider 不支持 stream_options
-        response = client.chat.completions.create(
-            model=m,
-            messages=messages,
-            stream=True,
-        )
-    except (APIConnectionError, APITimeoutError) as e:
-        raise _connection_hint(base_url, e) from e
+    with trace_span("llm.stream_chat", model=m, op="stream") as span:
+        try:
+            response = client.chat.completions.create(
+                model=m,
+                messages=messages,
+                stream=True,
+                stream_options={"include_usage": True},
+            )
+        except TypeError:
+            # 部分旧版 SDK 或 provider 不支持 stream_options
+            response = client.chat.completions.create(
+                model=m,
+                messages=messages,
+                stream=True,
+            )
+        except (APIConnectionError, APITimeoutError) as e:
+            raise _connection_hint(base_url, e) from e
 
-    call_usage: dict[str, int] | None = None
+        call_usage: dict[str, int] | None = None
 
-    for chunk in response:
-        # usage 只在最后一个 chunk 里出现（OpenAI stream_options 规范）
-        if hasattr(chunk, "usage") and chunk.usage and chunk.usage.total_tokens:
-            call_usage = {
-                "prompt_tokens":     chunk.usage.prompt_tokens or 0,
-                "completion_tokens": chunk.usage.completion_tokens or 0,
-                "total_tokens":      chunk.usage.total_tokens or 0,
-            }
+        for chunk in response:
+            # usage 只在最后一个 chunk 里出现（OpenAI stream_options 规范）
+            if hasattr(chunk, "usage") and chunk.usage and chunk.usage.total_tokens:
+                call_usage = {
+                    "prompt_tokens":     chunk.usage.prompt_tokens or 0,
+                    "completion_tokens": chunk.usage.completion_tokens or 0,
+                    "total_tokens":      chunk.usage.total_tokens or 0,
+                }
 
-        if chunk.choices and chunk.choices[0].delta.content:
-            yield chunk.choices[0].delta.content
+            if chunk.choices and chunk.choices[0].delta.content:
+                yield chunk.choices[0].delta.content
 
-    # generator 耗尽后才更新全局，避免多 chunk 重复累加
-    if track_usage and call_usage:
-        _last_usage = call_usage
-        _session_tokens += call_usage["total_tokens"]
+        # generator 耗尽后才更新全局，避免多 chunk 重复累加
+        if track_usage and call_usage:
+            record_call_usage(**call_usage)
+            span.update(call_usage)
 
 
 def get_last_usage() -> dict[str, int]:
     """返回最近一次调用的 token 用量（prompt / completion / total）。"""
-    return _last_usage.copy()
+    return get_last_call_usage()
 
 
 def get_session_tokens() -> int:
     """返回本次会话累计 token 数。"""
-    return _session_tokens
+    usage = get_session_usage()
+    return int(usage["total_tokens"])
+
+
+def reset_session_tokens() -> None:
+    """新 CLI 会话启动时重置 token 计数。"""
+    reset_session_usage()
 
 
 def call_with_tools(messages: list[dict], tools: list[dict], model: str = "") -> ChatCompletionMessage:
     """非流式调用，携带 tools，用于 function calling 第一步。"""
-    global _session_tokens
     client, cfg = _get_client()
     m = model or cfg["api"]["model"]
-    try:
-        response = client.chat.completions.create(
-            model=m,
-            messages=messages,
-            tools=tools,
-            tool_choice="auto",
-            stream=False,
-        )
-    except (APIConnectionError, APITimeoutError) as e:
-        raise _connection_hint(cfg["api"]["base_url"], e) from e
-    if getattr(response, "usage", None) and response.usage.total_tokens:
-        _session_tokens += response.usage.total_tokens
-    return response.choices[0].message
+    with trace_span("llm.call_with_tools", model=m, tool_count=len(tools)) as span:
+        try:
+            response = client.chat.completions.create(
+                model=m,
+                messages=messages,
+                tools=tools,
+                tool_choice="auto",
+                stream=False,
+            )
+        except (APIConnectionError, APITimeoutError) as e:
+            raise _connection_hint(cfg["api"]["base_url"], e) from e
+        if getattr(response, "usage", None) and response.usage.total_tokens:
+            usage = {
+                "prompt_tokens": response.usage.prompt_tokens or 0,
+                "completion_tokens": response.usage.completion_tokens or 0,
+                "total_tokens": response.usage.total_tokens or 0,
+            }
+            record_call_usage(**usage)
+            span.update(usage)
+        return response.choices[0].message
 
 
 def load_config() -> dict:

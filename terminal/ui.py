@@ -10,7 +10,7 @@ from rich.spinner import Spinner
 from rich.table import Table
 from rich.text import Text as _RichText
 
-from core.llm import get_session_tokens
+from core.llm import get_last_usage, get_session_tokens
 from memory.store import (
     save,
     list_all,
@@ -47,6 +47,8 @@ def stage_memories(mems: list[dict], source: str = "auto", silent: bool = False)
             source=source,
             confidence=m.get("confidence", 0.7),
             depth=m.get("depth", 3),
+            block_type=m.get("block_type"),
+            label=m.get("label"),
         )
         count += 1
     if not silent:
@@ -199,7 +201,7 @@ def _help(show_all: bool = False):
     _row("/chronicle [天数|history]",  "生成主题叙事（默认 14 天）")
     _row("/project",                   "列出 / 切换 / 归档项目")
     _row("/work list/new/start/done",  "任务管理")
-    _row("/cron list/add/remove",      "定时任务管理")
+    _row("/schedule list/add/remove",  "定时任务管理")
     _row("/exit",                      "退出并保存")
 
     if show_all:
@@ -216,7 +218,7 @@ def _help(show_all: bool = False):
         _row("/soul accept/reject/view",   "接受/拒绝/查看 SOUL 提议")
         _row("/skill suggest [--apply]",   "分析技能缺口")
         _row("/login",                     "邮箱 Magic Link 登录")
-        _row("/cron add/remove/run",       "定时任务详情")
+        _row("/schedule add/remove/run",   "定时任务详情")
         _row("/project new/log/status",    "项目详情操作")
         _row("/portrait [view]",            "生成 / 查看自我画像")
         _row("/chronicle [天数|history]",   "生成 / 查看主题叙事")
@@ -243,10 +245,18 @@ def _status(session, skills: dict, cfg: dict, active_project_id: int | None = No
     art_size      = fmt_size(dir_size())
     used   = _fmt_tokens(get_session_tokens())
     limit  = _fmt_tokens(_token_limit(cfg))
+    last_usage = get_last_usage()
+    last_total = last_usage.get("total_tokens", 0)
     console.print(f"  [#4dd9d4 bold]Archer {_VERSION}[/#4dd9d4 bold]")
     console.print(f"  模型        {model}")
     console.print(f"  模式        [dim]{mode_name}[/dim]")
     console.print(f"  上下文      {used} / {limit}")
+    if last_total:
+        console.print(
+            f"  上一轮      [dim]{_fmt_tokens(last_total)}"
+            f"（prompt {_fmt_tokens(last_usage.get('prompt_tokens', 0))}"
+            f" + completion {_fmt_tokens(last_usage.get('completion_tokens', 0))}）[/dim]"
+        )
     console.print(f"  技能        {len(skills)} 个：{', '.join(sorted(skills.keys()))}")
     soul_count = count_soul_proposals()
     console.print(f"  记忆库      {mem_count} 条" + (f"  [dim]（{pending_count} 条待确认）[/dim]" if pending_count else ""))

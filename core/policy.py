@@ -412,6 +412,75 @@ def check(skill_name: str, args: dict, skills: dict, cfg: dict | None = None) ->
     return PolicyResult(Decision.ALLOW, risk=risk)
 
 
+# ── P5.4: 子任务工具隔离 ───────────────────────────────────────────────────────
+
+SUBTASK_ALLOW_LIST = frozenset({
+    "web_search",
+    "web_fetch",
+    "file_ops",
+    "file_search",
+    "obsidian_read",
+    "obsidian_search",
+    "code_search",
+    "pdf_reader",
+    "rss_reader",
+    "weather",
+})
+
+SUBTASK_DENY_LIST = frozenset({
+    "shell",
+    "run_shell",
+    "github_ops",
+    "obsidian_write",
+    "hugo_blog",
+    "npm_run",
+    "code_edit",
+    "installer",
+    "browser_automation",
+    "image_generator",
+    "workflow_automation",
+    "memory_save",
+    "process_manager",
+    "frontend_dev",
+    "market_research",
+    "video_script",
+    "code_review",
+    "soul_evolution",
+    "weekly_review",
+    "humanizer",
+    "summarize",
+})
+
+
+def check_subtask(
+    skill_name: str,
+    args: dict | None = None,
+    skills: dict | None = None,
+    cfg: dict | None = None,
+) -> PolicyResult:
+    """Policy gate for isolated subtasks: allow-list + deny side effects."""
+    args = args or {}
+    if skill_name in SUBTASK_DENY_LIST:
+        return PolicyResult(
+            Decision.DENY,
+            reason=f"子任务隔离：禁用 {skill_name}",
+            risk="high",
+        )
+    if skill_name not in SUBTASK_ALLOW_LIST:
+        return PolicyResult(
+            Decision.DENY,
+            reason=f"子任务隔离：未授权 {skill_name}",
+            risk="medium",
+        )
+    if skill_name == "file_ops" and args.get("action") in ("write", "append"):
+        return PolicyResult(
+            Decision.DENY,
+            reason="子任务隔离：禁止 file_ops 写入",
+            risk="high",
+        )
+    return check(skill_name, args, skills or {}, cfg=cfg)
+
+
 def check_shell_command(command: str) -> tuple[bool, str]:
     """向后兼容接口：检查 shell 命令是否命中 critical 黑名单，返回 (allowed, reason)。"""
     risk_level, reason = score_shell_risk(command)

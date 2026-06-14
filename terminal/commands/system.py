@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from .registry import register
 from rich.console import Console
+from rich.table import Table
 from core.scheduler import (
     add_task, remove_task as remove_cron_task, set_enabled as cron_set_enabled,
     list_tasks, run_due_tasks, run_task_by_id, parse_interval, fmt_interval,
@@ -95,7 +96,7 @@ def _handle_cron(parts: list[str], skills: dict):
         case "list" | "ls" | "":
             tasks = list_tasks()
             if not tasks:
-                console.print("[dim]没有定时任务。用 /cron add <技能> <daily|weekly|Nh> [标签] 创建。[/dim]")
+                console.print("[dim]没有定时任务。用 /schedule add <技能> <daily|weekly|Nh> [标签] 创建。[/dim]")
                 return
             t = Table(show_header=True, header_style="bold cyan", box=None)
             t.add_column("ID",   style="dim", width=4)
@@ -118,7 +119,7 @@ def _handle_cron(parts: list[str], skills: dict):
 
         case "add":
             if len(rest) < 2:
-                console.print("[yellow]用法：/cron add <技能名> <daily|weekly|Nh> [--skip] [标签][/yellow]")
+                console.print("[yellow]用法：/schedule add <技能名> <daily|weekly|Nh> [--skip] [标签][/yellow]")
                 return
             skill_name    = rest[0]
             interval_spec = rest[1]
@@ -137,12 +138,12 @@ def _handle_cron(parts: list[str], skills: dict):
             tid = add_task(skill_name, interval_spec, label, catchup=catchup)
             strategy_hint = "（错过时跳过）" if catchup == "skip" else "（错过时补跑一次）"
             console.print(f"[green]已添加定时任务（ID {tid}）：{skill_name}，{fmt_interval(h)}执行一次{strategy_hint}。[/green]")
-            console.print(f"[dim]下次启动 Archer 时自动执行，或使用 /cron run {tid} 立即测试。[/dim]")
+            console.print(f"[dim]下次启动 Archer 时自动执行，或使用 /schedule run {tid} 立即测试。[/dim]")
 
         case "remove" | "rm" | "delete":
             ident = rest[0] if rest else ""
             if not ident.isdigit():
-                console.print("[yellow]用法：/cron remove <ID>[/yellow]")
+                console.print("[yellow]用法：/schedule remove <ID>[/yellow]")
                 return
             if remove_cron_task(int(ident)):
                 console.print(f"[dim]定时任务 {ident} 已删除。[/dim]")
@@ -152,7 +153,7 @@ def _handle_cron(parts: list[str], skills: dict):
         case "enable":
             ident = rest[0] if rest else ""
             if not ident.isdigit():
-                console.print("[yellow]用法：/cron enable <ID>[/yellow]")
+                console.print("[yellow]用法：/schedule enable <ID>[/yellow]")
                 return
             if cron_set_enabled(int(ident), True):
                 console.print(f"[dim]任务 {ident} 已启用。[/dim]")
@@ -162,7 +163,7 @@ def _handle_cron(parts: list[str], skills: dict):
         case "disable":
             ident = rest[0] if rest else ""
             if not ident.isdigit():
-                console.print("[yellow]用法：/cron disable <ID>[/yellow]")
+                console.print("[yellow]用法：/schedule disable <ID>[/yellow]")
                 return
             if cron_set_enabled(int(ident), False):
                 console.print(f"[dim]任务 {ident} 已禁用。[/dim]")
@@ -172,7 +173,7 @@ def _handle_cron(parts: list[str], skills: dict):
         case "run":
             ident = rest[0] if rest else ""
             if not ident.isdigit():
-                console.print("[yellow]用法：/cron run <ID>[/yellow]")
+                console.print("[yellow]用法：/schedule run <ID>[/yellow]")
                 return
             tid = int(ident)
             tr = run_task_by_id(tid, skills)

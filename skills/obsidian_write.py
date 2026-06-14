@@ -11,6 +11,14 @@ SKILL = {
     "requires_confirmation": True,
 }
 
+__meta__ = {
+    "name": "obsidian_write",
+    "description": "写入或追加 Obsidian 笔记",
+    "keywords": ["写入笔记", "obsidian", "记录到", "写回", "vault"],
+    "risk": "medium",
+    "auto_trigger": True,
+}
+
 def _vault() -> Path:
     cfg_path = Path(__file__).parent.parent / "archer.toml"
     with open(cfg_path, "rb") as f:

@@ -8,6 +8,14 @@ SKILL = {
     "author": "archer-builtin",
 }
 
+__meta__ = {
+    "name": "file_search",
+    "description": "按文件名或内容搜索本地文件",
+    "keywords": ["找文件", "搜索文件", "grep", "文件名", "内容搜索"],
+    "risk": "low",
+    "auto_trigger": True,
+}
+
 def schema() -> dict:
     return {
         "type": "function",

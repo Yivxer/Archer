@@ -10,6 +10,14 @@ SKILL = {
     "author": "archer-builtin",
 }
 
+__meta__ = {
+    "name": "web_fetch",
+    "description": "抓取 URL 网页正文为纯文本",
+    "keywords": ["网页", "网址", "http", "https", "链接", "抓取"],
+    "risk": "low",
+    "auto_trigger": True,
+}
+
 def schema() -> dict:
     return {
         "type": "function",

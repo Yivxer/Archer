@@ -26,6 +26,14 @@ SKILL = {
     "default_timeout": 15,
 }
 
+__meta__ = {
+    "name": "web_search",
+    "description": "搜索互联网文档、报错与时效信息",
+    "keywords": ["搜索", "搜一下", "查一下", "怎么写", "报错", "官方文档", "how to"],
+    "risk": "low",
+    "auto_trigger": True,
+}
+
 
 def schema() -> dict:
     return {

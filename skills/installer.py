@@ -164,6 +164,25 @@ def remove(name: str):
     path.unlink()
 
 
+def install_plugin_bundle(source: str, *, force: bool = False) -> dict:
+    """Install an .archer-plugin bundle directory."""
+    from core.plugin import install_plugin
+
+    return install_plugin(source, force=force)
+
+
+def list_plugins() -> list[dict]:
+    from core.plugin import list_installed
+
+    return list_installed()
+
+
+def remove_plugin_bundle(name: str) -> None:
+    from core.plugin import remove_plugin
+
+    remove_plugin(name)
+
+
 def schema() -> dict:
     return {
         "type": "function",

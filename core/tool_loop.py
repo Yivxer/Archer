@@ -7,9 +7,11 @@ from rich.live import Live
 from rich.spinner import Spinner
 from rich.text import Text
 
+from core.hooks import HookContext, run_hooks
 from core.input import confirm_select
 from core.llm import call_with_tools
-from core.policy import Decision, check as policy_check
+from core.observability import trace_span
+from core.policy import Decision, check as policy_check, check_subtask
 from core.tool_runtime import invoke as runtime_invoke
 from skills.loader import get_tools
 
@@ -119,7 +121,11 @@ def run_with_tools(
 
             console.print(f"[dim]→ {fn_name}{_fmt_args(fn_args)}[/dim]")
 
-            pr = policy_check(fn_name, fn_args, skills, cfg=cfg)
+            pr = (
+                check_subtask(fn_name, fn_args, skills, cfg=cfg)
+                if cfg and cfg.get("subtask_mode")
+                else policy_check(fn_name, fn_args, skills, cfg=cfg)
+            )
             if fn_name not in skills:
                 _gap_record(fn_name, "missing", session_id=session_id)
 
@@ -184,7 +190,30 @@ def run_with_tools(
                     })
                     continue
 
-            tr = runtime_invoke(fn_name, fn_args, skills)
+            hook_ctx = HookContext(
+                event="PreToolUse",
+                tool_name=fn_name,
+                tool_args=dict(fn_args),
+                session_id=session_id,
+                metadata={"user_input": user_input},
+            )
+            pre_hook = run_hooks("PreToolUse", hook_ctx, cfg=cfg)
+            if not pre_hook.continue_:
+                console.print(f"[yellow]  ✗ [Hook] {pre_hook.message or 'blocked'}[/yellow]")
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tc.id,
+                    "content": f"[Hook 阻断] {pre_hook.message or 'blocked by hook'}",
+                })
+                continue
+            if pre_hook.tool_args is not None:
+                fn_args = pre_hook.tool_args
+
+            with trace_span("tool.invoke", tool_name=fn_name) as span:
+                tr = runtime_invoke(fn_name, fn_args, skills)
+                span["ok"] = tr.ok
+                if tr.meta.get("duration_ms") is not None:
+                    span["tool_duration_ms"] = tr.meta["duration_ms"]
             if not tr.ok:
                 console.print(f"[yellow]  ✗ {tr.summary}[/yellow]")
                 _gap_record(fn_name, "failed", session_id=session_id)
@@ -196,6 +225,21 @@ def run_with_tools(
                 if tr.truncated:
                     console.print(f"[dim]  ↳ {tr.summary}[/dim]")
                 _maybe_mutter(console, "ok", duration_ms=tr.meta.get("duration_ms", 0))
+
+            post_hook = run_hooks(
+                "PostToolUse",
+                HookContext(
+                    event="PostToolUse",
+                    tool_name=fn_name,
+                    tool_args=dict(fn_args),
+                    tool_output=tr.to_message_content(),
+                    session_id=session_id,
+                    metadata={"ok": tr.ok},
+                ),
+                cfg=cfg,
+            )
+            if post_hook.errors and tr.ok:
+                console.print(f"[dim]  hook warnings: {'; '.join(post_hook.errors)}[/dim]")
 
             messages.append({
                 "role": "tool",

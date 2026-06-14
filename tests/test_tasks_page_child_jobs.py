@@ -12,6 +12,9 @@ def test_tasks_page_shows_child_job_summaries():
     assert "子任务" in source
     assert "task-child-list" in source
     assert "jobStatusLabel(child.status)" in source
+    assert "task-child-isolated" in source
+    assert "task-child-row-head" in source
+    assert "childStatusIcon" in source
 
 
 def test_tasks_page_has_manual_child_job_entry():

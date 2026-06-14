@@ -1,5 +1,6 @@
 import sqlite3
 import uuid
+import json
 from datetime import datetime, timedelta
 from pathlib import Path
 from core.paths import memory_db_path
@@ -29,6 +30,33 @@ MEMORY_TYPES = [
     "growth_marker",
     "reflection_anchor",
 ]
+
+BLOCK_TYPES = ("human", "persona", "preference", "decision", "event", "insight")
+
+_TYPE_TO_BLOCK: dict[str, str] = {
+    "fact": "human",
+    "identity": "human",
+    "self_narrative": "human",
+    "preference": "preference",
+    "creative_identity": "preference",
+    "decision": "decision",
+    "project": "decision",
+    "todo": "decision",
+    "reflection_anchor": "event",
+    "growth_marker": "event",
+    "context": "event",
+}
+
+
+def infer_block_type(memory_type: str, block_type: str | None = None) -> str:
+    if block_type and block_type in BLOCK_TYPES:
+        return block_type
+    return _TYPE_TO_BLOCK.get(memory_type, "insight")
+
+
+def normalize_label(label: str | None) -> str:
+    return str(label or "").strip()[:80]
+
 
 def init_db():
     conn = sqlite3.connect(DB_PATH)
@@ -125,6 +153,16 @@ def init_db():
         conn.execute("ALTER TABLE pending_memories ADD COLUMN suggest_reason TEXT DEFAULT ''")
     except Exception:
         pass
+    for ddl in [
+        "ALTER TABLE memories ADD COLUMN block_type TEXT DEFAULT 'insight'",
+        "ALTER TABLE memories ADD COLUMN label TEXT DEFAULT ''",
+        "ALTER TABLE pending_memories ADD COLUMN block_type TEXT DEFAULT 'insight'",
+        "ALTER TABLE pending_memories ADD COLUMN label TEXT DEFAULT ''",
+    ]:
+        try:
+            conn.execute(ddl)
+        except Exception:
+            pass
     # themes：跨会话行为模式归纳
     conn.execute("""
         CREATE TABLE IF NOT EXISTS themes (
@@ -278,7 +316,7 @@ def _clamp_depth(value: object) -> int:
 def save(content: str, tags: str = "", type: str = "insight", importance: int = 3,
          source: str = "", scope: str = "user", confidence: float = 0.8,
          valid_until: str | None = None, session_id: str | None = None,
-         depth: int = 3) -> int:
+         depth: int = 3, block_type: str | None = None, label: str | None = None) -> int:
     content = content.strip()
     tags = tags.strip()
     if type not in MEMORY_TYPES:
@@ -289,6 +327,8 @@ def save(content: str, tags: str = "", type: str = "insight", importance: int = 
         importance = 3
     importance = max(1, min(5, importance))
     depth = _clamp_depth(depth)
+    resolved_block = infer_block_type(type, block_type)
+    resolved_label = normalize_label(label)
 
     conn = sqlite3.connect(DB_PATH)
     existing = conn.execute(
@@ -306,9 +346,11 @@ def save(content: str, tags: str = "", type: str = "insight", importance: int = 
 
     cur = conn.execute(
         "INSERT INTO memories (content, tags, type, importance, depth, source, scope, confidence, "
-        "valid_until, session_id, created_at, updated_at, observed_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        "valid_until, session_id, block_type, label, created_at, updated_at, observed_at) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (content, tags, type, importance, depth, source, scope, confidence,
-         valid_until, session_id, _now(), _now(), json.dumps([_now()])),
+         valid_until, session_id, resolved_block, resolved_label,
+         _now(), _now(), json.dumps([_now()])),
     )
     conn.commit()
     mid = cur.lastrowid
@@ -318,36 +360,58 @@ def save(content: str, tags: str = "", type: str = "insight", importance: int = 
     contradiction_detect(mid, content)
     return mid
 
-def _row_to_dict(r, has_date: bool = False) -> dict:
-    d = {"id": r[0], "content": r[1], "tags": r[2], "type": r[3], "importance": r[4], "depth": _clamp_depth(r[5] if len(r) > 5 else 3)}
+def _row_to_dict(r, has_date: bool = False, has_block: bool = False) -> dict:
+    d = {
+        "id": r[0], "content": r[1], "tags": r[2], "type": r[3],
+        "importance": r[4],
+        "depth": _clamp_depth(r[5] if len(r) > 5 else 3),
+    }
     idx = 6
     if has_date:
-        d["created_at"] = r[idx]; idx += 1
+        d["created_at"] = r[idx] if idx < len(r) else None
+        idx += 1
     d["confidence"] = r[idx] if idx < len(r) else 0.8
-    d["valid_until"] = r[idx + 1] if idx + 1 < len(r) else None
+    idx += 1
+    d["valid_until"] = r[idx] if idx < len(r) else None
+    idx += 1
+    if has_block and idx < len(r):
+        d["block_type"] = r[idx] if r[idx] else infer_block_type(d["type"])
+        idx += 1
+        d["label"] = r[idx] if idx < len(r) and r[idx] else ""
+    else:
+        d["block_type"] = infer_block_type(d["type"])
+        d["label"] = ""
     return d
+
+
+_MEM_SELECT = (
+    "id, content, tags, type, importance, depth, created_at, confidence, valid_until, block_type, label"
+)
+_MEM_SELECT_NO_DATE = (
+    "id, content, tags, type, importance, depth, confidence, valid_until, block_type, label"
+)
 
 def list_by_type(memory_type: str, min_importance: int = 1, limit: int = 20) -> list[dict]:
     conn = sqlite3.connect(DB_PATH)
     rows = conn.execute(
-        "SELECT id, content, tags, type, importance, depth, created_at, confidence, valid_until FROM memories "
+        f"SELECT {_MEM_SELECT} FROM memories "
         "WHERE status = 'active' AND type = ? AND importance >= ? "
         "ORDER BY importance DESC, created_at DESC LIMIT ?",
         (memory_type, min_importance, limit),
     ).fetchall()
     conn.close()
-    return [_row_to_dict(r, has_date=True) for r in rows]
+    return [_row_to_dict(r, has_date=True, has_block=True) for r in rows]
 
 
 def list_all(limit: int = 50) -> list[dict]:
     conn = sqlite3.connect(DB_PATH)
     rows = conn.execute(
-        "SELECT id, content, tags, type, importance, depth, created_at, confidence, valid_until FROM memories "
+        f"SELECT {_MEM_SELECT} FROM memories "
         "WHERE status = 'active' ORDER BY importance DESC, updated_at DESC LIMIT ?",
         (limit,),
     ).fetchall()
     conn.close()
-    return [_row_to_dict(r, has_date=True) for r in rows]
+    return [_row_to_dict(r, has_date=True, has_block=True) for r in rows]
 
 def get_by_ids(ids: list[int]) -> dict[int, dict]:
     """批量按 ID 获取活跃记忆，返回 {id: memory_dict}。"""
@@ -357,11 +421,11 @@ def get_by_ids(ids: list[int]) -> dict[int, dict]:
     conn = sqlite3.connect(DB_PATH)
     try:
         rows = conn.execute(
-            f"SELECT id, content, tags, type, importance, depth, created_at, confidence, valid_until "
+            f"SELECT {_MEM_SELECT} "
             f"FROM memories WHERE id IN ({placeholders}) AND status = 'active'",
             ids,
         ).fetchall()
-        result = {r[0]: _row_to_dict(r, has_date=True) for r in rows}
+        result = {r[0]: _row_to_dict(r, has_date=True, has_block=True) for r in rows}
     except sqlite3.OperationalError:
         rows = conn.execute(
             f"SELECT id, content, tags, type, importance, created_at, confidence, valid_until "
@@ -380,30 +444,48 @@ def get_by_ids(ids: list[int]) -> dict[int, dict]:
     return result
 
 
-def search(keyword: str, limit: int = 10) -> list[dict]:
+def search(keyword: str, limit: int = 10, block_type: str | None = None,
+           label: str | None = None) -> list[dict]:
     conn = sqlite3.connect(DB_PATH)
+    filter_args: list = []
+    where_extra = ""
+    if block_type and block_type in BLOCK_TYPES:
+        where_extra += " AND m.block_type = ?"
+        filter_args.append(block_type)
+    if label:
+        where_extra += " AND m.label = ?"
+        filter_args.append(normalize_label(label))
     # FTS5 trigram 索引需要 ≥3 个字符，短词直接走 LIKE
     use_fts = len(keyword.strip()) >= 3
     try:
         if not use_fts:
             raise ValueError("keyword too short for FTS5 trigram")
         rows = conn.execute(
-            "SELECT m.id, m.content, m.tags, m.type, m.importance, m.depth, m.created_at, m.confidence, m.valid_until "
-            "FROM memories_fts f JOIN memories m ON f.rowid = m.id "
-            "WHERE memories_fts MATCH ? AND m.status = 'active' "
-            "ORDER BY m.importance DESC, rank LIMIT ?",
-            (keyword, limit),
+            f"SELECT m.id, m.content, m.tags, m.type, m.importance, m.depth, m.created_at, "
+            f"m.confidence, m.valid_until, m.block_type, m.label "
+            f"FROM memories_fts f JOIN memories m ON f.rowid = m.id "
+            f"WHERE memories_fts MATCH ? AND m.status = 'active'{where_extra} "
+            f"ORDER BY m.importance DESC, rank LIMIT ?",
+            (keyword, *filter_args, limit),
         ).fetchall()
     except Exception:
         like = f"%{keyword}%"
+        like_filters = ["status = 'active'", "(content LIKE ? OR tags LIKE ?)"]
+        like_args: list = [like, like]
+        if block_type and block_type in BLOCK_TYPES:
+            like_filters.append("block_type = ?")
+            like_args.append(block_type)
+        if label:
+            like_filters.append("label = ?")
+            like_args.append(normalize_label(label))
         rows = conn.execute(
-            "SELECT id, content, tags, type, importance, depth, created_at, confidence, valid_until FROM memories "
-            "WHERE status = 'active' AND (content LIKE ? OR tags LIKE ?) "
-            "ORDER BY importance DESC LIMIT ?",
-            (like, like, limit),
+            f"SELECT {_MEM_SELECT} FROM memories "
+            f"WHERE {' AND '.join(like_filters)} "
+            f"ORDER BY importance DESC LIMIT ?",
+            (*like_args, limit),
         ).fetchall()
     conn.close()
-    return [_row_to_dict(r, has_date=True) for r in rows]
+    return [_row_to_dict(r, has_date=True, has_block=True) for r in rows]
 
 def delete(mid: int):
     conn = sqlite3.connect(DB_PATH)
@@ -461,24 +543,60 @@ def archive(mid: int) -> bool:
 def recent(limit: int = 5) -> list[dict]:
     conn = sqlite3.connect(DB_PATH)
     rows = conn.execute(
-        "SELECT id, content, tags, type, importance, depth, confidence, valid_until FROM memories "
+        f"SELECT {_MEM_SELECT_NO_DATE} FROM memories "
         "WHERE status = 'active' ORDER BY importance DESC, updated_at DESC LIMIT ?",
         (limit,),
     ).fetchall()
     conn.close()
-    return [_row_to_dict(r) for r in rows]
+    return [_row_to_dict(r, has_block=True) for r in rows]
 
 def high_importance(min_importance: int = 4, limit: int = 3) -> list[dict]:
     conn = sqlite3.connect(DB_PATH)
     rows = conn.execute(
-        "SELECT id, content, tags, type, importance, depth, confidence, valid_until FROM memories "
+        f"SELECT {_MEM_SELECT_NO_DATE} FROM memories "
         "WHERE status = 'active' AND importance >= ? "
         "AND type IN ('identity', 'preference', 'project', 'decision', 'value', 'self_narrative', 'insight', 'fact', 'growth_marker') "
         "ORDER BY importance DESC, updated_at DESC LIMIT ?",
         (min_importance, limit),
     ).fetchall()
     conn.close()
-    return [_row_to_dict(r) for r in rows]
+    return [_row_to_dict(r, has_block=True) for r in rows]
+
+
+def list_by_block_type(block_type: str, limit: int = 20, label: str | None = None) -> list[dict]:
+    if block_type not in BLOCK_TYPES:
+        return []
+    conn = sqlite3.connect(DB_PATH)
+    if label:
+        rows = conn.execute(
+            f"SELECT {_MEM_SELECT} FROM memories "
+            "WHERE status = 'active' AND block_type = ? AND label = ? "
+            "ORDER BY importance DESC, updated_at DESC LIMIT ?",
+            (block_type, normalize_label(label), limit),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            f"SELECT {_MEM_SELECT} FROM memories "
+            "WHERE status = 'active' AND block_type = ? "
+            "ORDER BY importance DESC, updated_at DESC LIMIT ?",
+            (block_type, limit),
+        ).fetchall()
+    conn.close()
+    return [_row_to_dict(r, has_date=True, has_block=True) for r in rows]
+
+
+def list_compaction_candidates(limit: int = 50) -> list[dict]:
+    """Return active memories most eligible for compaction (low importance, least recently used)."""
+    conn = sqlite3.connect(DB_PATH)
+    rows = conn.execute(
+        f"SELECT {_MEM_SELECT} FROM memories "
+        "WHERE status = 'active' "
+        "ORDER BY importance ASC, COALESCE(last_used_at, created_at) ASC, id ASC "
+        "LIMIT ?",
+        (limit,),
+    ).fetchall()
+    conn.close()
+    return [_row_to_dict(r, has_date=True, has_block=True) for r in rows]
 
 
 def update_last_used(mid: int):
@@ -494,7 +612,8 @@ def update_last_used(mid: int):
 
 def add_pending(content: str, type: str = "insight", importance: int = 3,
                 tags: str = "", source: str = "auto", confidence: float = 0.7,
-                depth: int = 3, suggest_reason: str = "") -> int:
+                depth: int = 3, suggest_reason: str = "",
+                block_type: str | None = None, label: str | None = None) -> int:
     """将候选记忆写入 pending_memories 表，返回 ID。"""
     content = content.strip()
     if type not in MEMORY_TYPES:
@@ -507,12 +626,16 @@ def add_pending(content: str, type: str = "insight", importance: int = 3,
         depth = max(1, min(5, int(depth)))
     except Exception:
         depth = 3
+    resolved_block = infer_block_type(type, block_type)
+    resolved_label = normalize_label(label)
 
     conn = sqlite3.connect(DB_PATH)
     cur = conn.execute(
-        "INSERT INTO pending_memories (content, type, importance, depth, tags, source, confidence, created_at, suggest_reason) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (content, type, importance, depth, tags.strip(), source, float(confidence), _now(), suggest_reason.strip()),
+        "INSERT INTO pending_memories (content, type, importance, depth, tags, source, confidence, "
+        "created_at, suggest_reason, block_type, label) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (content, type, importance, depth, tags.strip(), source, float(confidence),
+         _now(), suggest_reason.strip(), resolved_block, resolved_label),
     )
     conn.commit()
     pid = cur.lastrowid
@@ -525,13 +648,15 @@ def list_pending(limit: int = 50, include_rejected: bool = False) -> list[dict]:
     conn = sqlite3.connect(DB_PATH)
     if include_rejected:
         rows = conn.execute(
-            "SELECT id, content, type, importance, depth, tags, source, confidence, created_at, status, suggest_reason "
+            "SELECT id, content, type, importance, depth, tags, source, confidence, created_at, "
+            "status, suggest_reason, block_type, label "
             "FROM pending_memories ORDER BY id LIMIT ?",
             (limit,),
         ).fetchall()
     else:
         rows = conn.execute(
-            "SELECT id, content, type, importance, depth, tags, source, confidence, created_at, status, suggest_reason "
+            "SELECT id, content, type, importance, depth, tags, source, confidence, created_at, "
+            "status, suggest_reason, block_type, label "
             "FROM pending_memories WHERE status = 'pending' ORDER BY id LIMIT ?",
             (limit,),
         ).fetchall()
@@ -543,9 +668,18 @@ def list_pending(limit: int = 50, include_rejected: bool = False) -> list[dict]:
             "source": r[6], "confidence": r[7], "created_at": r[8],
             "status": r[9] if len(r) > 9 and r[9] else "pending",
             "suggest_reason": r[10] if len(r) > 10 and r[10] else "",
+            "block_type": r[11] if len(r) > 11 and r[11] else infer_block_type(r[2]),
+            "label": r[12] if len(r) > 12 and r[12] else "",
         }
         for r in rows
     ]
+
+
+def count_active() -> int:
+    conn = sqlite3.connect(DB_PATH)
+    n = conn.execute("SELECT COUNT(*) FROM memories WHERE status = 'active'").fetchone()[0]
+    conn.close()
+    return n
 
 
 def count_pending(include_rejected: bool = False) -> int:
@@ -583,11 +717,13 @@ def accept_pending(pid: int | str) -> list[int]:
     conn = sqlite3.connect(DB_PATH)
     if str(pid) == "all":
         rows = conn.execute(
-            "SELECT id, content, type, importance, depth, tags, source, confidence FROM pending_memories WHERE status = 'pending'"
+            "SELECT id, content, type, importance, depth, tags, source, confidence, block_type, label "
+            "FROM pending_memories WHERE status = 'pending'"
         ).fetchall()
     else:
         rows = conn.execute(
-            "SELECT id, content, type, importance, depth, tags, source, confidence FROM pending_memories WHERE id = ? AND status = 'pending'",
+            "SELECT id, content, type, importance, depth, tags, source, confidence, block_type, label "
+            "FROM pending_memories WHERE id = ? AND status = 'pending'",
             (int(pid),),
         ).fetchall()
     conn.close()
@@ -598,8 +734,11 @@ def accept_pending(pid: int | str) -> list[int]:
     memory_ids = []
     accepted_pids = []
     for row in rows:
-        p_id, content, type_, importance, depth, tags, source, confidence = row
-        mid = save(content, tags=tags, type=type_, importance=importance, source=source, confidence=confidence, depth=depth)
+        p_id, content, type_, importance, depth, tags, source, confidence, block_type, label = row
+        mid = save(
+            content, tags=tags, type=type_, importance=importance, source=source,
+            confidence=confidence, depth=depth, block_type=block_type, label=label,
+        )
         memory_ids.append(mid)
         accepted_pids.append(p_id)
 
@@ -956,7 +1095,6 @@ def run_importance_decay() -> int:
 
 # ── P1: 记忆时间线 ────────────────────────────────────────────────────────────
 
-import json
 import textwrap
 
 _GRACE_DAYS = 90  # >90 天未确认 → stale
@@ -1346,15 +1484,19 @@ def memories_by_group(group_key: str, limit: int = 30) -> list[dict]:
     placeholders = ",".join("?" * len(types))
     conn = sqlite3.connect(DB_PATH)
     rows = conn.execute(
-        f"SELECT id, content, type, importance, depth, created_at, confidence "
+        f"SELECT id, content, type, importance, depth, created_at, confidence, block_type, label "
         f"FROM memories WHERE status = 'active' AND type IN ({placeholders}) "
         f"ORDER BY importance DESC, updated_at DESC LIMIT ?",
         [*types, limit],
     ).fetchall()
     conn.close()
     return [
-        {"id": r[0], "content": r[1], "type": r[2],
-         "importance": r[3], "depth": r[4], "created_at": r[5], "confidence": r[6]}
+        {
+            "id": r[0], "content": r[1], "type": r[2],
+            "importance": r[3], "depth": r[4], "created_at": r[5], "confidence": r[6],
+            "block_type": r[7] if len(r) > 7 and r[7] else infer_block_type(r[2]),
+            "label": r[8] if len(r) > 8 and r[8] else "",
+        }
         for r in rows
     ]
 

@@ -23,6 +23,12 @@ def available_modes(cfg: dict) -> set[str]:
         d = Path(modes_dir).expanduser()
         if d.is_dir():
             names.update(p.stem for p in d.glob("*.md"))
+    try:
+        from core.plugin import iter_plugin_mode_names
+
+        names.update(iter_plugin_mode_names())
+    except Exception:
+        pass
     return names
 
 

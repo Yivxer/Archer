@@ -11,6 +11,14 @@ SKILL = {
     "default_timeout": 30,
 }
 
+__meta__ = {
+    "name": "shell",
+    "description": "执行本地 shell 命令",
+    "keywords": ["shell", "bash", "终端", "命令行", "运行命令", "npm", "git"],
+    "risk": "high",
+    "auto_trigger": True,
+}
+
 _DANGEROUS = [
     r"rm\s+-rf\s+[/~]",
     r"sudo\s+",

@@ -13,6 +13,14 @@ SKILL = {
     "author": "archer-builtin",
 }
 
+__meta__ = {
+    "name": "code_search",
+    "description": "在代码文件中搜索关键词并返回行号",
+    "keywords": ["找代码", "查函数", "grep", "定位代码", "搜索代码", "哪一行"],
+    "risk": "low",
+    "auto_trigger": True,
+}
+
 
 def schema() -> dict:
     return {

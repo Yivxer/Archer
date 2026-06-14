@@ -15,6 +15,8 @@ from typing import Any
 from memory.store import DB_PATH
 from core.tool_runtime import invoke as runtime_invoke
 
+SCHEDULES_JSON_PATH = DB_PATH.parent / "schedules.json"
+
 # ── 间隔别名 ───────────────────────────────────────────────────────────────────
 
 _ALIASES: dict[str, int] = {
@@ -46,6 +48,45 @@ def _now() -> str:
     return datetime.now().isoformat(timespec="seconds")
 
 
+def format_task(task: dict) -> dict:
+    """Desktop/API 友好的任务结构。"""
+    try:
+        args = json.loads(task.get("args_json") or "{}")
+    except Exception:
+        args = {}
+    return {
+        "id": task["id"],
+        "skillName": task["skill_name"],
+        "label": task.get("label") or "",
+        "intervalHours": task["interval_h"],
+        "intervalLabel": fmt_interval(task["interval_h"]),
+        "enabled": bool(task.get("enabled", 1)),
+        "catchup": task.get("catchup") or "latest",
+        "args": args,
+        "lastRunAt": task.get("last_run_at"),
+        "nextRunAt": task["next_run_at"],
+        "createdAt": task["created_at"],
+    }
+
+
+def sync_schedules_json(db_path: Path = DB_PATH) -> None:
+    """将 DB 任务镜像到 memory/schedules.json，便于人工查看与 Desktop 读取。"""
+    payload = {
+        "version": 1,
+        "updatedAt": _now(),
+        "tasks": [format_task(t) for t in list_tasks(db_path)],
+    }
+    SCHEDULES_JSON_PATH.parent.mkdir(parents=True, exist_ok=True)
+    SCHEDULES_JSON_PATH.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def _after_mutate(db_path: Path = DB_PATH) -> None:
+    sync_schedules_json(db_path)
+
+
 # ── CRUD ───────────────────────────────────────────────────────────────────────
 
 def add_task(
@@ -73,6 +114,7 @@ def add_task(
     task_id = cur.lastrowid
     conn.commit()
     conn.close()
+    _after_mutate(db_path)
     return task_id
 
 
@@ -82,6 +124,8 @@ def remove_task(task_id: int, db_path: Path = DB_PATH) -> bool:
     ok = cur.rowcount > 0
     conn.commit()
     conn.close()
+    if ok:
+        _after_mutate(db_path)
     return ok
 
 
@@ -94,6 +138,8 @@ def set_enabled(task_id: int, enabled: bool, db_path: Path = DB_PATH) -> bool:
     ok = cur.rowcount > 0
     conn.commit()
     conn.close()
+    if ok:
+        _after_mutate(db_path)
     return ok
 
 
@@ -140,6 +186,7 @@ def _mark_ran(task_id: int, interval_h: int, db_path: Path = DB_PATH):
     )
     conn.commit()
     conn.close()
+    _after_mutate(db_path)
 
 
 # ── 执行 ───────────────────────────────────────────────────────────────────────

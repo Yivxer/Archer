@@ -53,6 +53,7 @@ class OrchestrationResult:
     needs_tools: bool = False
     needs_job: bool = False
     memory_scope: list[str] = field(default_factory=list)
+    matched_skills: list[str] = field(default_factory=list)
     side_effect_level: SideEffectLevel = "none"
     reasons: list[str] = field(default_factory=list)
     source: str = "rules"
@@ -350,6 +351,15 @@ def orchestrate_user_input(
     scopes = _memory_scope(sub_intent, bool(intent_info.get("needs_memory")))
     needs_memory = bool(scopes) or bool(intent_info.get("needs_memory"))
 
+    matched_skills: list[str] = []
+    if needs_tools or intent in {"task", "project"}:
+        try:
+            from core.skill_router import auto_match_skills
+
+            matched_skills = auto_match_skills(text, intent=intent)
+        except Exception:
+            matched_skills = []
+
     reasons = [
         f"intent:{intent_info.get('source', 'rules')}:{intent}",
         f"sub_intent:{sub_intent}",
@@ -371,6 +381,7 @@ def orchestrate_user_input(
         needs_tools=needs_tools,
         needs_job=needs_job,
         memory_scope=scopes,
+        matched_skills=matched_skills,
         side_effect_level=side_effect_level,
         reasons=reasons,
         source=str(intent_info.get("source", "rules")),
@@ -443,6 +454,26 @@ def format_task_plan_for_prompt(plan: TaskPlan | None) -> str:
     for step in plan.steps:
         approval = "，需要确认" if step.requires_approval else ""
         lines.append(f"{step.id}. {step.action}（tool={step.tool}{approval}）")
+    return "\n".join(lines)
+
+
+def format_matched_skills_for_prompt(matched_skills: list[str]) -> str:
+    """Inject orchestrator-preselected skills into the system prompt."""
+    if not matched_skills:
+        return ""
+    from skills.loader import load_skills
+
+    registry = load_skills()
+    lines = [
+        "[本轮可能相关的技能]",
+        "以下技能由编排层预选；仅在用户明确需要时使用，不要声称已调用未使用的技能。",
+    ]
+    for name in matched_skills:
+        meta = registry.get_meta(name)
+        if meta is None:
+            lines.append(f"- {name}")
+            continue
+        lines.append(f"- {name}: {meta.description}")
     return "\n".join(lines)
 
 
@@ -530,6 +561,7 @@ def orchestration_to_event_dict(orchestration: OrchestrationResult) -> dict:
         "labels": orchestration_status_labels(orchestration),
         "needsMemory": orchestration.needs_memory,
         "needsJob": orchestration.needs_job,
+        "matchedSkills": list(orchestration.matched_skills),
     }
 
 
@@ -579,3 +611,43 @@ def build_memory_candidate_policy(
         requires_review=True,
         sensitive=sensitive,
     )
+
+
+def maybe_run_memory_compaction_after_turn(cfg: dict | None = None) -> dict | None:
+    """Run memory compaction if thresholds are met. Returns result dict or None."""
+    from core.hooks import HookContext, run_hooks
+    from memory.compaction import maybe_compact_memories
+
+    if cfg is None:
+        try:
+            from core.llm import load_config
+
+            cfg = load_config()
+        except Exception:
+            cfg = {}
+
+    pre = run_hooks(
+        "PreCompact",
+        HookContext(event="PreCompact", metadata={"kind": "memory"}),
+        cfg=cfg,
+    )
+    if not pre.continue_:
+        return None
+
+    result = maybe_compact_memories()
+    if result is None:
+        return None
+
+    payload = {
+        "triggered": result.triggered,
+        "reason": result.reason,
+        "archivedCount": result.archived_count,
+        "archivedIds": result.archived_ids,
+        "summaryId": result.summary_id,
+    }
+    run_hooks(
+        "PostCompact",
+        HookContext(event="PostCompact", metadata={"kind": "memory", "result": payload}),
+        cfg=cfg,
+    )
+    return payload

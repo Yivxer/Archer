@@ -45,36 +45,32 @@ DEFAULT_BACKGROUND_JOB_TIMEOUT_SECONDS = 300
 
 def _sessions(limit: int = 20) -> list[dict]:
     from core.session import SESSIONS_DIR
+    from core.session_store import read_session_file
     sessions_dir = Path(SESSIONS_DIR)
     if not sessions_dir.exists():
         return []
     items: list[dict] = []
     for path in sorted(sessions_dir.glob("*.json"), reverse=True)[:limit]:
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-        except Exception:
-            data = []
-        first_user = next((m.get("content", "") for m in data if m.get("role") == "user"), "")
+        messages, _usage = read_session_file(path)
+        first_user = next((m.get("content", "") for m in messages if m.get("role") == "user"), "")
         title = str(first_user).strip().replace("\n", " ")[:42] or path.stem
         preview = str(first_user).strip().replace("\n", " ")[:60]
         items.append({
             "id": path.stem, "title": title, "date": path.stem[:8],
-            "turns": max(1, len(data) // 2), "tone": "saved", "preview": preview,
+            "turns": max(1, len(messages) // 2), "tone": "saved", "preview": preview,
         })
     return items
 
 
 def _session_detail(session_id: str) -> dict | None:
     from core.session import SESSIONS_DIR
+    from core.session_store import read_session_file
     if not _valid_session_id(session_id):
         return None
     path = Path(SESSIONS_DIR) / f"{session_id}.json"
     if not path.exists() or not path.is_file():
         return None
-    try:
-        messages = json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        messages = []
+    messages, token_usage = read_session_file(path)
     if not isinstance(messages, list):
         messages = []
     clean_messages = []
@@ -87,7 +83,7 @@ def _session_detail(session_id: str) -> dict | None:
             continue
         clean_messages.append({"id": idx + 1, "role": role, "text": content})
     first_user = next((m["text"] for m in clean_messages if m["role"] == "user"), "")
-    return {
+    detail = {
         "id": session_id,
         "title": first_user.strip().replace("\n", " ")[:42] or session_id,
         "date": session_id[:8],
@@ -95,10 +91,15 @@ def _session_detail(session_id: str) -> dict | None:
         "tone": "saved",
         "messages": clean_messages,
     }
+    if token_usage:
+        detail["tokenUsage"] = token_usage
+    return detail
 
 
 def _save_session(payload: dict) -> dict:
     from core.session import SESSIONS_DIR
+    from core.session_store import dump_session_file
+    from core.token_usage import session_usage_for_file
     messages = _clean_session_messages(payload.get("messages"))
     sessions_dir = Path(SESSIONS_DIR)
     sessions_dir.mkdir(parents=True, exist_ok=True)
@@ -108,12 +109,16 @@ def _save_session(payload: dict) -> dict:
     while path.exists():
         path = sessions_dir / f"{session_id}_{counter}.json"
         counter += 1
-    path.write_text(json.dumps(messages, ensure_ascii=False, indent=2), encoding="utf-8")
+    path.write_text(
+        dump_session_file(messages, token_usage=session_usage_for_file()),
+        encoding="utf-8",
+    )
     return {"id": path.stem, "path": str(path), "messages": len(messages)}
 
 
 def _append_session(session_id: str, payload: dict) -> dict:
     from core.session import SESSIONS_DIR
+    from core.session_store import dump_session_file, read_session_file
     if not _valid_session_id(session_id):
         raise ValueError("invalid session id")
     new_messages = _clean_session_messages(payload.get("messages"))
@@ -124,14 +129,14 @@ def _append_session(session_id: str, payload: dict) -> dict:
     path = Path(SESSIONS_DIR) / f"{session_id}.json"
     if not path.exists() or not path.is_file():
         raise FileNotFoundError(f"session not found: {session_id}")
-    try:
-        existing = json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        existing = []
+    existing, token_usage = read_session_file(path)
     if not isinstance(existing, list):
         existing = []
     existing.extend(new_messages)
-    path.write_text(json.dumps(existing, ensure_ascii=False, indent=2), encoding="utf-8")
+    path.write_text(
+        dump_session_file(existing, token_usage=token_usage),
+        encoding="utf-8",
+    )
     return {"id": session_id, "path": str(path), "messages": len(existing), "appended": len(new_messages)}
 
 
@@ -255,6 +260,7 @@ def _create_job(payload: dict) -> dict:
         if parent_job_id and parent_job_id in BACKGROUND_JOBS:
             parent = BACKGROUND_JOBS[parent_job_id]
             job["parentJobId"] = parent_job_id
+            job["isolated"] = True
             child_ids: list = parent.setdefault("childJobIds", [])
             child_ids.append(job_id)
             parent["updatedAt"] = created_at
@@ -295,6 +301,10 @@ def _job_detail(job_id: str) -> dict | None:
                         "title": child.get("title"),
                         "status": child.get("status"),
                         "createdAt": child.get("createdAt"),
+                        "parentJobId": child.get("parentJobId"),
+                        "isolated": child.get("isolated"),
+                        "result": child.get("result") or "",
+                        "error": child.get("error") or "",
                     })
             if children:
                 result["children"] = children
@@ -312,6 +322,99 @@ def _update_job(job_id: str, **updates: object) -> None:
         _persist_jobs_locked()
 
 
+def _active_child_job_count_locked() -> int:
+    return sum(
+        1
+        for job in BACKGROUND_JOBS.values()
+        if job.get("parentJobId")
+        and job.get("status") in ("running", "waiting_approval")
+    )
+
+
+def _can_start_child_job_locked() -> bool:
+    from core.subagent_context import MAX_PARALLEL_CHILD_JOBS
+
+    return _active_child_job_count_locked() < MAX_PARALLEL_CHILD_JOBS
+
+
+def _kick_queued_children(parent_id: str | None = None) -> None:
+    from core.subagent_context import MAX_PARALLEL_CHILD_JOBS
+
+    to_start: list[str] = []
+    with BACKGROUND_JOB_LOCK:
+        _load_jobs_locked()
+        slots = MAX_PARALLEL_CHILD_JOBS - _active_child_job_count_locked()
+        if slots <= 0:
+            return
+        queued = [
+            job["id"]
+            for job in BACKGROUND_JOBS.values()
+            if job.get("parentJobId")
+            and job.get("status") == "queued"
+            and (parent_id is None or job.get("parentJobId") == parent_id)
+        ]
+        to_start = queued[:slots]
+    for child_id in to_start:
+        worker = threading.Thread(target=_run_job, args=(child_id,), daemon=True)
+        worker.start()
+
+
+def _run_isolated_child_job_chat(prompt: str, job: dict) -> dict:
+    """Execute a child background job with isolated context (no memory, read-only tools)."""
+    from core.llm import stream_chat
+    from core.subagent_context import (
+        build_subagent_system_prompt,
+        select_subagent_enrichment_skills,
+    )
+
+    config = _load_config()
+    title = str(job.get("title", "")).replace("[子] ", "").strip()
+    system = build_subagent_system_prompt(config, title, prompt)
+
+    tool_parts: list[str] = []
+    system_parts = [system]
+
+    for skill_name in select_subagent_enrichment_skills(prompt):
+        if skill_name == "web_search":
+            try:
+                from skills.web_search import run as web_search_run
+
+                result = web_search_run({"query": prompt[:200], "max_results": 5})
+                if result and not str(result).startswith("未找到"):
+                    system_parts.append(f"互联网搜索结果（{prompt[:80]}）：\n{result}")
+                    tool_parts.append("[web_search] 搜索完成")
+            except Exception as exc:
+                tool_parts.append(f"[web_search] 失败: {exc}")
+        elif skill_name == "web_fetch":
+            url_match = re.search(r'https?://[^\s）+）"]+', prompt)
+            if url_match:
+                target_url = url_match.group(0).rstrip(".。，,;；")
+                try:
+                    from skills.web_fetch import run as web_fetch_run
+
+                    fetch = web_fetch_run({"url": target_url, "max_chars": 4000})
+                    if fetch:
+                        system_parts.append(f"网页内容（{target_url}）：\n{fetch}")
+                        tool_parts.append(f"[web_fetch] {target_url}")
+                except Exception as exc:
+                    tool_parts.append(f"[web_fetch] 失败: {exc}")
+
+    messages = [
+        {"role": "system", "content": "\n\n".join(system_parts)},
+        {"role": "user", "content": prompt},
+    ]
+
+    chunks: list[str] = []
+    for chunk in stream_chat(messages):
+        chunks.append(chunk)
+    text = "".join(chunks)
+
+    if tool_parts:
+        text += "\n\n---\n*子任务隔离模式自动执行了以下工具：*\n" + "\n".join(f"- {p}" for p in tool_parts)
+
+    return {"role": "assistant", "text": text}
+
+
 def _run_job_chat_with_tools(prompt: str, job_id: str) -> dict:
     """Execute a background job with tool-loop enrichment.
 
@@ -322,6 +425,13 @@ def _run_job_chat_with_tools(prompt: str, job_id: str) -> dict:
     Medium+ risk tools (shell, github, file_ops, obsidian_write, hugo_blog)
     are skipped — they require user approval which isn't available in background.
     """
+    from core.subagent_context import is_isolated_job
+
+    with BACKGROUND_JOB_LOCK:
+        job = dict(BACKGROUND_JOBS.get(job_id) or {})
+    if is_isolated_job(job):
+        return _run_isolated_child_job_chat(prompt, job)
+
     from core.context import classify_query_intent
     from core.llm import stream_chat
     from terminal.api._tools import _select_api_skills, _filter_api_skills_for_intent
@@ -443,8 +553,17 @@ def _run_job(job_id: str) -> None:
             return
         _update_job(job_id, status="failed", result="", error=str(exc))
 
+    parent_id = job.get("parentJobId")
+    if parent_id:
+        _kick_queued_children(str(parent_id))
+
 
 def _start_job(job_id: str) -> None:
+    with BACKGROUND_JOB_LOCK:
+        _load_jobs_locked()
+        job = BACKGROUND_JOBS.get(job_id)
+        if job and job.get("parentJobId") and not _can_start_child_job_locked():
+            return
     worker = threading.Thread(target=_run_job, args=(job_id,), daemon=True)
     worker.start()
 
@@ -600,6 +719,7 @@ def _spawn_child_jobs(job_id: str, payload: dict) -> dict:
             return {"ok": False, "error": "parent job not found", "id": job_id}
 
         child_jobs = []
+        start_ids: list[str] = []
         for spec in children_specs[:20]:
             if not isinstance(spec, dict):
                 continue
@@ -623,16 +743,20 @@ def _spawn_child_jobs(job_id: str, payload: dict) -> dict:
                 "updatedAt": created_at,
                 "timeoutSeconds": timeout_seconds,
                 "parentJobId": job_id,
+                "isolated": True,
             }
             BACKGROUND_JOBS[child_id] = child
             child_ids: list = parent.setdefault("childJobIds", [])
             child_ids.append(child_id)
             child_jobs.append(dict(child))
             if spec.get("autoStart", True) is not False:
-                _start_job(child_id)
+                start_ids.append(child_id)
 
         parent["updatedAt"] = datetime.now().isoformat()
         _persist_jobs_locked()
+
+    for child_id in start_ids:
+        _start_job(child_id)
 
     return {"ok": True, "id": job_id, "spawned": len(child_jobs), "children": child_jobs}
 
@@ -644,27 +768,24 @@ def _spawn_child_jobs(job_id: str, payload: dict) -> dict:
 def _memory(limit: int = 50, include_rejected: bool = False) -> list[dict]:
     from memory.store import init_db, list_all, list_pending
     init_db()
-    confirmed = [
-        {
+
+    def _item_fields(item: dict, status: str) -> dict:
+        return {
             "id": int(item["id"]),
-            "status": "confirmed",
+            "status": status,
             "type": item.get("type", "insight"),
             "content": item.get("content", ""),
             "confidence": f"{float(item.get('confidence') or 0):.2f}",
             "source": item.get("source", ""),
             "depth": int(item.get("depth") or item.get("importance") or 3),
+            "blockType": item.get("block_type", "insight"),
+            "label": item.get("label", ""),
         }
-        for item in list_all(limit=limit)
-    ]
+
+    confirmed = [_item_fields(item, "confirmed") for item in list_all(limit=limit)]
     pending = [
         {
-            "id": int(item["id"]),
-            "status": item.get("status", "pending"),
-            "type": item.get("type", "insight"),
-            "content": item.get("content", ""),
-            "confidence": f"{float(item.get('confidence') or 0):.2f}",
-            "source": item.get("source", ""),
-            "depth": int(item.get("depth") or item.get("importance") or 3),
+            **_item_fields(item, item.get("status", "pending")),
             "suggestReason": item.get("suggest_reason", ""),
         }
         for item in list_pending(limit=limit, include_rejected=include_rejected)
@@ -802,15 +923,15 @@ def _toggle_skill(name: str, enabled: bool) -> dict:
 
 
 def _skills() -> list[dict]:
-    from skills.loader import load_skills
+    from skills.loader import register_all_skills
     disabled = _load_disabled_skills()
+    registry = register_all_skills()
     result = []
-    for name, mod in sorted(load_skills().items()):
-        meta = getattr(mod, "SKILL", {})
+    for name, meta in sorted(registry.metas().items()):
         result.append({
             "name": name,
-            "description": meta.get("description", ""),
-            "risk": meta.get("risk", "low"),
+            "description": meta.description,
+            "risk": meta.risk,
             "enabled": name not in disabled,
         })
     return result
@@ -1130,6 +1251,8 @@ def _status(cfg: dict) -> dict:
     mode_auto = persona.get("mode_auto", True) is not False
     mode = "auto" if mode_auto else persona.get("current_mode", persona.get("default_mode", "listener"))
     from core.model_select import status_model_label
+    from core.token_usage import status_payload
+    token_limit = int(cfg.get("context", {}).get("token_limit", 1_000_000))
     return {
         "adapter": "local",
         "model": status_model_label(cfg),
@@ -1140,6 +1263,7 @@ def _status(cfg: dict) -> dict:
         "accountName": cfg.get("account", {}).get("name", ""),
         "isLoggedIn": bool(access_token and archer_id),
         "archerId": archer_id[:8] if archer_id else "",
+        "tokenUsage": status_payload(token_limit=token_limit),
     }
 
 
@@ -1270,6 +1394,109 @@ def _tool_approval(payload: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Scheduled tasks
+# ---------------------------------------------------------------------------
+
+def _list_schedules() -> dict:
+    from core.scheduler import SCHEDULES_JSON_PATH, format_task, list_tasks, sync_schedules_json
+    from memory.store import init_db
+
+    init_db()
+    sync_schedules_json()
+    return {
+        "ok": True,
+        "jsonPath": str(SCHEDULES_JSON_PATH),
+        "tasks": [format_task(t) for t in list_tasks()],
+    }
+
+
+def _add_schedule(payload: dict) -> tuple[int, dict]:
+    from core.scheduler import add_task, format_task, get_task, parse_interval
+    from memory.store import init_db
+    from skills.loader import register_all_skills
+
+    init_db()
+    skill_name = str(payload.get("skillName") or payload.get("skill_name") or "").strip()
+    interval = str(payload.get("interval") or payload.get("intervalSpec") or "").strip()
+    label = str(payload.get("label") or "").strip()
+    catchup = str(payload.get("catchup") or "latest").strip()
+    args = payload.get("args") if isinstance(payload.get("args"), dict) else None
+
+    if not skill_name or not interval:
+        return 400, {"ok": False, "error": "skillName and interval are required"}
+
+    registry = register_all_skills()
+    if skill_name not in registry:
+        return 400, {"ok": False, "error": f"unknown skill: {skill_name}"}
+
+    try:
+        parse_interval(interval)
+    except ValueError as exc:
+        return 400, {"ok": False, "error": str(exc)}
+
+    task_id = add_task(skill_name, interval, label, args=args, catchup=catchup)
+    task = get_task(task_id)
+    return 200, {"ok": True, "task": format_task(task)}
+
+
+def _schedule_action(task_id: str, action: str, payload: dict | None = None) -> tuple[int, dict]:
+    from core.scheduler import (
+        format_task,
+        get_task,
+        remove_task,
+        run_task_by_id,
+        set_enabled,
+    )
+    from memory.store import init_db
+    from skills.loader import register_all_skills
+
+    if not re.fullmatch(r"[0-9]+", task_id):
+        return 400, {"ok": False, "error": "task id must be numeric"}
+
+    init_db()
+    tid = int(task_id)
+    task = get_task(tid)
+    if task is None and action != "remove":
+        return 404, {"ok": False, "error": "task_not_found", "id": tid}
+
+    if action == "remove":
+        ok = remove_task(tid)
+        return (200 if ok else 404), {"ok": ok, "id": tid}
+
+    if action == "enable":
+        ok = set_enabled(tid, True)
+        task = get_task(tid)
+        return 200, {"ok": ok, "task": format_task(task) if task else None}
+
+    if action == "disable":
+        ok = set_enabled(tid, False)
+        task = get_task(tid)
+        return 200, {"ok": ok, "task": format_task(task) if task else None}
+
+    if action == "run":
+        skills = register_all_skills()
+        tr = run_task_by_id(tid, skills)
+        task = get_task(tid)
+        if tr is None and task is None:
+            return 404, {"ok": False, "error": "task_not_found", "id": tid}
+        if tr is None:
+            return 400, {
+                "ok": False,
+                "error": "skill_not_loaded",
+                "id": tid,
+                "skillName": task["skill_name"],
+            }
+        return 200, {
+            "ok": tr.ok,
+            "task": format_task(task) if task else None,
+            "summary": tr.summary,
+            "preview": (tr.content_preview or "")[:600],
+        }
+
+    return 400, {"ok": False, "error": f"unknown action: {action}"}
+
+
+# ---------------------------------------------------------------------------
 # Route dispatchers
 # ---------------------------------------------------------------------------
 
@@ -1336,7 +1563,19 @@ def payload_get(path: str) -> tuple[int, dict | list]:
             groups_data[key] = {
                 **group,
                 "count": counts.get(key, 0),
-                "memories": memories_by_group(key, limit=30),
+                "memories": [
+                    {
+                        "id": m["id"],
+                        "content": m["content"],
+                        "type": m["type"],
+                        "importance": m["importance"],
+                        "depth": m["depth"],
+                        "confidence": m["confidence"],
+                        "blockType": m.get("block_type", "insight"),
+                        "label": m.get("label", ""),
+                    }
+                    for m in memories_by_group(key, limit=30)
+                ],
             }
         return 200, groups_data
     if path == "/soul-profile":
@@ -1347,6 +1586,8 @@ def payload_get(path: str) -> tuple[int, dict | list]:
         return 200, {"ok": True}
     if path == "/jobs":
         return 200, _list_jobs()
+    if path == "/schedules":
+        return 200, _list_schedules()
     if path.startswith("/jobs/"):
         job_id = path.removeprefix("/jobs/")
         job = _job_detail(job_id)
@@ -1360,6 +1601,13 @@ def payload_post(path: str, payload: dict) -> tuple[int, dict | list]:
     """Handle POST request routing."""
     if path == "/jobs":
         return 200, _create_job(payload)
+    if path == "/schedules":
+        status, body = _add_schedule(payload)
+        return status, body
+    schedule_action = re.fullmatch(r"/schedules/([0-9]+)/(remove|enable|disable|run)", path)
+    if schedule_action:
+        status, body = _schedule_action(schedule_action.group(1), schedule_action.group(2), payload)
+        return status, body
     job_cancel = re.fullmatch(r"/jobs/([^/]+)/cancel", path)
     if job_cancel:
         result = _cancel_job(job_cancel.group(1))

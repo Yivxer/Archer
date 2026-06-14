@@ -50,7 +50,8 @@ def test_session_add_and_save():
             saved = s.save()
             assert saved.exists(), "会话文件未生成"
             data = json.loads(saved.read_text(encoding="utf-8"))
-            assert len(data) == 2
+            assert isinstance(data, dict)
+            assert len(data["messages"]) == 2
         finally:
             sess_mod.SESSIONS_DIR = original_dir
 
@@ -122,9 +123,11 @@ def test_memory_dedup():
 
 def test_skills_load():
     """skills 目录下的技能可正常加载，且每个技能包含必要字段。"""
+    from collections.abc import Mapping
+
     from skills.loader import load_skills
     skills = load_skills()
-    assert isinstance(skills, dict), "load_skills 应返回 dict"
+    assert isinstance(skills, Mapping), "load_skills 应返回 mapping"
     assert len(skills) > 0, "至少应有一个技能"
 
     for name, mod in skills.items():

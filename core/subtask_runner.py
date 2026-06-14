@@ -26,11 +26,15 @@ from rich.progress import BarColumn, Progress, SpinnerColumn, TaskID, TextColumn
 from memory.subtask import (
     AGENT_TYPES,
     get as subtask_get,
-    get_agent_system_prompt,
     list_for_work,
     set_done,
     set_failed,
     set_running,
+)
+from core.subagent_context import (
+    SUBTASK_ALLOW_LIST,
+    build_subagent_system_prompt,
+    filter_subagent_skills,
 )
 
 # ── 并行策略 ─────────────────────────────────────────────────────────────────
@@ -62,7 +66,7 @@ def _consume_steering(work_item_id: int | None) -> list[str]:
 _AGENT_SKILLS_FILTER: dict[str, list[str] | None] = {
     "explore": ["web_fetch", "file_search", "obsidian_search", "rss_reader", "weather"],
     "plan":    [],
-    "work":    None,
+    "work":    list(SUBTASK_ALLOW_LIST),
     "review":  [],
 }
 
@@ -76,7 +80,7 @@ def _resolve_model(tier: str, cfg: dict) -> str:
 
 def _filter_skills(skills: dict, allowed: list[str] | None) -> dict:
     if allowed is None:
-        return skills
+        return filter_subagent_skills(skills)
     return {k: v for k, v in skills.items() if k in allowed}
 
 
@@ -86,9 +90,15 @@ def _build_messages(
     subtask: dict,
     prior_results: list[dict],
     steering_msgs: list[str],
+    cfg: dict,
 ) -> list[dict]:
-    agent_prompt = get_agent_system_prompt(subtask["agent_type"])
-    system = f"{agent_prompt}\n\n输出格式：纯文本，不使用 Markdown 语法。"
+    system = build_subagent_system_prompt(
+        cfg,
+        task_title=f"subtask #{subtask['id']}",
+        task_prompt=subtask["prompt"],
+        agent_type=subtask["agent_type"],
+    )
+    system += "\n\n输出格式：纯文本，不使用 Markdown 语法。"
 
     if prior_results:
         parts = [
@@ -137,9 +147,10 @@ def run_subtask(
     agent_type = st["agent_type"]
     model      = _resolve_model(st["model_tier"], cfg)
     steering   = _consume_steering(st.get("work_item_id"))
-    messages   = _build_messages(st, prior_results or [], steering)
+    messages   = _build_messages(st, prior_results or [], steering, cfg)
     allowed    = _AGENT_SKILLS_FILTER.get(agent_type, [])
     active_skills = _filter_skills(skills, allowed)
+    subtask_cfg = {**cfg, "subtask_mode": True}
 
     if steering:
         console.print(f"[dim]  [{agent_type}] #{subtask_id} 注入 {len(steering)} 条 steering 指令[/dim]")
@@ -161,7 +172,7 @@ def run_subtask(
                 console=console,
                 model=model,
                 max_rounds=6,
-                cfg=cfg,
+                cfg=subtask_cfg,
             )
         else:
             from core.llm import stream_chat

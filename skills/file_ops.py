@@ -9,6 +9,14 @@ SKILL = {
     "default_timeout": 10,
 }
 
+__meta__ = {
+    "name": "file_ops",
+    "description": "读写本地文件与目录列表",
+    "keywords": ["文件", "读取", "写入", "目录", ".py", ".md", ".ts", "路径"],
+    "risk": "medium",
+    "auto_trigger": True,
+}
+
 def schema() -> dict:
     return {
         "type": "function",

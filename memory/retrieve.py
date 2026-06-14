@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta
 from memory.a4 import select_context_memories, should_create_reflection_anchor
 from memory.store import search, recent, high_importance, update_last_used, get_by_ids
+from core.observability import trace_span
 
 _LIGHT_INPUTS = {
     "你好", "hi", "hello", "在吗", "早", "早安", "晚安",
@@ -43,7 +44,8 @@ def _infer_trigger(user_input: str, intent: str | None) -> str | None:
     return None
 
 
-def for_context(user_input: str = "", limit: int = 5, intent: str | None = None) -> tuple[list, list]:
+def for_context(user_input: str = "", limit: int = 5, intent: str | None = None,
+                block_types: list[str] | None = None) -> tuple[list, list]:
     """
     A4 记忆检索：
     - 保持旧接口兼容：调用方不传 intent 时自动轻量推断。
@@ -51,46 +53,54 @@ def for_context(user_input: str = "", limit: int = 5, intent: str | None = None)
     - core 与 related 合并后按 A4 策略排序，再拆回 core / related。
     - 检索后过滤 reflection 类型和已过期记忆，并更新 last_used_at。
     """
-    if _should_skip_memory(user_input):
-        return [], []
+    with trace_span("memory.retrieve", limit=limit, intent=intent or "") as span:
+        if _should_skip_memory(user_input):
+            span["skipped"] = True
+            return [], []
 
-    intent = intent or _infer_intent(user_input)
-    trigger = _infer_trigger(user_input, intent)
-    total_limit = max(1, limit)
+        intent = intent or _infer_intent(user_input)
+        trigger = _infer_trigger(user_input, intent)
+        total_limit = max(1, limit)
 
-    core_raw = [m for m in high_importance(min_importance=4, limit=2) if _is_valid_memory(m)]
+        core_raw = [m for m in high_importance(min_importance=4, limit=2) if _is_valid_memory(m)]
 
-    if user_input and len(user_input.strip()) >= 2:
-        related_raw = _hybrid_search(user_input.strip(), limit=total_limit)
-    else:
-        related_raw = recent(total_limit)
+        if user_input and len(user_input.strip()) >= 2:
+            related_raw = _hybrid_search(user_input.strip(), limit=total_limit)
+        else:
+            related_raw = recent(total_limit)
 
-    # 去重 + 过滤
-    seen: set[int] = set()
-    combined: list[dict] = []
-    for m in core_raw + related_raw:
-        mid = m["id"]
-        if mid in seen or not _is_valid_memory(m):
-            continue
-        seen.add(mid)
-        combined.append(m)
+        # 去重 + 过滤
+        seen: set[int] = set()
+        combined: list[dict] = []
+        for m in core_raw + related_raw:
+            mid = m["id"]
+            if mid in seen or not _is_valid_memory(m):
+                continue
+            seen.add(mid)
+            combined.append(m)
 
-    selected = select_context_memories(
-        combined,
-        intent=intent,
-        trigger=trigger,
-        limit=total_limit,
-    )
-    selected_ids = {m["id"] for m in selected}
-    core_ids = {m["id"] for m in core_raw}
-    core = [m for m in selected if m["id"] in core_ids]
-    related = [m for m in selected if m["id"] not in core_ids]
+        selected = select_context_memories(
+            combined,
+            intent=intent,
+            trigger=trigger,
+            limit=total_limit,
+        )
+        if block_types:
+            allowed = {bt for bt in block_types if bt}
+            if allowed:
+                selected = [m for m in selected if m.get("block_type") in allowed]
+        selected_ids = {m["id"] for m in selected}
+        core_ids = {m["id"] for m in core_raw}
+        core = [m for m in selected if m["id"] in core_ids]
+        related = [m for m in selected if m["id"] not in core_ids]
 
-    # 更新 last_used_at
-    for m in core + related:
-        update_last_used(m["id"])
+        # 更新 last_used_at
+        for m in core + related:
+            update_last_used(m["id"])
 
-    return core, related
+        span["core_count"] = len(core)
+        span["related_count"] = len(related)
+        return core, related
 
 
 def _recency_tier(created_at: str | None) -> int:
@@ -217,3 +227,8 @@ def format_for_prompt(core: list, related: list) -> str:
         parts.append("\n".join(lines))
 
     return "\n\n".join(parts)
+
+
+def filter_by_block_type(block_type: str, limit: int = 20, label: str | None = None) -> list[dict]:
+    from memory.store import list_by_block_type
+    return list_by_block_type(block_type, limit=limit, label=label)

@@ -1350,6 +1350,29 @@ def _chat(payload: dict) -> dict:
 _api_extract_thread: threading.Thread | None = None
 
 
+def _yield_memory_compaction_events():
+    """Run compaction if thresholds met; yield a lightweight tool event for Desktop."""
+    try:
+        from core.orchestrator import maybe_run_memory_compaction_after_turn
+
+        result = maybe_run_memory_compaction_after_turn()
+        if result and result.get("archivedCount", 0) > 0:
+            yield _tool_event(
+                f"memory-compact-{uuid4().hex[:8]}",
+                "memory.compact",
+                "complete",
+                "low",
+                "已整理记忆",
+                (
+                    f"archived: {result['archivedCount']}, "
+                    f"summary_id: {result.get('summaryId')}, "
+                    f"reason: {result.get('reason', '')}"
+                ),
+            )
+    except Exception as exc:
+        logger.warning("[memory] compaction failed: %s", exc)
+
+
 def _do_extract_api(history: list[dict]) -> None:
     if len(history) < 2:
         return
@@ -1402,6 +1425,8 @@ def _do_extract_api(history: list[dict]) -> None:
                 confidence=m.get("confidence", 0.7),
                 depth=m.get("depth", 3),
                 suggest_reason=suggest_reason,
+                block_type=m.get("block_type"),
+                label=m.get("label"),
             )
             staged += 1
         logger.info(
@@ -1442,6 +1467,7 @@ def _iter_chat_chunks(
     try:
         from core.orchestrator import (
             build_task_plan,
+            format_matched_skills_for_prompt,
             format_mode_constraints_for_prompt,
             format_task_plan_for_prompt,
             orchestrate_user_input,
@@ -1452,6 +1478,7 @@ def _iter_chat_chunks(
         task_plan = build_task_plan(query, orchestration)
         task_plan_block = format_task_plan_for_prompt(task_plan)
         mode_constraint_block = format_mode_constraints_for_prompt(orchestration)
+        matched_skills_block = format_matched_skills_for_prompt(orchestration.matched_skills)
         plan_event = _plan_event_from_task_plan(task_plan, query)
         orchestration_event = orchestration_to_event_dict(orchestration)
     except Exception:
@@ -1459,6 +1486,7 @@ def _iter_chat_chunks(
         memory_scope = None
         task_plan_block = ""
         mode_constraint_block = ""
+        matched_skills_block = ""
         plan_event = None
         orchestration_event = None
     intent = intent_info["intent"]
@@ -1832,6 +1860,7 @@ def _iter_chat_chunks(
             memory_scope=memory_scope,
             task_plan_block=task_plan_block,
             mode_constraint_block=mode_constraint_block,
+            matched_skills_block=matched_skills_block,
             needs_project_context=(
                 orchestration.needs_project_context if orchestration else None
             ),
@@ -2054,5 +2083,8 @@ def _iter_chat_chunks(
                 str(exc)[:240],
                 False,
             )
+
+    for event in _yield_memory_compaction_events():
+        yield event
 
     yield {"type": "done", "done": True}

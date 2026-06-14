@@ -34,6 +34,9 @@ type 从以下分类中选一个:
 
 depth 字段必须给出:1=事实,2=偏好/习惯,3=模式,4=价值/叙事,5=精神母题。
 
+block_type 从以下枚举选一个: human / persona / preference / decision / event / insight
+label 可选，80 字内标签，如 writing_style、core_values；拿不准留空。
+
 如果提炼内容涉及以下情况,在 obsidian_hint 字段给出写回建议:
 - 用户价值观/防御模式/核心特征变化 → "SOUL.md"
 - 新项目/人生方向/当前目标变化 → "MEMORY.md"
@@ -42,7 +45,7 @@ depth 字段必须给出:1=事实,2=偏好/习惯,3=模式,4=价值/叙事,5=精
 以 JSON 格式返回:
 {
   "memories": [
-    {"content": "一句话中文记忆", "tags": "标签1,标签2", "type": "value", "importance": 3, "depth": 4, "obsidian_hint": ""}
+    {"content": "一句话中文记忆", "tags": "标签1,标签2", "type": "value", "importance": 3, "depth": 4, "block_type": "human", "label": "core_values", "obsidian_hint": ""}
   ]
 }
 
@@ -149,6 +152,10 @@ def _clean_memory(m: dict) -> dict | None:
     if mtype in {"value", "life_theme", "project_mythology", "reflection_anchor"}:
         importance = max(4, importance)
 
+    from memory.store import infer_block_type, normalize_label
+    resolved_block = infer_block_type(mtype, str(m.get("block_type", "")).strip() or None)
+    resolved_label = normalize_label(m.get("label"))
+
     return {
         "content": content,
         "tags": str(m.get("tags", "")).strip(),
@@ -156,6 +163,8 @@ def _clean_memory(m: dict) -> dict | None:
         "importance": importance,
         "depth": depth,
         "confidence": 0.7,
+        "block_type": resolved_block,
+        "label": resolved_label,
         "obsidian_hint": str(m.get("obsidian_hint", "")).strip(),
     }
 

@@ -15,7 +15,8 @@ from rich.live import Live
 from rich.panel import Panel
 from rich.table import Table
 
-from core.llm import stream_chat, load_config, get_last_usage, get_session_tokens, pop_config_reloaded
+from core.hooks import HookContext, run_hooks
+from core.llm import stream_chat, load_config, get_last_usage, get_session_tokens, pop_config_reloaded, reset_session_tokens
 from core.context import (
     build_messages, is_heavy_query, classify_query_intent,
     augment_retrieval_query,
@@ -288,7 +289,13 @@ def run():
         pass
     cfg = load_config()
     session = Session()
+    reset_session_tokens()
     skills = load_skills()
+    run_hooks(
+        "SessionStart",
+        HookContext(event="SessionStart", session_id=_current_session_id),
+        cfg=cfg,
+    )
 
     # ── MCP 初始化（可选，配置驱动）─────────────────────────────────────────
     _mcp_manager = None
@@ -296,7 +303,7 @@ def run():
     try:
         _mcp_manager = mcp_load(cfg)
         if _mcp_manager:
-            _mcp_skills = _mcp_manager.make_skill_modules()
+            _mcp_skills = _mcp_manager.make_deferred_registry()
     except Exception as _e:
         console.print(f"[dim]MCP 初始化失败，已跳过：{_e}[/dim]")
 
@@ -338,7 +345,7 @@ def run():
         ):
             console.print("[dim]上下文接近预算，正在压缩…[/dim]")
             try:
-                session.history = compress(session.history)
+                session.history = compress(session.history, cfg=cfg)
                 console.print("[dim]压缩完成，上下文已精简。[/dim]")
             except Exception as e:
                 console.print(f"[dim]压缩失败，跳过：{e}[/dim]")
@@ -363,6 +370,11 @@ def run():
             )
         except (KeyboardInterrupt, EOFError):
             console.print()
+            run_hooks(
+                "SessionStop",
+                HookContext(event="SessionStop", session_id=_current_session_id),
+                cfg=cfg,
+            )
             _wait_for_extract()
             if len(session.history) >= 2:
                 _auto_extract(session.history, silent=True)
@@ -532,7 +544,8 @@ def run():
             active_skills = _turn.filtered_skills
             # MCP 工具：三条件策略注入（recent/server_name/capability_keyword）
             if _mcp_skills and _should_inject_mcp(user_text, _mcp_skills, cfg):
-                active_skills = {**active_skills, **_mcp_skills}
+                from skills.loader import ChainSkillRegistry
+                active_skills = ChainSkillRegistry(active_skills, _mcp_skills)
             if active_skills:
                 full_response = _run_with_tools(messages, active_skills, model=active_model, cfg=cfg, user_input=user_text)
                 # DSML 救援：tool_loop 末尾 stream_fn 在工具调用上下文残留时输出 DSML

@@ -31,6 +31,8 @@ from core.intent import (
     is_heavy_query,
     should_clarify,
 )
+from core.layered_config import load_layered_file, load_project_archer_layers, resolve_project_root
+from core.observability import trace_span
 from core.persona import FIRST_RUN_PATH, build_core_persona
 
 # ── Runtime Safety Rules（每轮必注入）──────────────────────────────────────────
@@ -83,6 +85,14 @@ def _get_mode_prompt(cfg: dict, mode: str | None = None) -> str:
         mode_file = Path(modes_dir).expanduser() / f"{current}.md"
         if mode_file.is_file():
             return mode_file.read_text(encoding="utf-8")
+    try:
+        from core.plugin import find_plugin_mode_file
+
+        plugin_mode = find_plugin_mode_file(current)
+        if plugin_mode is not None:
+            return plugin_mode.read_text(encoding="utf-8")
+    except Exception:
+        pass
     modes = cfg.get("persona", {}).get("modes", {})
     return modes.get(current, {}).get("prompt", "")
 
@@ -258,6 +268,7 @@ def build_system_prompt(
     memory_scope: list[str] | None = None,
     task_plan_block: str = "",
     mode_constraint_block: str = "",
+    matched_skills_block: str = "",
     needs_project_context: bool | None = None,
     context_limits: ContextLimits | None = None,
 ) -> str:
@@ -273,177 +284,190 @@ def build_system_prompt(
     Layer 6: 活跃项目（project/task 时）
     Layer 7: Retrieved Memories（外部传入时）
     """
-    mode_prompt = _get_mode_prompt(cfg, mode_override)
-    limits = context_limits or resolve_context_limits(
-        memory_scope,
-        needs_memory=heavy,
-    )
-
-    # 加载灵魂三层文件
-    covenant_text = _load_file(cfg["persona"].get("covenant_path", ""))
-    presence_text = _load_file(cfg["persona"].get("presence_path", ""))
-
-    _SOUL_MD_SCOPES = {"soul", "emotion", "values", "period_review", "journal"}
-    _SOUL_PROFILE_SCOPES = {
-        "soul", "emotion", "patterns", "values", "constraints",
-        "past_decisions", "period_review", "journal",
-    }
-    _PROJECT_SCOPES = {"project", "work", "subtask"}
-
-    needs_soul = intent in ("decision", "emotional", "reflection") if intent else heavy
-    if memory_scope is not None:
-        needs_soul = needs_soul and any(scope in _SOUL_MD_SCOPES for scope in memory_scope)
-
-    runtime_info = (
-        f"[运行时信息]\n"
-        f"当前时间：{datetime.now().strftime('%Y-%m-%d %H:%M')}  "
-        f"工作目录：{os.getcwd()}"
-    )
-
-    parts: list[str] = []
-
-    # Layer 0: Runtime Safety
-    parts.append(_RUNTIME_SAFETY)
-    parts.append(runtime_info)
-
-    # Layer 1: COVENANT 摘要
-    if covenant_text:
-        covenant_summary = _extract_covenant_summary(covenant_text)
-        parts.append(f"[根契约摘要]\n{covenant_summary}")
-
-    # Layer 2: PRESENCE 摘要
-    if presence_text:
-        presence_summary = _extract_presence_summary(presence_text)
-        parts.append(f"[在场方式]\n{presence_summary}")
-
-    # Layer 3: 核心人格 + mode
-    parts.append(build_core_persona())
-    parts.append(_ARCHER_CORE)
-    if mode_prompt:
-        parts.append(mode_prompt)
-
-    try:
-        from core.writing import load_writing_prompt_blocks, resolve_writing_profile
-        profile = writing_profile
-        query_for_writing = (writing_query or "").strip()
-        if not query_for_writing and isinstance(user_input, str):
-            query_for_writing = user_input.strip()
-        if profile is None and query_for_writing:
-            profile = resolve_writing_profile(
-                query_for_writing, cfg, mode=mode_override or cfg["persona"].get("current_mode"),
-            )
-        for block in load_writing_prompt_blocks(cfg, profile):
-            parts.append(block)
-    except Exception:
-        pass
-
-    if emotion_hint:
-        parts.append(emotion_hint)
-
-    if thread_hint and thread_hint.get("topic"):
-        turns = thread_hint.get("turns", 1)
-        parts.append(
-            f"[当前对话线程] 正在讨论：{thread_hint['topic']}（第 {turns} 轮）"
+    with trace_span("context.build_system_prompt", heavy=heavy, intent=intent or "") as span:
+        mode_prompt = _get_mode_prompt(cfg, mode_override)
+        limits = context_limits or resolve_context_limits(
+            memory_scope,
+            needs_memory=heavy,
         )
 
-    if first_run:
-        parts.append(FIRST_RUN_PATH)
+        # 加载灵魂三层文件（含 *.local.md 覆盖）
+        covenant_text = load_layered_file(cfg["persona"].get("covenant_path", ""))
+        presence_text = load_layered_file(cfg["persona"].get("presence_path", ""))
+        project_archer = load_project_archer_layers(cfg=cfg)
 
-    # Layer 4: SOUL（按需注入）
-    if needs_soul:
-        soul = _load_file(cfg["persona"].get("soul_path", ""))
-        if soul:
-            parts.append(tag_context_block("soul_md", f"[灵魂档案（SOUL.md）]\n{soul}"))
+        _SOUL_MD_SCOPES = {"soul", "emotion", "values", "period_review", "journal"}
+        _SOUL_PROFILE_SCOPES = {
+            "soul", "emotion", "patterns", "values", "constraints",
+            "past_decisions", "period_review", "journal",
+        }
+        _PROJECT_SCOPES = {"project", "work", "subtask"}
 
-    # Layer 4.5: Soul Profile（紧凑结构化摘要，不注入完整档案）
-    include_soul_profile = True
-    if memory_scope is not None:
-        include_soul_profile = any(scope in _SOUL_PROFILE_SCOPES for scope in memory_scope)
-    if include_soul_profile:
+        needs_soul = intent in ("decision", "emotional", "reflection") if intent else heavy
+        if memory_scope is not None:
+            needs_soul = needs_soul and any(scope in _SOUL_MD_SCOPES for scope in memory_scope)
+
+        runtime_info = (
+            f"[运行时信息]\n"
+            f"当前时间：{datetime.now().strftime('%Y-%m-%d %H:%M')}  "
+            f"工作目录：{os.getcwd()}"
+        )
+
+        parts: list[str] = []
+
+        # Layer 0: Runtime Safety
+        parts.append(_RUNTIME_SAFETY)
+        parts.append(runtime_info)
+
+        # Layer 1: COVENANT 摘要
+        if covenant_text:
+            covenant_summary = _extract_covenant_summary(covenant_text)
+            parts.append(f"[根契约摘要]\n{covenant_summary}")
+
+        # Layer 2: PRESENCE 摘要
+        if presence_text:
+            presence_summary = _extract_presence_summary(presence_text)
+            parts.append(f"[在场方式]\n{presence_summary}")
+
+        if project_archer:
+            parts.append(tag_context_block(
+                "archer_project",
+                f"[项目约定（ARCHER.md）]\n{project_archer}",
+            ))
+
+        # Layer 3: 核心人格 + mode
+        parts.append(build_core_persona(cfg=cfg))
+        parts.append(_ARCHER_CORE)
+        if mode_prompt:
+            parts.append(mode_prompt)
+
         try:
-            from memory.soul_profile import load_soul_profile, format_soul_profile_for_prompt
-            soul_profile = load_soul_profile(cfg["persona"].get("soul_profile_path", ""))
-            soul_profile_text = format_soul_profile_for_prompt(
-                soul_profile,
-                intent=intent,
-                user_input=user_input,
-                limit=limits.soul_profile,
-            )
-            if soul_profile_text:
-                parts.append(tag_context_block("soul_profile", soul_profile_text))
+            from core.writing import load_writing_prompt_blocks, resolve_writing_profile
+            profile = writing_profile
+            query_for_writing = (writing_query or "").strip()
+            if not query_for_writing and isinstance(user_input, str):
+                query_for_writing = user_input.strip()
+            if profile is None and query_for_writing:
+                profile = resolve_writing_profile(
+                    query_for_writing, cfg, mode=mode_override or cfg["persona"].get("current_mode"),
+                )
+            for block in load_writing_prompt_blocks(cfg, profile):
+                parts.append(block)
         except Exception:
             pass
 
-    # Layer 5: MEMORY.md
-    #
-    # Backward compatible default: old callers still use ``heavy``.
-    # New orchestrated callers can pass memory_scope to avoid injecting the
-    # whole working memory for narrow scopes such as writing style.
-    include_memory_md = heavy
-    if memory_scope is not None:
-        include_memory_md = any(
-            scope in {"project", "work", "recent", "period_review", "journal"}
-            for scope in memory_scope
+        if emotion_hint:
+            parts.append(emotion_hint)
+
+        if thread_hint and thread_hint.get("topic"):
+            turns = thread_hint.get("turns", 1)
+            parts.append(
+                f"[当前对话线程] 正在讨论：{thread_hint['topic']}（第 {turns} 轮）"
+            )
+
+        if first_run:
+            parts.append(FIRST_RUN_PATH)
+
+        # Layer 4: SOUL（按需注入）
+        if needs_soul:
+            soul = load_layered_file(cfg["persona"].get("soul_path", ""))
+            if soul:
+                parts.append(tag_context_block("soul_md", f"[灵魂档案（SOUL.md）]\n{soul}"))
+
+        # Layer 4.5: Soul Profile（紧凑结构化摘要，不注入完整档案）
+        include_soul_profile = True
+        if memory_scope is not None:
+            include_soul_profile = any(scope in _SOUL_PROFILE_SCOPES for scope in memory_scope)
+        if include_soul_profile:
+            try:
+                from memory.soul_profile import load_soul_profile, format_soul_profile_for_prompt
+                soul_profile = load_soul_profile(cfg["persona"].get("soul_profile_path", ""))
+                soul_profile_text = format_soul_profile_for_prompt(
+                    soul_profile,
+                    intent=intent,
+                    user_input=user_input,
+                    limit=limits.soul_profile,
+                )
+                if soul_profile_text:
+                    parts.append(tag_context_block("soul_profile", soul_profile_text))
+            except Exception:
+                pass
+
+        # Layer 5: MEMORY.md
+        #
+        # Backward compatible default: old callers still use ``heavy``.
+        # New orchestrated callers can pass memory_scope to avoid injecting the
+        # whole working memory for narrow scopes such as writing style.
+        include_memory_md = heavy
+        if memory_scope is not None:
+            include_memory_md = any(
+                scope in {"project", "work", "recent", "period_review", "journal"}
+                for scope in memory_scope
+            )
+        if include_memory_md:
+            memory_text = load_layered_file(cfg["persona"].get("memory_path", ""))
+            if memory_text and limits.memory_md_max_chars:
+                memory_text = memory_text[: limits.memory_md_max_chars]
+            if memory_text:
+                parts.append(tag_context_block(
+                    "memory_md",
+                    f"[当前记忆与状态（MEMORY.md）]\n{memory_text}",
+                ))
+
+        inject_project_work = needs_project_context
+        if inject_project_work is None:
+            inject_project_work = intent in ("project", "task") if intent else False
+        if memory_scope is not None:
+            inject_project_work = inject_project_work or any(
+                scope in _PROJECT_SCOPES for scope in memory_scope
+            )
+
+        # Layer 6: 活跃项目
+        if project and inject_project_work:
+            proj_ctx = _format_project_context(
+                project, project_events, event_limit=limits.project_events,
+            )
+            parts.append(tag_context_block("project", proj_ctx))
+
+        # Layer 6.5: 进行中的 Work items（project/task 类请求时注入）
+        if inject_project_work:
+            work_ctx = _format_work_context(limit=limits.work_items)
+            if work_ctx:
+                parts.append(tag_context_block("work", work_ctx))
+
+        # Layer 6.8: 对峙提醒（当用户言行与过去矛盾时注入）
+        if confrontation_hints:
+            hints_text = "[对峙提醒]\n你过去说过以下内容，可能与当前对话相关。如果用户现在的言行与这些矛盾，请温和地指出变化，并询问变化的原因——不是指责，是观察。\n"
+            hints_text += "\n".join(f"- {h}" for h in confrontation_hints)
+            parts.append(hints_text)
+
+        # Layer 7: Retrieved Memories
+        if db_memories:
+            parts.append(tag_context_block("memory.retrieve", db_memories))
+
+        if mode_constraint_block:
+            parts.append(tag_context_block("orchestration.mode", mode_constraint_block))
+
+        if task_plan_block:
+            parts.append(tag_context_block("orchestration.plan", task_plan_block))
+
+        if matched_skills_block:
+            parts.append(tag_context_block("orchestration.skills", matched_skills_block))
+
+        parts.append(
+            "[能力边界]\n"
+            "你有本地工具能力来完成用户的请求——文件读写、Shell 命令、代码搜索、网页获取等。"
+            "自然地使用这些工具完成用户的要求。如果遇到确实超出你能力范围的任务，"
+            "诚实地说明局限，并提供你能做到的最接近替代方案。"
+            "用工具不意味着你成了工具箱——用工具是你完成职责的手段。"
         )
-    if include_memory_md:
-        memory_text = _load_file(cfg["persona"].get("memory_path", ""))
-        if memory_text and limits.memory_md_max_chars:
-            memory_text = memory_text[: limits.memory_md_max_chars]
-        if memory_text:
-            parts.append(tag_context_block(
-                "memory_md",
-                f"[当前记忆与状态（MEMORY.md）]\n{memory_text}",
-            ))
 
-    inject_project_work = needs_project_context
-    if inject_project_work is None:
-        inject_project_work = intent in ("project", "task") if intent else False
-    if memory_scope is not None:
-        inject_project_work = inject_project_work or any(
-            scope in _PROJECT_SCOPES for scope in memory_scope
-        )
-
-    # Layer 6: 活跃项目
-    if project and inject_project_work:
-        proj_ctx = _format_project_context(
-            project, project_events, event_limit=limits.project_events,
-        )
-        parts.append(tag_context_block("project", proj_ctx))
-
-    # Layer 6.5: 进行中的 Work items（project/task 类请求时注入）
-    if inject_project_work:
-        work_ctx = _format_work_context(limit=limits.work_items)
-        if work_ctx:
-            parts.append(tag_context_block("work", work_ctx))
-
-    # Layer 6.8: 对峙提醒（当用户言行与过去矛盾时注入）
-    if confrontation_hints:
-        hints_text = "[对峙提醒]\n你过去说过以下内容，可能与当前对话相关。如果用户现在的言行与这些矛盾，请温和地指出变化，并询问变化的原因——不是指责，是观察。\n"
-        hints_text += "\n".join(f"- {h}" for h in confrontation_hints)
-        parts.append(hints_text)
-
-    # Layer 7: Retrieved Memories
-    if db_memories:
-        parts.append(tag_context_block("memory.retrieve", db_memories))
-
-    if mode_constraint_block:
-        parts.append(tag_context_block("orchestration.mode", mode_constraint_block))
-
-    if task_plan_block:
-        parts.append(tag_context_block("orchestration.plan", task_plan_block))
-
-    parts.append(
-        "[能力边界]\n"
-        "你有本地工具能力来完成用户的请求——文件读写、Shell 命令、代码搜索、网页获取等。"
-        "自然地使用这些工具完成用户的要求。如果遇到确实超出你能力范围的任务，"
-        "诚实地说明局限，并提供你能做到的最接近替代方案。"
-        "用工具不意味着你成了工具箱——用工具是你完成职责的手段。"
-    )
-
-    return "\n\n".join(parts)
+        result = "\n\n".join(parts)
+        span["prompt_chars"] = len(result)
+        return result
 
 
-def build_desktop_core_prompt() -> str:
+def build_desktop_core_prompt(cfg: dict | None = None) -> str:
     """构建 Desktop API 使用的核心 persona 提示词。
 
     与 Terminal CLI 的 build_system_prompt() 不同，Desktop 使用精简版——
@@ -451,8 +475,11 @@ def build_desktop_core_prompt() -> str:
     客户端通过 /soul-files 等端点独立管理），只注入核心 persona + 工具态度。
     """
     try:
-        from core.persona import build_core_persona
-        return f"{build_core_persona()}\n\n{_ARCHER_CORE}"
+        if cfg is None:
+            from core.llm import load_config
+
+            cfg = load_config()
+        return f"{build_core_persona(cfg=cfg)}\n\n{_ARCHER_CORE}"
     except Exception:
         return "Archer 的核心身份是长期陪伴型 AI 灵魂伴生体。"
 
@@ -476,6 +503,7 @@ def build_messages(
     memory_scope: list[str] | None = None,
     task_plan_block: str = "",
     mode_constraint_block: str = "",
+    matched_skills_block: str = "",
     needs_project_context: bool | None = None,
     context_limits: ContextLimits | None = None,
 ) -> list[dict]:

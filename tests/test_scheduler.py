@@ -280,3 +280,25 @@ def test_run_task_by_id_ok():
 def test_run_task_by_id_nonexistent():
     db = _make_db()
     assert run_task_by_id(999, {}, db_path=db) is None
+
+
+def test_sync_schedules_json_writes_mirror(tmp_path):
+    from core.scheduler import SCHEDULES_JSON_PATH, sync_schedules_json
+
+    db = _make_db()
+    add_task("weather", "daily", "morning check", db_path=db)
+
+    json_path = tmp_path / "schedules.json"
+    import core.scheduler as sched_mod
+    orig_json = sched_mod.SCHEDULES_JSON_PATH
+    sched_mod.SCHEDULES_JSON_PATH = json_path
+    try:
+        sync_schedules_json(db)
+        assert json_path.exists()
+        payload = json.loads(json_path.read_text(encoding="utf-8"))
+        assert payload["version"] == 1
+        assert len(payload["tasks"]) == 1
+        assert payload["tasks"][0]["skillName"] == "weather"
+        assert payload["tasks"][0]["intervalLabel"] == "每天"
+    finally:
+        sched_mod.SCHEDULES_JSON_PATH = orig_json

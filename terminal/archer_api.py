@@ -279,13 +279,24 @@ def main() -> None:
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--token", default="")
+    parser.add_argument(
+        "--legacy",
+        action="store_true",
+        help="Use legacy BaseHTTPRequestHandler server instead of FastAPI",
+    )
     args = parser.parse_args()
     DESKTOP_API_TOKEN = args.token or os.environ.get("ARCHER_DESKTOP_TOKEN", "")
 
-    server = ThreadingHTTPServer((args.host, args.port), Handler)
-    _log_info("server", f"Archer Desktop API listening on http://{args.host}:{args.port}")
-    print(f"Archer Desktop API listening on http://{args.host}:{args.port}")
-    server.serve_forever()
+    if args.legacy:
+        server = ThreadingHTTPServer((args.host, args.port), Handler)
+        _log_info("server", f"Archer Desktop API (legacy) listening on http://{args.host}:{args.port}")
+        print(f"Archer Desktop API (legacy) listening on http://{args.host}:{args.port}")
+        server.serve_forever()
+        return
+
+    from terminal.api.fastapi_app import run_fastapi_server
+
+    run_fastapi_server(args.host, args.port, DESKTOP_API_TOKEN)
 
 
 if __name__ == "__main__":

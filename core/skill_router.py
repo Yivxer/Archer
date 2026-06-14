@@ -373,4 +373,41 @@ def select_skills(user_input: str, all_skills: Mapping[str, Any]) -> dict:
                 selected.update(skill_names)
                 break
 
-    return {name: mod for name, mod in all_skills.items() if name in selected}
+    return {name: all_skills[name] for name in selected if name in all_skills}
+
+
+def auto_match_skills(
+    user_input: str,
+    *,
+    intent: str | None = None,
+    all_skills: Mapping[str, Any] | None = None,
+    limit: int = 6,
+) -> list[str]:
+    """Return ranked skill names for orchestration hints (keyword + router merge)."""
+    if not user_input or not user_input.strip():
+        return []
+
+    from skills.loader import get_skill_meta, load_skills
+
+    registry = all_skills if all_skills is not None else load_skills()
+    if not registry:
+        return []
+
+    lower = user_input.lower()
+    scores: dict[str, int] = {}
+
+    for name in select_skills(user_input, registry):
+        scores[name] = scores.get(name, 0) + 5
+
+    for name in registry:
+        meta = registry.get_meta(name) if hasattr(registry, "get_meta") else get_skill_meta(registry[name])
+        if meta is None or not meta.auto_trigger:
+            continue
+        for keyword in meta.keywords:
+            if keyword.lower() in lower:
+                scores[name] = scores.get(name, 0) + 3
+        if intent in {"task", "project"} and meta.risk in {"medium", "high", "critical"}:
+            scores[name] = scores.get(name, 0) + 1
+
+    ranked = sorted(scores.items(), key=lambda item: (-item[1], item[0]))
+    return [name for name, score in ranked[:limit] if score > 0]

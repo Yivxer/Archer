@@ -1,7 +1,10 @@
 import json
 from datetime import datetime
 from pathlib import Path
+
 from core.paths import sessions_dir
+from core.session_store import dump_session_file
+from core.token_usage import session_usage_for_file
 
 SESSIONS_DIR = sessions_dir(Path(__file__).parent.parent / "memory" / "sessions")
 
@@ -19,7 +22,7 @@ class Session:
         filename = self.started_at.strftime("%Y%m%d_%H%M%S") + ".json"
         path = SESSIONS_DIR / filename
         path.write_text(
-            json.dumps(self.history, ensure_ascii=False, indent=2),
+            dump_session_file(self.history, token_usage=session_usage_for_file()),
             encoding="utf-8",
         )
         return path
