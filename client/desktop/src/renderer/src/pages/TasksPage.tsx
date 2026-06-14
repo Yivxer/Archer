@@ -1,18 +1,50 @@
 import React from 'react'
-import { Check, ChevronRight, Clock3, Loader2, Plus, RotateCcw, X } from 'lucide-react'
-import { cancelBackgroundJob, listBackgroundJobs, retryBackgroundJob, spawnChildJobs } from '../adapters/localArcher'
+import { Check, ChevronRight, Clock3, Copy, Loader2, Plus, Trash2, X } from 'lucide-react'
+import { cancelBackgroundJob, fetchBackgroundJob, listBackgroundJobs, retryBackgroundJob, spawnChildJobs } from '../adapters/localArcher'
 import { EmptyDetail, SearchBox } from '../components/common'
-import type { ArcherAdapter, BackgroundJob } from '../types'
+import type { ArcherAdapter, BackgroundJob, BackgroundJobChildSummary } from '../types'
 import type { SpawnChildSpec } from '../adapters/localArcher'
 
 type LoadState = 'idle' | 'loading' | 'error'
 
+type ChildDraft = {
+  key: string
+  title: string
+  kind: string
+  prompt: string
+  autoStart: boolean
+}
+
+function createChildDraft(): ChildDraft {
+  return {
+    key: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    title: '',
+    kind: 'analysis',
+    prompt: '',
+    autoStart: false,
+  }
+}
+
 export function TasksPage({ data }: { data: ArcherAdapter }) {
   const [jobs, setJobs] = React.useState<BackgroundJob[]>([])
   const [selectedId, setSelectedId] = React.useState('')
+  const [jobDetail, setJobDetail] = React.useState<BackgroundJob | null>(null)
   const [query, setQuery] = React.useState('')
   const [loadState, setLoadState] = React.useState<LoadState>('idle')
   const [notice, setNotice] = React.useState('')
+
+  async function loadJobDetail(jobId: string) {
+    if (!jobId || data.status.adapter !== 'local') {
+      setJobDetail(null)
+      return
+    }
+    try {
+      const detail = await fetchBackgroundJob(jobId)
+      setJobDetail(detail)
+    } catch {
+      setJobDetail(null)
+    }
+  }
 
   async function refreshJobs() {
     if (data.status.adapter !== 'local') return
@@ -21,9 +53,15 @@ export function TasksPage({ data }: { data: ArcherAdapter }) {
     try {
       const result = await listBackgroundJobs()
       setJobs(result.jobs)
-      setSelectedId((current) => current && result.jobs.some((job) => job.id === current)
-        ? current
-        : result.jobs[0]?.id || '')
+      const nextId = selectedId && result.jobs.some((job) => job.id === selectedId)
+        ? selectedId
+        : result.jobs[0]?.id || ''
+      setSelectedId(nextId)
+      if (nextId) {
+        await loadJobDetail(nextId)
+      } else {
+        setJobDetail(null)
+      }
       setLoadState('idle')
     } catch (error) {
       setLoadState('error')
@@ -35,11 +73,16 @@ export function TasksPage({ data }: { data: ArcherAdapter }) {
     void refreshJobs()
   }, [data.status.adapter])
 
+  React.useEffect(() => {
+    void loadJobDetail(selectedId)
+  }, [selectedId, data.status.adapter])
+
   async function cancelJob(job: BackgroundJob) {
     try {
       const result = await cancelBackgroundJob(job.id)
       upsertJob(result.job)
       setNotice(result.message)
+      await loadJobDetail(job.id)
     } catch (error) {
       setNotice(error instanceof Error ? error.message : '取消失败')
     }
@@ -56,9 +99,9 @@ export function TasksPage({ data }: { data: ArcherAdapter }) {
     }
   }
 
-  async function spawnChildJob(job: BackgroundJob, spec: SpawnChildSpec) {
+  async function spawnChildJobsForParent(job: BackgroundJob, specs: SpawnChildSpec[]) {
     try {
-      const result = await spawnChildJobs(job.id, [spec])
+      const result = await spawnChildJobs(job.id, specs)
       setNotice(`已创建 ${result.spawned} 个子任务`)
       await refreshJobs()
     } catch (error) {
@@ -81,6 +124,7 @@ export function TasksPage({ data }: { data: ArcherAdapter }) {
       .includes(clean))
   }, [jobs, query])
   const selected = visibleJobs.find((job) => job.id === selectedId) ?? visibleJobs[0]
+  const selectedDetail = selected && jobDetail?.id === selected.id ? jobDetail : selected
 
   React.useEffect(() => {
     if (visibleJobs.length && !visibleJobs.some((job) => job.id === selectedId)) {
@@ -127,13 +171,13 @@ export function TasksPage({ data }: { data: ArcherAdapter }) {
         )}
       </div>
 
-      {selected ? (
+      {selectedDetail ? (
         <TaskDetail
-          job={selected}
+          job={selectedDetail}
           notice={notice}
-          onCancel={() => void cancelJob(selected)}
-          onRetry={() => void retryJob(selected)}
-          onSpawnChild={(spec) => spawnChildJob(selected, spec)}
+          onCancel={() => void cancelJob(selectedDetail)}
+          onRetry={() => void retryJob(selectedDetail)}
+          onSpawnChildren={(specs) => spawnChildJobsForParent(selectedDetail, specs)}
         />
       ) : (
         <EmptyDetail icon={Clock3} title="暂无任务" text="后台 jobs 记录为空。" />
@@ -147,40 +191,68 @@ function TaskDetail({
   notice,
   onCancel,
   onRetry,
-  onSpawnChild,
+  onSpawnChildren,
 }: {
   job: BackgroundJob
   notice: string
   onCancel: () => void
   onRetry: () => void
-  onSpawnChild: (spec: SpawnChildSpec) => Promise<void>
+  onSpawnChildren: (specs: SpawnChildSpec[]) => Promise<void>
 }) {
   const isActive = job.status === 'queued' || job.status === 'running' || job.status === 'waiting_approval'
   const canRetry = job.status === 'failed' || job.status === 'cancelled'
   const StatusIcon = isActive ? Loader2 : job.status === 'complete' ? Check : X
   const [showChildForm, setShowChildForm] = React.useState(false)
-  const [childTitle, setChildTitle] = React.useState('')
-  const [childKind, setChildKind] = React.useState('analysis')
-  const [childPrompt, setChildPrompt] = React.useState('')
-  const [childAutoStart, setChildAutoStart] = React.useState(false)
+  const [childDrafts, setChildDrafts] = React.useState<ChildDraft[]>([createChildDraft()])
+  const [copyNotice, setCopyNotice] = React.useState('')
+  const children = job.children ?? []
+  const childProgress = summarizeChildProgress(children)
+  const childSummaryText = buildChildJobsSummary(children)
 
-  async function handleSpawnChild(event: React.FormEvent<HTMLFormElement>) {
+  function updateDraft(key: string, patch: Partial<ChildDraft>) {
+    setChildDrafts((current) => current.map((draft) => (
+      draft.key === key ? { ...draft, ...patch } : draft
+    )))
+  }
+
+  function addDraftRow() {
+    setChildDrafts((current) => [...current, createChildDraft()])
+  }
+
+  function removeDraftRow(key: string) {
+    setChildDrafts((current) => (
+      current.length <= 1 ? current : current.filter((draft) => draft.key !== key)
+    ))
+  }
+
+  async function handleSpawnChildren(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    const title = childTitle.trim()
-    const prompt = childPrompt.trim()
-    if (!title || !prompt) return
-    await onSpawnChild({
-      title,
-      kind: childKind,
-      prompt,
-      autoStart: childAutoStart,
-    })
-    setChildTitle('')
-    setChildPrompt('')
-    setChildKind('analysis')
-    setChildAutoStart(false)
+    const specs = childDrafts
+      .map((draft) => ({
+        title: draft.title.trim(),
+        kind: draft.kind,
+        prompt: draft.prompt.trim(),
+        autoStart: draft.autoStart,
+      }))
+      .filter((spec) => spec.title && spec.prompt)
+    if (!specs.length) return
+    await onSpawnChildren(specs)
+    setChildDrafts([createChildDraft()])
     setShowChildForm(false)
   }
+
+  async function copyChildSummary() {
+    if (!childSummaryText) return
+    try {
+      await navigator.clipboard.writeText(childSummaryText)
+      setCopyNotice('已复制子任务汇总')
+      window.setTimeout(() => setCopyNotice(''), 1800)
+    } catch {
+      setCopyNotice('复制失败')
+    }
+  }
+
+  const validDraftCount = childDrafts.filter((draft) => draft.title.trim() && draft.prompt.trim()).length
 
   return (
     <div className="session-detail task-detail">
@@ -218,30 +290,59 @@ function TaskDetail({
       {notice && <p className="detail-muted">{notice}</p>}
       {job.error && <p className="detail-error">{job.error}</p>}
       {showChildForm && (
-        <form className="task-child-form" onSubmit={(event) => void handleSpawnChild(event)}>
-          <label>
-            <span>标题</span>
-            <input value={childTitle} onChange={(event) => setChildTitle(event.target.value)} />
-          </label>
-          <label>
-            <span>类型</span>
-            <select value={childKind} onChange={(event) => setChildKind(event.target.value)}>
-              <option value="analysis">analysis</option>
-              <option value="review">review</option>
-              <option value="work">work</option>
-            </select>
-          </label>
-          <label className="task-child-prompt">
-            <span>Prompt</span>
-            <textarea value={childPrompt} onChange={(event) => setChildPrompt(event.target.value)} />
-          </label>
-          <label className="task-child-autostart">
-            <input type="checkbox" checked={childAutoStart} onChange={(event) => setChildAutoStart(event.target.checked)} />
-            <span>立即开始</span>
-          </label>
+        <form className="task-child-form" onSubmit={(event) => void handleSpawnChildren(event)}>
+          <div className="task-child-form-head">
+            <strong>批量创建子任务</strong>
+            <span>一次最多提交 20 个</span>
+          </div>
+          {childDrafts.map((draft, index) => (
+            <div className="task-child-draft-row" key={draft.key}>
+              <div className="task-child-draft-row-head">
+                <strong>子任务 {index + 1}</strong>
+                {childDrafts.length > 1 ? (
+                  <button className="quiet-button task-child-draft-remove" type="button" onClick={() => removeDraftRow(draft.key)}>
+                    <Trash2 size={14} />
+                    移除
+                  </button>
+                ) : null}
+              </div>
+              <label>
+                <span>标题</span>
+                <input value={draft.title} onChange={(event) => updateDraft(draft.key, { title: event.target.value })} />
+              </label>
+              <label>
+                <span>类型</span>
+                <select value={draft.kind} onChange={(event) => updateDraft(draft.key, { kind: event.target.value })}>
+                  <option value="analysis">analysis</option>
+                  <option value="review">review</option>
+                  <option value="work">work</option>
+                </select>
+              </label>
+              <label className="task-child-prompt">
+                <span>Prompt</span>
+                <textarea value={draft.prompt} onChange={(event) => updateDraft(draft.key, { prompt: event.target.value })} />
+              </label>
+              <label className="task-child-autostart">
+                <input
+                  type="checkbox"
+                  checked={draft.autoStart}
+                  onChange={(event) => updateDraft(draft.key, { autoStart: event.target.checked })}
+                />
+                <span>立即开始</span>
+              </label>
+            </div>
+          ))}
+          <div className="task-child-form-toolbar">
+            <button className="quiet-button" type="button" onClick={addDraftRow}>
+              <Plus size={14} />
+              添加一行
+            </button>
+          </div>
           <div className="task-child-form-actions">
             <button className="quiet-button" type="button" onClick={() => setShowChildForm(false)}>取消</button>
-            <button className="quiet-button strong" type="submit" disabled={!childTitle.trim() || !childPrompt.trim()}>创建</button>
+            <button className="quiet-button strong" type="submit" disabled={!validDraftCount}>
+              创建 {validDraftCount || ''} 个子任务
+            </button>
           </div>
         </form>
       )}
@@ -249,31 +350,47 @@ function TaskDetail({
         <h3>请求</h3>
         <p>{job.prompt}</p>
       </section>
-      {job.children?.length ? (
-        <section className="task-section">
-          <h3>子任务</h3>
-          <div className="task-child-list">
-            {job.children.map((child) => {
-              const ChildIcon = childStatusIcon(child.status)
-              return (
-                <div className={`task-child-row task-status-${child.status}`} key={child.id}>
-                  <div className="task-child-row-head">
-                    <div className={`task-child-status-icon task-status-${child.status}`}>
-                      <ChildIcon size={14} />
+      {children.length ? (
+        <>
+          <section className="task-section">
+            <div className="task-section-head">
+              <h3>子任务汇总</h3>
+              <button className="quiet-button" type="button" onClick={() => void copyChildSummary()}>
+                <Copy size={14} />
+                复制汇总
+              </button>
+            </div>
+            {copyNotice ? <p className="detail-muted">{copyNotice}</p> : null}
+            <p className="task-child-summary-stats">
+              共 {childProgress.total} 个 · 已完成 {childProgress.complete} · 进行中 {childProgress.active} · 失败/取消 {childProgress.failed}
+            </p>
+            <pre className="task-child-summary-text">{childSummaryText}</pre>
+          </section>
+          <section className="task-section">
+            <h3>子任务</h3>
+            <div className="task-child-list">
+              {children.map((child) => {
+                const ChildIcon = childStatusIcon(child.status)
+                return (
+                  <div className={`task-child-row task-status-${child.status}`} key={child.id}>
+                    <div className="task-child-row-head">
+                      <div className={`task-child-status-icon task-status-${child.status}`}>
+                        <ChildIcon size={14} />
+                      </div>
+                      <strong>{child.title || child.id}</strong>
+                      {(child.parentJobId || child.isolated) && (
+                        <span className="task-child-isolated">隔离</span>
+                      )}
                     </div>
-                    <strong>{child.title || child.id}</strong>
-                    {(child.parentJobId || child.isolated) && (
-                      <span className="task-child-isolated">隔离</span>
-                    )}
+                    <span>{jobStatusLabel(child.status)} · {formatDate(child.createdAt)}</span>
+                    {child.error ? <p className="task-child-error">{child.error}</p> : null}
+                    {child.result ? <p className="task-child-preview">{child.result}</p> : null}
                   </div>
-                  <span>{jobStatusLabel(child.status)} · {formatDate(child.createdAt)}</span>
-                  {child.error ? <p className="task-child-error">{child.error}</p> : null}
-                  {child.result ? <p className="task-child-preview">{child.result}</p> : null}
-                </div>
-              )
-            })}
-          </div>
-        </section>
+                )
+              })}
+            </div>
+          </section>
+        </>
       ) : null}
       <section className="task-section">
         <h3>结果</h3>
@@ -281,6 +398,37 @@ function TaskDetail({
       </section>
     </div>
   )
+}
+
+export function summarizeChildProgress(children: BackgroundJobChildSummary[]) {
+  return {
+    total: children.length,
+    complete: children.filter((child) => child.status === 'complete').length,
+    failed: children.filter((child) => child.status === 'failed' || child.status === 'cancelled').length,
+    active: children.filter((child) => (
+      child.status === 'queued' || child.status === 'running' || child.status === 'waiting_approval'
+    )).length,
+  }
+}
+
+export function buildChildJobsSummary(children: BackgroundJobChildSummary[]): string {
+  if (!children.length) return ''
+  const progress = summarizeChildProgress(children)
+  const lines = [
+    `子任务进度：${progress.complete}/${progress.total} 已完成，${progress.active} 进行中，${progress.failed} 失败或取消。`,
+  ]
+  for (const child of children) {
+    lines.push('')
+    lines.push(`## ${child.title || child.id}（${jobStatusLabel(child.status)}）`)
+    if (child.error) {
+      lines.push(`错误：${child.error}`)
+    } else if (child.result) {
+      lines.push(child.result)
+    } else {
+      lines.push('（暂无结果）')
+    }
+  }
+  return lines.join('\n')
 }
 
 function jobStatusLabel(status: BackgroundJob['status']): string {
