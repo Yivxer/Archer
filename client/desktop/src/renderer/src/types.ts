@@ -7,6 +7,18 @@ export type ApiConnectionState = 'idle' | 'loading' | 'connected' | 'api_offline
 export type MemoryStatus = 'confirmed' | 'pending' | 'rejected'
 export type RiskLevel = 'low' | 'medium' | 'high' | 'critical'
 
+export type TokenUsageStatus = {
+  sessionTotal: number
+  sessionPrompt: number
+  sessionCompletion: number
+  callCount: number
+  lastCallTotal: number
+  lastCallPrompt: number
+  lastCallCompletion: number
+  limit: number
+  percentUsed: number
+}
+
 export type ArcherStatus = {
   adapter: 'mock' | 'local'
   model: string
@@ -17,6 +29,7 @@ export type ArcherStatus = {
   accountName?: string
   isLoggedIn?: boolean
   archerId?: string
+  tokenUsage?: TokenUsageStatus
 }
 
 export type ChatMessage = {
@@ -135,6 +148,8 @@ export type BackgroundJob = {
   updatedAt: string
   timeoutSeconds?: number
   error?: string
+  /** Isolated subagent context (P5.4) */
+  isolated?: boolean
   /** Pending tool approval context when status is 'waiting_approval' */
   pendingTool?: BackgroundJobPendingTool
   /** Parent job ID when this is a child/sub-agent job */
@@ -161,6 +176,10 @@ export type BackgroundJobChildSummary = {
   title: string
   status: BackgroundJobStatus
   createdAt: string
+  parentJobId?: string
+  isolated?: boolean
+  result?: string
+  error?: string
 }
 
 export type BackgroundJobCreateResult = {
@@ -180,6 +199,8 @@ export type BackgroundJobActionResult = {
   error?: string
 }
 
+export type MemoryBlockType = 'human' | 'persona' | 'preference' | 'decision' | 'event' | 'insight'
+
 export type MemoryItem = {
   id: number
   status: MemoryStatus
@@ -189,6 +210,8 @@ export type MemoryItem = {
   source: string
   suggestReason?: string
   depth?: number
+  blockType?: MemoryBlockType
+  label?: string
 }
 
 export type MemoryStats = {
@@ -337,6 +360,35 @@ export type SettingsSaveResult = {
   restartRequired: boolean
   errors?: string[]
   message: string
+}
+
+export type ScheduledTask = {
+  id: number
+  skillName: string
+  label: string
+  intervalHours: number
+  intervalLabel: string
+  enabled: boolean
+  catchup: 'latest' | 'skip'
+  args: Record<string, unknown>
+  lastRunAt: string | null
+  nextRunAt: string
+  createdAt: string
+}
+
+export type ScheduleListResult = {
+  ok: boolean
+  jsonPath?: string
+  tasks: ScheduledTask[]
+}
+
+export type ScheduleMutationResult = {
+  ok: boolean
+  task?: ScheduledTask
+  id?: number
+  summary?: string
+  preview?: string
+  error?: string
 }
 
 export type ArcherAdapter = {

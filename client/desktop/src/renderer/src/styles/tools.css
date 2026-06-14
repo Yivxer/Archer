@@ -476,6 +476,18 @@
   padding: 0 2px;
 }
 
+.token-usage-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-3);
+  background: color-mix(in srgb, var(--bg-2) 88%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+}
+
 .orchestration-chip {
   display: inline-flex;
   align-items: center;

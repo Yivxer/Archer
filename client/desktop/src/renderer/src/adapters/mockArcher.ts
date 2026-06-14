@@ -6,7 +6,18 @@ export const mockArcher: ArcherAdapter = {
     model: 'deepseek-chat',
     mode: 'operator',
     memoryCount: 128,
-    skillCount: 18
+    skillCount: 18,
+    tokenUsage: {
+      sessionTotal: 12800,
+      sessionPrompt: 9200,
+      sessionCompletion: 3600,
+      callCount: 3,
+      lastCallTotal: 2400,
+      lastCallPrompt: 1800,
+      lastCallCompletion: 600,
+      limit: 1000000,
+      percentUsed: 0.0128
+    }
   },
   chat: {
     initialMessages: [],

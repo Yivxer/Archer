@@ -66,3 +66,16 @@ export function connectionStatusLabel(
   if (apiState === 'error') return '未连接'
   return '未连接'
 }
+
+export function formatTokenCount(value: number): string {
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`
+  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}k`
+  return String(value)
+}
+
+export function tokenUsageSummary(
+  usage: { sessionTotal: number; limit: number } | undefined
+): string | null {
+  if (!usage || usage.limit <= 0) return null
+  return `上下文 ${formatTokenCount(usage.sessionTotal)} / ${formatTokenCount(usage.limit)}`
+}

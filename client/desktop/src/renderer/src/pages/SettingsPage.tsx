@@ -1,11 +1,11 @@
 import React from 'react'
-import { ArrowLeft, Clipboard, Database, Eye, KeyRound, Moon, Palette, Settings2, SlidersHorizontal, Sun, Terminal, X } from 'lucide-react'
-import type { ApiConnectionState, ArcherAdapter, ConversationMode, MemoryContextMode, ObsidianContextMode, Route, Theme } from '../types'
+import { ArrowLeft, CalendarClock, Clipboard, Database, Eye, KeyRound, Moon, Palette, Settings2, SlidersHorizontal, Sun, Terminal, X } from 'lucide-react'
+import type { ApiConnectionState, ArcherAdapter, ConversationMode, MemoryContextMode, ObsidianContextMode, Route, ScheduledTask, Theme } from '../types'
 import { FormField } from '../components/common'
-import { clearDesktopApiToken, getDesktopApiToken, resolveDesktopApiToken, saveDesktopApiToken, saveLocalSettings, switchLocalMode } from '../adapters/localArcher'
+import { addSchedule, clearDesktopApiToken, getDesktopApiToken, listSchedules, removeSchedule, resolveDesktopApiToken, runSchedule, saveDesktopApiToken, saveLocalSettings, setScheduleEnabled, switchLocalMode } from '../adapters/localArcher'
 import { connectionStatusLabel, modeLabelFromId, personaPresetFromMode } from '../lib/conversationPersona'
 
-type SettingsTab = 'model' | 'context' | 'local' | 'appearance'
+type SettingsTab = 'model' | 'context' | 'local' | 'appearance' | 'schedules'
 
 export function SettingsPage({
   data,
@@ -42,6 +42,12 @@ export function SettingsPage({
   const [saving, setSaving] = React.useState(false)
   const [modeSaving, setModeSaving] = React.useState('')
   const [commandCopied, setCommandCopied] = React.useState(false)
+  const [scheduleTasks, setScheduleTasks] = React.useState<ScheduledTask[]>([])
+  const [scheduleLoading, setScheduleLoading] = React.useState(false)
+  const [scheduleSkill, setScheduleSkill] = React.useState('')
+  const [scheduleInterval, setScheduleInterval] = React.useState('daily')
+  const [scheduleLabel, setScheduleLabel] = React.useState('')
+  const [scheduleBusyId, setScheduleBusyId] = React.useState<number | null>(null)
 
   React.useEffect(() => {
     setDraft(data.settings)
@@ -145,8 +151,99 @@ export function SettingsPage({
     }
   }
 
+  const loadScheduleTasks = React.useCallback(async () => {
+    if (data.status.adapter !== 'local') {
+      setScheduleTasks([])
+      return
+    }
+    setScheduleLoading(true)
+    try {
+      const result = await listSchedules()
+      setScheduleTasks(result.tasks || [])
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : '读取定时任务失败')
+    } finally {
+      setScheduleLoading(false)
+    }
+  }, [data.status.adapter])
+
+  React.useEffect(() => {
+    if (activeTab !== 'schedules') return
+    void loadScheduleTasks()
+  }, [activeTab, loadScheduleTasks])
+
+  async function submitSchedule() {
+    if (data.status.adapter !== 'local') {
+      setNotice('需要本地 API 连接才能管理定时任务。')
+      return
+    }
+    if (!scheduleSkill.trim()) {
+      setNotice('请填写技能名称。')
+      return
+    }
+    setSaving(true)
+    setNotice('')
+    try {
+      await addSchedule({
+        skillName: scheduleSkill.trim(),
+        interval: scheduleInterval.trim() || 'daily',
+        label: scheduleLabel.trim(),
+      })
+      setScheduleSkill('')
+      setScheduleLabel('')
+      setNotice('定时任务已添加。')
+      await loadScheduleTasks()
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : '添加定时任务失败')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function toggleScheduleTask(task: ScheduledTask) {
+    setScheduleBusyId(task.id)
+    setNotice('')
+    try {
+      await setScheduleEnabled(task.id, !task.enabled)
+      await loadScheduleTasks()
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : '更新任务状态失败')
+    } finally {
+      setScheduleBusyId(null)
+    }
+  }
+
+  async function deleteScheduleTask(taskId: number) {
+    setScheduleBusyId(taskId)
+    setNotice('')
+    try {
+      await removeSchedule(taskId)
+      setNotice('定时任务已删除。')
+      await loadScheduleTasks()
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : '删除定时任务失败')
+    } finally {
+      setScheduleBusyId(null)
+    }
+  }
+
+  async function runScheduleTask(taskId: number) {
+    setScheduleBusyId(taskId)
+    setNotice('')
+    try {
+      const result = await runSchedule(taskId)
+      setNotice(result.ok ? `已执行：${result.summary || '完成'}` : `执行失败：${result.summary || result.error || '未知错误'}`)
+      await loadScheduleTasks()
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : '执行任务失败')
+    } finally {
+      setScheduleBusyId(null)
+    }
+  }
+
   const tabs: Array<{ id: SettingsTab; icon: React.ElementType; label: string; desc: string }> = [
     { id: 'local', icon: Database, label: '连接', desc: 'API、Token、路径' },
+    { id: 'schedules', icon: CalendarClock, label: '定时', desc: '技能定时执行' },
     { id: 'model', icon: KeyRound, label: '模型', desc: '服务商与模型' },
     { id: 'context', icon: SlidersHorizontal, label: '上下文', desc: '记忆与笔记' },
     { id: 'appearance', icon: Palette, label: '外观', desc: '主题' },
@@ -346,6 +443,71 @@ export function SettingsPage({
             </SettingRow>
             <SettingRow title="背景密度" description="第一轮固定为柔和，避免设置项过早膨胀。">
               <span className="setting-static-value">柔和</span>
+            </SettingRow>
+          </SettingsGroup>
+        )}
+
+        {activeTab === 'schedules' && (
+          <SettingsGroup icon={CalendarClock} title="定时任务" note="按间隔自动执行技能；终端也可用 /schedule。">
+            {data.status.adapter !== 'local' && (
+              <p className="schedule-empty">连接本地 API 后可查看与管理定时任务。</p>
+            )}
+            {data.status.adapter === 'local' && scheduleLoading && (
+              <p className="schedule-empty">加载中…</p>
+            )}
+            {data.status.adapter === 'local' && !scheduleLoading && scheduleTasks.length === 0 && (
+              <p className="schedule-empty">暂无定时任务。下方添加，或在终端使用 /schedule add。</p>
+            )}
+            {data.status.adapter === 'local' && scheduleTasks.length > 0 && (
+              <div className="schedule-list">
+                {scheduleTasks.map((task) => (
+                  <div className="schedule-row" key={task.id}>
+                    <div className="schedule-row-main">
+                      <strong>{task.label || task.skillName}</strong>
+                      <span>{task.skillName} · {task.intervalLabel}</span>
+                      <div className="schedule-row-meta">
+                        {task.enabled ? '启用' : '禁用'} · 下次 {task.nextRunAt.slice(0, 16)}
+                      </div>
+                    </div>
+                    <div className="schedule-row-actions">
+                      <button
+                        className="quiet-button"
+                        type="button"
+                        disabled={scheduleBusyId === task.id}
+                        onClick={() => void toggleScheduleTask(task)}
+                      >
+                        {task.enabled ? '禁用' : '启用'}
+                      </button>
+                      <button
+                        className="quiet-button"
+                        type="button"
+                        disabled={scheduleBusyId === task.id}
+                        onClick={() => void runScheduleTask(task.id)}
+                      >
+                        立即运行
+                      </button>
+                      <button
+                        className="quiet-button"
+                        type="button"
+                        disabled={scheduleBusyId === task.id}
+                        onClick={() => void deleteScheduleTask(task.id)}
+                      >
+                        删除
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            <SettingRow title="添加任务" description="interval 支持 daily、weekly、6h 等。">
+              <div className="schedule-add-form">
+                <FormField label="技能名" value={scheduleSkill} onChange={setScheduleSkill} />
+                <FormField label="间隔" value={scheduleInterval} onChange={setScheduleInterval} />
+                <FormField label="标签（可选）" value={scheduleLabel} onChange={setScheduleLabel} />
+                <button className="quiet-button strong" type="button" onClick={() => void submitSchedule()} disabled={saving}>
+                  {saving ? '添加中' : '添加定时任务'}
+                </button>
+              </div>
             </SettingRow>
           </SettingsGroup>
         )}

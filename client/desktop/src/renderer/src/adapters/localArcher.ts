@@ -17,6 +17,9 @@ import type {
   SettingsDraft,
   SettingsSaveResult,
   SettingsValidationResult,
+  ScheduledTask,
+  ScheduleListResult,
+  ScheduleMutationResult,
   SoulImportResult,
   ReviewPeriod,
   ToolApprovalResult,
@@ -263,6 +266,31 @@ export async function validateLocalSettings(settings: SettingsDraft): Promise<Se
 
 export async function saveLocalSettings(settings: SettingsDraft): Promise<SettingsSaveResult> {
   return postJson<SettingsSaveResult>('/settings/save', { settings })
+}
+
+export async function listSchedules(): Promise<ScheduleListResult> {
+  return getJson<ScheduleListResult>('/schedules')
+}
+
+export async function addSchedule(payload: {
+  skillName: string
+  interval: string
+  label?: string
+  catchup?: 'latest' | 'skip'
+}): Promise<ScheduleMutationResult> {
+  return postJson<ScheduleMutationResult>('/schedules', payload)
+}
+
+export async function removeSchedule(taskId: number): Promise<ScheduleMutationResult> {
+  return postJson<ScheduleMutationResult>(`/schedules/${taskId}/remove`, {})
+}
+
+export async function setScheduleEnabled(taskId: number, enabled: boolean): Promise<ScheduleMutationResult> {
+  return postJson<ScheduleMutationResult>(`/schedules/${taskId}/${enabled ? 'enable' : 'disable'}`, {})
+}
+
+export async function runSchedule(taskId: number): Promise<ScheduleMutationResult> {
+  return postJson<ScheduleMutationResult>(`/schedules/${taskId}/run`, {})
 }
 
 export async function createBackgroundJob(payload: {

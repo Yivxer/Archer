@@ -1,10 +1,21 @@
 import React from 'react'
 import { Check, Database, Edit3, Heart, Settings, TrendingUp, Waves, Compass, X, Search } from 'lucide-react'
 import { batchResolvePendingMemory, resolvePendingMemory, fetchMemoryStats, fetchMemoryGroups, updateMemory } from '../adapters/localArcher'
-import type { ArcherAdapter, MemoryItem, MemoryStats, MemoryGroup } from '../types'
+import type { ArcherAdapter, MemoryBlockType, MemoryItem, MemoryStats, MemoryGroup } from '../types'
 import { ConfirmDialog } from '../components/common'
 
 type ViewMode = 'pending' | 'groups'
+type BlockFilter = 'all' | MemoryBlockType
+
+const BLOCK_FILTERS: { id: BlockFilter; label: string }[] = [
+  { id: 'all', label: '全部' },
+  { id: 'human', label: '档案' },
+  { id: 'persona', label: 'Persona' },
+  { id: 'preference', label: '偏好' },
+  { id: 'decision', label: '决策' },
+  { id: 'event', label: '事件' },
+  { id: 'insight', label: '洞察' },
+]
 
 const groupIcons: Record<string, React.ElementType> = {
   heart: Heart, settings: Settings, waves: Waves, compass: Compass, trending_up: TrendingUp,
@@ -17,6 +28,7 @@ export function MemoryPage({ data, onRefresh }: { data: ArcherAdapter; onRefresh
   const [batchBusy, setBatchBusy] = React.useState(false)
   const [memoryMessage, setMemoryMessage] = React.useState('')
   const [query, setQuery] = React.useState('')
+  const [blockFilter, setBlockFilter] = React.useState<BlockFilter>('all')
   const [stats, setStats] = React.useState<MemoryStats | null>(null)
   const [groups, setGroups] = React.useState<Record<string, MemoryGroup> | null>(null)
   const [editingId, setEditingId] = React.useState<number | null>(null)
@@ -114,6 +126,12 @@ export function MemoryPage({ data, onRefresh }: { data: ArcherAdapter; onRefresh
   const canResolveMemory = data.status.adapter === 'local'
   const cleanQuery = query.trim().toLowerCase()
 
+  function matchesFilters(item: MemoryItem): boolean {
+    if (cleanQuery && !item.content.toLowerCase().includes(cleanQuery)) return false
+    if (blockFilter !== 'all' && item.blockType !== blockFilter) return false
+    return true
+  }
+
   return (
     <div className="memory-page">
       <ConfirmDialog open={Boolean(confirmState)} title={confirmState?.title ?? ''}
@@ -153,6 +171,18 @@ export function MemoryPage({ data, onRefresh }: { data: ArcherAdapter; onRefresh
           <Search size={14} className="memory-search-icon" />
           <input className="search-input" type="search" placeholder="搜索记忆…" value={query} onChange={(e) => setQuery(e.target.value)} />
         </div>
+        <div className="memory-block-filter">
+          {BLOCK_FILTERS.map((opt) => (
+            <button
+              key={opt.id}
+              className={blockFilter === opt.id ? 'active' : ''}
+              type="button"
+              onClick={() => setBlockFilter(opt.id)}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* ── 待确认视图 ── */}
@@ -172,8 +202,8 @@ export function MemoryPage({ data, onRefresh }: { data: ArcherAdapter; onRefresh
 
           <section className="surface memory-list-surface">
             <div className="stack">
-              {pending.filter((item) => !cleanQuery || item.content.toLowerCase().includes(cleanQuery)).length ? (
-                pending.filter((item) => !cleanQuery || item.content.toLowerCase().includes(cleanQuery)).map((item) => (
+              {pending.filter(matchesFilters).length ? (
+                pending.filter(matchesFilters).map((item) => (
                   <MemoryCard key={`pending-${item.id}`} item={item} busy={busyId === item.id || batchBusy}
                     onResolve={canResolveMemory ? resolveMemory : undefined} compact />
                 ))
@@ -192,10 +222,8 @@ export function MemoryPage({ data, onRefresh }: { data: ArcherAdapter; onRefresh
           {groups ? (
             Object.entries(groups).map(([key, group]) => {
               const Icon = groupIcons[group.icon] || Database
-              const filtered = cleanQuery
-                ? group.memories.filter((m) => m.content.toLowerCase().includes(cleanQuery))
-                : group.memories
-              if (!filtered.length && cleanQuery) return null
+              const filtered = group.memories.filter(matchesFilters)
+              if (!filtered.length && (cleanQuery || blockFilter !== 'all')) return null
               return (
                 <div key={key} className="memory-group-block">
                   <div className="memory-group-head">
@@ -220,7 +248,7 @@ export function MemoryPage({ data, onRefresh }: { data: ArcherAdapter; onRefresh
                         />
                       ))}
                     </div>
-                  ) : !cleanQuery ? (
+                  ) : !cleanQuery && blockFilter === 'all' ? (
                     <div className="empty-inline">此分类暂无记忆</div>
                   ) : null}
                 </div>
@@ -264,6 +292,12 @@ function MemoryCard({
       <div className="memory-card-body">
         <div className="memory-card-top">
           <span className={`memory-type-tag ${item.type}`}>{typeLabel}</span>
+          {item.blockType && (
+            <span className={`memory-block-tag ${item.blockType}`}>
+              {memoryBlockLabel(item.blockType)}
+              {item.label ? ` · ${item.label}` : ''}
+            </span>
+          )}
           <span className="memory-card-meta">
             {memorySourceLabel(item)}
           </span>
@@ -293,6 +327,18 @@ function memorySourceLabel(item: MemoryItem): string {
   if (item.source === 'desktop') return 'Desktop 对话'
   if (item.source === 'auto') return '自动提取'
   return item.source || ''
+}
+
+function memoryBlockLabel(blockType: MemoryBlockType): string {
+  const map: Record<MemoryBlockType, string> = {
+    human: '档案',
+    persona: 'Persona',
+    preference: '偏好',
+    decision: '决策',
+    event: '事件',
+    insight: '洞察',
+  }
+  return map[blockType] || blockType
 }
 
 function memoryTypeLabel(mtype: string): string {

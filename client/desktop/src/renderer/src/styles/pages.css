@@ -339,21 +339,81 @@
 
 .task-child-row {
   display: grid;
-  gap: 4px;
+  gap: 6px;
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 10px 11px;
   background: var(--field);
 }
 
+.task-child-row-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.task-child-status-icon {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  color: var(--muted);
+  background: color-mix(in srgb, var(--ink) 4%, transparent);
+  flex-shrink: 0;
+}
+
+.task-child-status-icon.task-status-running,
+.task-child-status-icon.task-status-queued,
+.task-child-status-icon.task-status-waiting_approval {
+  color: var(--cyan);
+}
+
+.task-child-status-icon.task-status-complete {
+  color: #3ecf8e;
+}
+
+.task-child-status-icon.task-status-failed,
+.task-child-status-icon.task-status-cancelled {
+  color: var(--orange);
+}
+
+.task-child-isolated {
+  margin-left: auto;
+  border: 1px solid color-mix(in srgb, var(--cyan) 24%, var(--line));
+  border-radius: 999px;
+  padding: 1px 8px;
+  color: var(--cyan);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
 .task-child-row strong {
   color: var(--ink);
   font-size: 13px;
+  min-width: 0;
 }
 
 .task-child-row span {
   color: var(--muted);
   font-size: 12px;
+}
+
+.task-child-preview,
+.task-child-error {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+
+.task-child-preview {
+  color: var(--ink);
+}
+
+.task-child-error {
+  color: var(--orange);
 }
 
 .detail-muted,
@@ -466,6 +526,7 @@
 /* ── 筛选栏 ── */
 .memory-toolbar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 10px;
 }
@@ -488,6 +549,50 @@
   transform: translateY(-50%);
   color: var(--muted);
   pointer-events: none;
+}
+
+.memory-block-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  width: 100%;
+}
+
+.memory-block-filter button {
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--muted);
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.memory-block-filter button.active {
+  color: var(--text);
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.memory-block-tag {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.memory-block-tag.human,
+.memory-block-tag.preference {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+}
+
+.memory-block-tag.decision,
+.memory-block-tag.event {
+  color: #c49a6c;
+  border-color: color-mix(in srgb, #c49a6c 35%, var(--border));
 }
 
 /* ── 批量操作栏 ── */
@@ -1807,6 +1912,73 @@
 
   .mode-segmented {
     grid-template-columns: repeat(2, auto);
+  }
+}
+
+/* ── scheduled tasks (settings) ─────────────────────────────────────── */
+.schedule-list {
+  display: grid;
+  gap: 10px;
+}
+
+.schedule-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--field) 88%, transparent);
+}
+
+.schedule-row-main strong {
+  display: block;
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.schedule-row-main span {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.schedule-row-meta {
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.schedule-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.schedule-add-form {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-top: 8px;
+}
+
+.schedule-add-form button {
+  grid-column: 1 / -1;
+  justify-self: start;
+}
+
+.schedule-empty {
+  color: var(--muted);
+  font-size: 13px;
+  padding: 8px 0;
+}
+
+@media (max-width: 820px) {
+  .schedule-add-form {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 

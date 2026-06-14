@@ -253,12 +253,25 @@ function TaskDetail({
         <section className="task-section">
           <h3>子任务</h3>
           <div className="task-child-list">
-            {job.children.map((child) => (
-              <div className="task-child-row" key={child.id}>
-                <strong>{child.title || child.id}</strong>
-                <span>{jobStatusLabel(child.status)} · {formatDate(child.createdAt)}</span>
-              </div>
-            ))}
+            {job.children.map((child) => {
+              const ChildIcon = childStatusIcon(child.status)
+              return (
+                <div className={`task-child-row task-status-${child.status}`} key={child.id}>
+                  <div className="task-child-row-head">
+                    <div className={`task-child-status-icon task-status-${child.status}`}>
+                      <ChildIcon size={14} />
+                    </div>
+                    <strong>{child.title || child.id}</strong>
+                    {(child.parentJobId || child.isolated) && (
+                      <span className="task-child-isolated">隔离</span>
+                    )}
+                  </div>
+                  <span>{jobStatusLabel(child.status)} · {formatDate(child.createdAt)}</span>
+                  {child.error ? <p className="task-child-error">{child.error}</p> : null}
+                  {child.result ? <p className="task-child-preview">{child.result}</p> : null}
+                </div>
+              )
+            })}
           </div>
         </section>
       ) : null}
@@ -278,6 +291,12 @@ function jobStatusLabel(status: BackgroundJob['status']): string {
   if (status === 'failed') return '失败'
   if (status === 'cancelled') return '已取消'
   return status
+}
+
+function childStatusIcon(status: BackgroundJob['status']) {
+  if (status === 'queued' || status === 'running' || status === 'waiting_approval') return Loader2
+  if (status === 'complete') return Check
+  return X
 }
 
 function formatDate(value: string): string {

@@ -2,7 +2,7 @@ import React from 'react'
 import { ArrowUp, Check, ChevronDown, Copy, CornerDownLeft, Crop, Edit3, FileText, Github, Infinity, Loader2, Mic, Monitor, Paperclip, RotateCcw, Send, Terminal, UserRoundCog, X } from 'lucide-react'
 import { appendLocalSession, approveJobToolEvent, cancelBackgroundJobEvent, createBackgroundJobEvent, fetchBackgroundJob, pollBackgroundJobEvents, retryBackgroundJobEvent, saveLocalSession, streamLocalChat, submitToolApprovalEvent, switchLocalMode } from '../adapters/localArcher'
 import { pickChatGreeting } from '../lib/chatGreetings'
-import { extendedConversationModes, PERSONA_PRESETS, personaIdFromMode } from '../lib/conversationPersona'
+import { extendedConversationModes, PERSONA_PRESETS, personaIdFromMode, tokenUsageSummary } from '../lib/conversationPersona'
 import type { ArcherAdapter, ChatMessage, FileRef, MemoryContextMode, ObsidianContextMode, SessionDetail, ToolEvent } from '../types'
 import { ArcherRing, MarkdownMessage, ThinkingDots } from '../components/common'
 import { createInitialRuntimeState, createPersistentEventLog, reduceRuntimeEvent, routeTaskForRuntime, jobSnapshotToAgentEvent, buildPlanExecutionPrompt, planWithStatus } from '../../../agent'
@@ -1014,15 +1014,22 @@ export function ChatPage({
         ? '接着这段聊…'
         : '继续说…'
 
+  const tokenUsageLabel = tokenUsageSummary(data.status.tokenUsage)
+
   const composerEl = (
     <>
-      {runtimeOrchestration && runtimeOrchestration.labels.length > 0 && (
-        <div className="orchestration-status-row" aria-label="当前对话判断">
-          {runtimeOrchestration.labels.map((label) => (
+      {(runtimeOrchestration && runtimeOrchestration.labels.length > 0) || tokenUsageLabel ? (
+        <div className="orchestration-status-row" aria-label="当前对话状态">
+          {runtimeOrchestration?.labels.map((label) => (
             <span key={label} className="orchestration-chip">{label}</span>
           ))}
+          {tokenUsageLabel && (
+            <span className="token-usage-chip" title="本次 API 进程累计 token 用量">
+              {tokenUsageLabel}
+            </span>
+          )}
         </div>
-      )}
+      ) : null}
     <div className="composer" ref={composerRef}>
       {fileRefs.length > 0 && (
         <div className="file-ref-row" aria-label="已引用文件">
@@ -1726,6 +1733,7 @@ function toolKind(event: ToolEvent): 'shell' | 'github' | 'file' | 'publish' {
 }
 
 function toolTitle(event: ToolEvent): string {
+  if (event.name === 'memory.compact') return '已整理记忆'
   if (event.name === 'shell' || event.name === 'shell.execute') return 'Shell 命令'
   if (event.name === 'github' || event.name === 'github_ops') return 'GitHub 操作'
   if (event.name === 'hugo_blog') return '博客发布'
