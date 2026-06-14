@@ -19,6 +19,14 @@ _span_recorder: ContextVar[list[dict[str, Any]] | None] = ContextVar(
 )
 
 
+def _safe_reset(var: ContextVar[Any], token: Any, fallback: Any) -> None:
+    """Reset a ContextVar token; tolerate thread/async context switches."""
+    try:
+        var.reset(token)
+    except ValueError:
+        var.set(fallback)
+
+
 def configure_logging(*, level: int = logging.INFO) -> None:
     """Configure structlog once; safe to call repeatedly."""
     global _configured
@@ -76,11 +84,12 @@ def span_recording(enabled: bool = True) -> Iterator[list[dict[str, Any]]]:
         yield []
         return
     records: list[dict[str, Any]] = []
+    previous = _span_recorder.get()
     token = _span_recorder.set(records)
     try:
         yield records
     finally:
-        _span_recorder.reset(token)
+        _safe_reset(_span_recorder, token, previous)
 
 
 def get_recorded_spans() -> list[dict[str, Any]]:
@@ -100,7 +109,8 @@ def trace_span(name: str, **attributes: Any) -> Iterator[dict[str, Any]]:
     configure_logging()
     log = get_logger("archer.trace")
 
-    stack = list(_span_stack.get())
+    previous_stack = list(_span_stack.get())
+    stack = list(previous_stack)
     parent = stack[-1] if stack else None
     stack.append(name)
     stack_token = _span_stack.set(stack)
@@ -137,4 +147,4 @@ def trace_span(name: str, **attributes: Any) -> Iterator[dict[str, Any]]:
                 "duration_ms": duration_ms,
             }
         )
-        _span_stack.reset(stack_token)
+        _safe_reset(_span_stack, stack_token, previous_stack)

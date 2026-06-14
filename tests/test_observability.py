@@ -58,3 +58,19 @@ def test_memory_retrieve_span_on_skip():
     assert core == [] and related == []
     assert records[0]["name"] == "memory.retrieve"
     assert records[0]["attributes"]["skipped"] is True
+
+
+def test_trace_span_survives_cross_context_generator_cleanup():
+    """Sync generators consumed across contexts must not raise on span cleanup."""
+
+    def stream_with_span():
+        with trace_span("llm.stream_chat", model="test"):
+            yield "a"
+            yield "b"
+
+    import contextvars
+
+    gen = stream_with_span()
+    assert next(gen) == "a"
+    ctx = contextvars.copy_context()
+    assert ctx.run(lambda: "".join(gen)) == "b"
