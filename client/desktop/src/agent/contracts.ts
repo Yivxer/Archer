@@ -96,6 +96,15 @@ export type OrchestrationEvent = AgentEventBase & {
   needsJob: boolean
 }
 
+export type StatusEvent = AgentEventBase & {
+  type: 'status.event'
+  intentType: string
+  intentLabel: string
+  matchedSkills: string[]
+  isBackground: boolean
+  memoryScope: string[]
+}
+
 export type ErrorEvent = AgentEventBase & {
   type: 'runtime.error'
   scope: 'stream' | 'approval' | 'job' | 'adapter'
@@ -112,6 +121,7 @@ export type AgentEvent =
   | JobEvent
   | PlanEvent
   | OrchestrationEvent
+  | StatusEvent
   | ErrorEvent
 
 export type RuntimeMessage = {

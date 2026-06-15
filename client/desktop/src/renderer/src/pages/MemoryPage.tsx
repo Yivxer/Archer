@@ -310,6 +310,9 @@ function MemoryCard({
         {item.suggestReason && item.status === 'pending' && (
           <p className="memory-suggest-reason">{item.suggestReason}</p>
         )}
+        {item.sessionSummary && item.status === 'pending' && (
+          <p className="memory-session-summary">📋 对话：{item.sessionSummary}{item.sessionSummary.length >= 80 ? '...' : ''}</p>
+        )}
         <p className="memory-card-content">{item.content}</p>
       </div>
       {item.status === 'pending' && onResolve && (

@@ -787,6 +787,7 @@ def _memory(limit: int = 50, include_rejected: bool = False) -> list[dict]:
         {
             **_item_fields(item, item.get("status", "pending")),
             "suggestReason": item.get("suggest_reason", ""),
+            "sessionSummary": item.get("session_summary", ""),
         }
         for item in list_pending(limit=limit, include_rejected=include_rejected)
     ]

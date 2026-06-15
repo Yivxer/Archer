@@ -153,6 +153,10 @@ def init_db():
         conn.execute("ALTER TABLE pending_memories ADD COLUMN suggest_reason TEXT DEFAULT ''")
     except Exception:
         pass
+    try:
+        conn.execute("ALTER TABLE pending_memories ADD COLUMN session_summary TEXT DEFAULT ''")
+    except Exception:
+        pass
     for ddl in [
         "ALTER TABLE memories ADD COLUMN block_type TEXT DEFAULT 'insight'",
         "ALTER TABLE memories ADD COLUMN label TEXT DEFAULT ''",
@@ -613,7 +617,8 @@ def update_last_used(mid: int):
 def add_pending(content: str, type: str = "insight", importance: int = 3,
                 tags: str = "", source: str = "auto", confidence: float = 0.7,
                 depth: int = 3, suggest_reason: str = "",
-                block_type: str | None = None, label: str | None = None) -> int:
+                block_type: str | None = None, label: str | None = None,
+                session_summary: str = "") -> int:
     """将候选记忆写入 pending_memories 表，返回 ID。"""
     content = content.strip()
     if type not in MEMORY_TYPES:
@@ -632,10 +637,10 @@ def add_pending(content: str, type: str = "insight", importance: int = 3,
     conn = sqlite3.connect(DB_PATH)
     cur = conn.execute(
         "INSERT INTO pending_memories (content, type, importance, depth, tags, source, confidence, "
-        "created_at, suggest_reason, block_type, label) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "created_at, suggest_reason, block_type, label, session_summary) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (content, type, importance, depth, tags.strip(), source, float(confidence),
-         _now(), suggest_reason.strip(), resolved_block, resolved_label),
+         _now(), suggest_reason.strip(), resolved_block, resolved_label, session_summary.strip()),
     )
     conn.commit()
     pid = cur.lastrowid
@@ -649,14 +654,14 @@ def list_pending(limit: int = 50, include_rejected: bool = False) -> list[dict]:
     if include_rejected:
         rows = conn.execute(
             "SELECT id, content, type, importance, depth, tags, source, confidence, created_at, "
-            "status, suggest_reason, block_type, label "
+            "status, suggest_reason, block_type, label, session_summary "
             "FROM pending_memories ORDER BY id LIMIT ?",
             (limit,),
         ).fetchall()
     else:
         rows = conn.execute(
             "SELECT id, content, type, importance, depth, tags, source, confidence, created_at, "
-            "status, suggest_reason, block_type, label "
+            "status, suggest_reason, block_type, label, session_summary "
             "FROM pending_memories WHERE status = 'pending' ORDER BY id LIMIT ?",
             (limit,),
         ).fetchall()
@@ -670,6 +675,7 @@ def list_pending(limit: int = 50, include_rejected: bool = False) -> list[dict]:
             "suggest_reason": r[10] if len(r) > 10 and r[10] else "",
             "block_type": r[11] if len(r) > 11 and r[11] else infer_block_type(r[2]),
             "label": r[12] if len(r) > 12 and r[12] else "",
+            "session_summary": r[13] if len(r) > 13 and r[13] else "",
         }
         for r in rows
     ]

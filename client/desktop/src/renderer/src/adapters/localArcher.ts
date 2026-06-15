@@ -25,7 +25,7 @@ import type {
   ToolApprovalResult,
   ToolEvent
 } from '../types'
-import { jobSnapshotToAgentEvent, pythonApprovalToAgentEvent, pythonOrchestrationToAgentEvent, pythonPlanToAgentEvent, pythonToolEventToAgentEvent } from '../../../agent'
+import { jobSnapshotToAgentEvent, pythonApprovalToAgentEvent, pythonOrchestrationToAgentEvent, pythonPlanToAgentEvent, pythonStatusToAgentEvent, pythonToolEventToAgentEvent } from '../../../agent'
 import type { AgentEvent } from '../../../agent'
 
 const BASE_URL = 'http://127.0.0.1:8765'
@@ -528,6 +528,13 @@ export async function streamLocalChat(
           needsMemory: boolean
           needsJob: boolean
         }
+        statusEvent?: {
+          intentType: string
+          intentLabel: string
+          matchedSkills: string[]
+          isBackground: boolean
+          memoryScope: string[]
+        }
       }
       if (payload.error) throw new Error(`[server] ${payload.error}`)
       if (payload.toolEvent) {
@@ -536,6 +543,9 @@ export async function streamLocalChat(
       }
       if (payload.orchestrationEvent) {
         onAgentEvent?.(pythonOrchestrationToAgentEvent(runtimeSessionId, payload.orchestrationEvent))
+      }
+      if (payload.statusEvent) {
+        onAgentEvent?.(pythonStatusToAgentEvent(runtimeSessionId, payload.statusEvent))
       }
       if (payload.planEvent) {
         onAgentEvent?.(pythonPlanToAgentEvent(runtimeSessionId, payload.planEvent))

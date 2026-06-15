@@ -6,7 +6,7 @@ import { extendedConversationModes, PERSONA_PRESETS, personaIdFromMode, tokenUsa
 import type { ArcherAdapter, ChatMessage, FileRef, MemoryContextMode, ObsidianContextMode, SessionDetail, ToolEvent } from '../types'
 import { ArcherRing, MarkdownMessage, ThinkingDots } from '../components/common'
 import { createInitialRuntimeState, createPersistentEventLog, reduceRuntimeEvent, routeTaskForRuntime, jobSnapshotToAgentEvent, buildPlanChildJobSpecs, buildPlanCoordinatorPrompt, buildPlanExecutionPrompt, planWithStatus } from '../../../agent'
-import type { AgentEvent, EventLog, JobEvent, OrchestrationEvent, PlanEvent } from '../../../agent'
+import type { AgentEvent, EventLog, JobEvent, OrchestrationEvent, PlanEvent, StatusEvent } from '../../../agent'
 
 const CHAT_STARTERS = [
   { label: '先听我说', prompt: '我先说一段，你不用急着给方案。' },
@@ -87,6 +87,14 @@ export function ChatPage({
   const runtimeOrchestration = Object.values(runtimeState.orchestrations).sort(
     (a, b) => b.createdAt.localeCompare(a.createdAt),
   )[0] as OrchestrationEvent | undefined
+
+  const runtimeStatus: StatusEvent | undefined = React.useMemo(() => {
+    for (let i = runtimeState.events.length - 1; i >= 0; i--) {
+      const e = runtimeState.events[i]
+      if (e.type === 'status.event') return e as StatusEvent
+    }
+    return undefined
+  }, [runtimeState.events])
 
   function recordAgentEvent(event: AgentEvent) {
     eventLogRef.current?.append(event)
@@ -1066,11 +1074,19 @@ export function ChatPage({
 
   const composerEl = (
     <>
-      {(runtimeOrchestration && runtimeOrchestration.labels.length > 0) || tokenUsageLabel ? (
+      {(runtimeOrchestration && runtimeOrchestration.labels.length > 0) || runtimeStatus || tokenUsageLabel ? (
         <div className="orchestration-status-row" aria-label="当前对话状态">
           {runtimeOrchestration?.labels.map((label) => (
             <span key={label} className="orchestration-chip">{label}</span>
           ))}
+          {runtimeStatus && (
+            <span className="status-event-line">
+              🧠 {runtimeStatus.intentLabel}
+              {runtimeStatus.memoryScope.length > 0 && ` · 记忆检索：${runtimeStatus.memoryScope.join(', ')}`}
+              {runtimeStatus.matchedSkills.length > 0 && ` · 已匹配：${runtimeStatus.matchedSkills.join(', ')}`}
+              {runtimeStatus.isBackground ? ' · 后台执行' : ' · 前台流式'}
+            </span>
+          )}
           {tokenUsageLabel && (
             <span className="token-usage-chip" title="本次 API 进程累计 token 用量">
               {tokenUsageLabel}

@@ -13,7 +13,7 @@ export type { PlanChildJobSpec } from './planBridge'
 export { jobSnapshotToAgentEvent } from './jobBridge'
 export type { RuntimeJobSnapshot } from './jobBridge'
 export { createJobRunner } from './jobRunner'
-export { pythonApprovalToAgentEvent, pythonOrchestrationToAgentEvent, pythonPlanToAgentEvent, pythonToolEventToAgentEvent } from './pythonBridge'
+export { pythonApprovalToAgentEvent, pythonOrchestrationToAgentEvent, pythonPlanToAgentEvent, pythonStatusToAgentEvent, pythonToolEventToAgentEvent } from './pythonBridge'
 export { createInitialRuntimeState, reduceRuntimeEvent } from './runtimeStore'
 export type { RuntimeState } from './runtimeStore'
 export { routeTaskForRuntime } from './taskRouter'
@@ -34,6 +34,7 @@ export type {
   RiskLevel,
   RuntimeMessage,
   RuntimeSession,
+  StatusEvent,
   TextDeltaEvent,
   TextFinalEvent,
   ToolRequestEvent,

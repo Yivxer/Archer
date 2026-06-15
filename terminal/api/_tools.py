@@ -1405,6 +1405,14 @@ def _do_extract_api(history: list[dict]) -> None:
         staged = 0
         skipped_dup = 0
         skipped_low = 0
+        # Build session_summary: first user message, first 80 chars
+        session_summary = ""
+        for m in history:
+            if m.get("role") == "user":
+                content = str(m.get("content", "")).strip()
+                if content:
+                    session_summary = content[:80]
+                    break
         for m in mems:
             content = m.get("content", "")
             mtype = m.get("type", "insight")
@@ -1427,6 +1435,7 @@ def _do_extract_api(history: list[dict]) -> None:
                 suggest_reason=suggest_reason,
                 block_type=m.get("block_type"),
                 label=m.get("label"),
+                session_summary=session_summary,
             )
             staged += 1
         logger.info(
@@ -1531,6 +1540,17 @@ def _iter_chat_chunks(
         yield {"type": "orchestrationEvent", "orchestrationEvent": orchestration_event}
     if plan_event:
         yield {"type": "planEvent", "planEvent": plan_event}
+    if orchestration is not None:
+        yield {
+            "type": "statusEvent",
+            "statusEvent": {
+                "intentType": intent_info["intent"],
+                "intentLabel": intent_info.get("intent_label", intent_info["intent"]),
+                "matchedSkills": list(orchestration.matched_skills),
+                "isBackground": orchestration.needs_job,
+                "memoryScope": list(orchestration.memory_scope),
+            },
+        }
     if memory_mode == "off":
         yield _tool_event(
             "memory-retrieve", "memory.retrieve", "complete", "low",

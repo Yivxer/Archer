@@ -1298,6 +1298,53 @@ class TestFileReferences:
         assert any(event.get("type") == "token" and event.get("text") == "ok" for event in events)
 
 
+def test_chat_stream_emits_status_event(monkeypatch):
+    """验证 chat SSE 流包含 statusEvent 且字段正确。"""
+    from terminal.api._tools import _iter_chat_chunks
+    from core.orchestrator import OrchestrationResult
+
+    monkeypatch.setattr("core.llm.stream_chat", lambda messages, **kwargs: iter(["ok"]))
+    monkeypatch.setattr(
+        "core.context.classify_query_intent",
+        lambda query, history=None, llm_fallback=False: {
+            "intent": "writing",
+            "intent_label": "写作协助",
+            "needs_memory": True,
+            "needs_tools": True,
+        },
+    )
+    monkeypatch.setattr(
+        "core.orchestrator.orchestrate_user_input",
+        lambda query, history=None: OrchestrationResult(
+            intent="writing",
+            sub_intent="writing_assist",
+            mode="adaptive",
+            depth="deep",
+            needs_memory=True,
+            needs_tools=True,
+            matched_skills=["obsidian_search", "file_ops"],
+            memory_scope=["project_update", "preference"],
+        ),
+    )
+
+    events = list(_iter_chat_chunks(
+        [{"role": "user", "content": "帮我写一个技术文档"}],
+        memory_mode="on",
+        obsidian_mode="off",
+    ))
+    status_events = [e for e in events if e.get("type") == "statusEvent"]
+    assert len(status_events) == 1, f"Expected exactly 1 statusEvent, got {len(status_events)}"
+    se = status_events[0]["statusEvent"]
+    assert se["intentType"] == "writing"
+    assert se["intentLabel"] == "写作协助"
+    assert isinstance(se["matchedSkills"], list)
+    assert "obsidian_search" in se["matchedSkills"]
+    assert isinstance(se["isBackground"], bool)
+    assert se["isBackground"] is False
+    assert isinstance(se["memoryScope"], list)
+    assert "project_update" in se["memoryScope"]
+
+
 class TestDesktopApiAuth:
     """测试桌面 API Bearer token 鉴权。"""
 

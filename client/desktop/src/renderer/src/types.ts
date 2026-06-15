@@ -209,6 +209,7 @@ export type MemoryItem = {
   confidence: string
   source: string
   suggestReason?: string
+  sessionSummary?: string
   depth?: number
   blockType?: MemoryBlockType
   label?: string

@@ -500,6 +500,15 @@
   letter-spacing: 0.01em;
 }
 
+.status-event-line {
+  display: inline-flex;
+  align-items: center;
+  font-size: 11px;
+  color: var(--text-3);
+  line-height: 1.4;
+  padding: 2px 4px;
+}
+
 .tool-meta-grid,
 .tool-event-head {
   display: none;

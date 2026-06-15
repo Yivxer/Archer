@@ -129,3 +129,28 @@ export function pythonOrchestrationToAgentEvent(
     needsJob: snapshot.needsJob,
   }
 }
+
+type PythonStatusEvent = {
+  intentType: string
+  intentLabel: string
+  matchedSkills: string[]
+  isBackground: boolean
+  memoryScope: string[]
+}
+
+export function pythonStatusToAgentEvent(
+  sessionId: string,
+  snapshot: PythonStatusEvent,
+): AgentEvent {
+  return {
+    type: 'status.event',
+    id: `status-${crypto.randomUUID().slice(0, 8)}`,
+    sessionId,
+    createdAt: nowIso(),
+    intentType: snapshot.intentType,
+    intentLabel: snapshot.intentLabel,
+    matchedSkills: snapshot.matchedSkills ?? [],
+    isBackground: snapshot.isBackground ?? false,
+    memoryScope: snapshot.memoryScope ?? [],
+  }
+}

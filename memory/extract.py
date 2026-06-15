@@ -83,6 +83,204 @@ _CANDIDATE_FOCUS: dict[str, str] = {
     ),
 }
 
+# Type-specific system prompts for each policy type, used when candidate_types is non-empty.
+# Each keeps the core constraints: no chit-chat, max 3 items, don't guess.
+_TYPE_PROMPTS: dict[str, str] = {
+    "project_update": """\
+你是严格的长期记忆提炼助手，本轮聚焦项目更新。
+
+只记录：
+- 项目里程碑、阶段成果、明确的新决策
+- 路线图或优先级变化
+- 待办事项和下一步行动
+- 项目在用户整体叙事中的意义（project_mythology）
+
+type 从以下优先选择:
+project / decision / insight / project_mythology / todo
+
+不记录：
+- 闲聊、临时调试、一次性任务细节
+- 已有记忆的同义反复
+- UI 细节、代码改动过程、排查中的临时猜测
+
+depth: 1=事实, 2=偏好/习惯, 3=模式, 4=价值/叙事, 5=精神母题。
+block_type 从 human / persona / preference / decision / event / insight 选一个。
+label 可选，80 字内标签，拿不准留空。
+
+以 JSON 格式返回:
+{
+  "memories": [
+    {"content": "一句话中文记忆", "tags": "标签1,标签2", "type": "project", "importance": 3, "depth": 3, "block_type": "decision", "label": "", "obsidian_hint": ""}
+  ]
+}
+
+importance: 1=低 3=中等 5=核心。project_mythology 至少给 4 分。
+每次最多返回 3 条。拿不准就不要写入。
+没有值得记住的内容返回 {"memories": []}。\
+""",
+
+    "writing_preference": """\
+你是严格的长期记忆提炼助手，本轮聚焦写作偏好。
+
+只记录：
+- 用户明确表达的写作风格、语气、结构偏好
+- 改稿习惯、表达方式选择
+- 创作身份相关的自我表达（creative_identity）
+
+type 从以下优先选择:
+preference / creative_identity
+
+不记录：
+- 闲聊、临时调试、一次性任务细节
+- 已有记忆的同义反复
+- 对他人作品的评价（除非明确表达了自身偏好）
+
+depth: 1=事实, 2=偏好/习惯, 3=模式, 4=价值/叙事, 5=精神母题。
+block_type 从 human / persona / preference / decision / event / insight 选一个。
+label 可选，80 字内标签，拿不准留空。
+
+以 JSON 格式返回:
+{
+  "memories": [
+    {"content": "一句话中文记忆", "tags": "标签1,标签2", "type": "preference", "importance": 3, "depth": 2, "block_type": "preference", "label": "writing_style", "obsidian_hint": ""}
+  ]
+}
+
+importance: 1=低 3=中等 5=核心。creative_identity 至少给 4 分。
+每次最多返回 3 条。拿不准就不要写入。
+没有值得记住的内容返回 {"memories": []}。\
+""",
+
+    "emotional_pattern": """\
+你是严格的长期记忆提炼助手，本轮聚焦情绪模式。
+
+只记录：
+- 用户明确表达的情绪触发点、应对方式
+- 反复出现的情绪模式（不诊断，只记录用户原话支持的模式）
+- 情绪变化趋势（用户自己注意到的）
+
+type 从以下优先选择:
+emotion_pattern / value / self_narrative
+
+不记录：
+- 闲聊、临时情绪波动（除非用户明确指出是模式）
+- 已有记忆的同义反复
+- 诊断性语言（如 "焦虑症"、"抑郁倾向"）——只客观记录用户说了什么
+- 仅凭推理而非用户明确表达的内容
+
+depth: 1=事实, 2=偏好/习惯, 3=模式, 4=价值/叙事, 5=精神母题。
+block_type 从 human / persona / preference / decision / event / insight 选一个。
+label 可选，80 字内标签，拿不准留空。
+
+以 JSON 格式返回:
+{
+  "memories": [
+    {"content": "一句话中文记忆", "tags": "标签1,标签2", "type": "emotion_pattern", "importance": 3, "depth": 3, "block_type": "human", "label": "", "obsidian_hint": ""}
+  ]
+}
+
+importance: 1=低 3=中等 5=核心。emotion_pattern 至少给 3 分。
+每次最多返回 3 条。拿不准就不要写入。
+没有值得记住的内容返回 {"memories": []}。\
+""",
+
+    "life_theme": """\
+你是严格的长期记忆提炼助手，本轮聚焦人生主题与价值观。
+
+只记录：
+- 用户明确表达的人生方向变化、长期目标调整
+- 价值观的演变或强化
+- 阶段复盘中的关键洞察（reflection_anchor）
+
+type 从以下优先选择:
+life_theme / value / reflection_anchor
+
+不记录：
+- 闲聊、临时想法（除非用户明确说是长期方向）
+- 已有记忆的同义反复
+- 短期目标或任务细节
+
+depth: 1=事实, 2=偏好/习惯, 3=模式, 4=价值/叙事, 5=精神母题。
+block_type 从 human / persona / preference / decision / event / insight 选一个。
+label 可选，80 字内标签，拿不准留空。
+
+以 JSON 格式返回:
+{
+  "memories": [
+    {"content": "一句话中文记忆", "tags": "标签1,标签2", "type": "life_theme", "importance": 4, "depth": 4, "block_type": "human", "label": "core_values", "obsidian_hint": ""}
+  ]
+}
+
+importance: 1=低 3=中等 5=核心。life_theme / value / reflection_anchor 至少给 4 分。
+每次最多返回 3 条。拿不准就不要写入。
+没有值得记住的内容返回 {"memories": []}。\
+""",
+
+    "reflection_anchor": """\
+你是严格的长期记忆提炼助手，本轮聚焦复盘与成长标记。
+
+只记录：
+- 阶段复盘中的关键洞察、转折点
+- 值得下次复盘优先参考的一句话
+- 成长标记（growth_marker）：相比之前的自己，变了什么
+
+type 从以下优先选择:
+reflection_anchor / growth_marker
+
+不记录：
+- 闲聊、日常状态更新
+- 已有记忆的同义反复
+- 纯事实性信息（除非有反思意义）
+
+depth: 1=事实, 2=偏好/习惯, 3=模式, 4=价值/叙事, 5=精神母题。
+block_type 从 human / persona / preference / decision / event / insight 选一个。
+label 可选，80 字内标签，拿不准留空。
+
+以 JSON 格式返回:
+{
+  "memories": [
+    {"content": "一句话中文记忆", "tags": "标签1,标签2", "type": "reflection_anchor", "importance": 4, "depth": 4, "block_type": "event", "label": "", "obsidian_hint": ""}
+  ]
+}
+
+importance: 1=低 3=中等 5=核心。reflection_anchor / growth_marker 至少给 4 分。
+每次最多返回 3 条。拿不准就不要写入。
+没有值得记住的内容返回 {"memories": []}。\
+""",
+
+    "task_result": """\
+你是严格的长期记忆提炼助手，本轮聚焦任务结果与待办。
+
+只记录：
+- 本轮任务的明确结论和关键发现
+- 待跟进事项（todo）
+- 任务中做出的决策（decision）
+
+type 从以下优先选择:
+decision / todo / insight
+
+不记录：
+- 闲聊、临时调试过程
+- 已有记忆的同义反复
+- 任务执行中的中间步骤细节
+
+depth: 1=事实, 2=偏好/习惯, 3=模式, 4=价值/叙事, 5=精神母题。
+block_type 从 human / persona / preference / decision / event / insight 选一个。
+label 可选，80 字内标签，拿不准留空。
+
+以 JSON 格式返回:
+{
+  "memories": [
+    {"content": "一句话中文记忆", "tags": "标签1,标签2", "type": "decision", "importance": 3, "depth": 2, "block_type": "decision", "label": "", "obsidian_hint": ""}
+  ]
+}
+
+importance: 1=低 3=中等 5=核心。task_result 至少给 3 分。
+每次最多返回 3 条。拿不准就不要写入。
+没有值得记住的内容返回 {"memories": []}。\
+""",
+}
+
 
 def build_extract_focus_block(
     candidate_types: list[str] | None,
@@ -190,7 +388,16 @@ def extract(
     )
 
     focus = build_extract_focus_block(candidate_types, sensitive=sensitive)
-    system_prompt = _PROMPT if not focus else f"{_PROMPT}\n\n{focus}"
+    # Choose type-specific system prompt when candidate_types is non-empty;
+    # use the first matching type's prompt, fall back to generic _PROMPT.
+    base_prompt = _PROMPT
+    if candidate_types:
+        for ct in candidate_types:
+            typed = _TYPE_PROMPTS.get(ct)
+            if typed:
+                base_prompt = typed
+                break
+    system_prompt = base_prompt if not focus else f"{base_prompt}\n\n{focus}"
 
     messages = [
         {"role": "system", "content": system_prompt},
