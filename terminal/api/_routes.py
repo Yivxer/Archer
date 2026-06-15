@@ -359,6 +359,41 @@ def _kick_queued_children(parent_id: str | None = None) -> None:
         worker.start()
 
 
+def _try_rollup_parent_result(parent_id: str) -> bool:
+    """Auto-aggregate child results into parent job when all children are done."""
+    with BACKGROUND_JOB_LOCK:
+        parent = BACKGROUND_JOBS.get(parent_id)
+        if not parent:
+            return False
+        child_ids: list = parent.get("childJobIds") or []
+        if not child_ids:
+            return False
+        for cid in child_ids:
+            child = BACKGROUND_JOBS.get(cid)
+            if child and child.get("status") in ("queued", "running", "waiting_approval"):
+                return False
+        lines: list[str] = []
+        for cid in child_ids:
+            child = BACKGROUND_JOBS.get(cid)
+            if not child:
+                continue
+            title = str(child.get("title", "")).replace("[子] ", "").strip()
+            status = str(child.get("status", "?"))
+            result = str(child.get("result", "") or "").strip()
+            error = str(child.get("error", "") or "").strip()
+            lines.append(f"## {title} [{status}]")
+            if result:
+                lines.append(result)
+            elif error:
+                lines.append(f"错误：{error}")
+            lines.append("")
+        parent["result"] = "\n".join(lines).strip()
+        parent["status"] = "complete"
+        parent["updatedAt"] = datetime.now().isoformat()
+        _persist_jobs_locked()
+        return True
+
+
 def _run_isolated_child_job_chat(prompt: str, job: dict) -> dict:
     """Execute a child background job with isolated context (no memory, read-only tools)."""
     from core.llm import stream_chat
@@ -556,6 +591,7 @@ def _run_job(job_id: str) -> None:
     parent_id = job.get("parentJobId")
     if parent_id:
         _kick_queued_children(str(parent_id))
+        _try_rollup_parent_result(str(parent_id))
 
 
 def _start_job(job_id: str) -> None:
