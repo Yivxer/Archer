@@ -1074,7 +1074,7 @@ export function ChatPage({
 
   const composerEl = (
     <>
-      {!isHome && ((runtimeOrchestration && runtimeOrchestration.labels.length > 0) || runtimeStatus || tokenUsageLabel) ? (
+      {messages.length > 0 && ((runtimeOrchestration && runtimeOrchestration.labels.length > 0) || runtimeStatus || tokenUsageLabel) ? (
         <div className="orchestration-status-row" aria-label="当前对话状态">
           {runtimeOrchestration?.labels.map((label) => (
             <span key={label} className="orchestration-chip">{label}</span>
