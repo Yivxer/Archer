@@ -2,11 +2,11 @@ import React from 'react'
 import { ArrowUp, Check, ChevronDown, Copy, CornerDownLeft, Crop, Edit3, FileText, Github, Infinity, Loader2, Mic, Monitor, Paperclip, RotateCcw, Send, Terminal, UserRoundCog, X } from 'lucide-react'
 import { appendLocalSession, approveJobToolEvent, cancelBackgroundJobEvent, createBackgroundJobEvent, fetchBackgroundJob, pollBackgroundJobEvents, retryBackgroundJobEvent, saveLocalSession, spawnChildJobs, streamLocalChat, submitToolApprovalEvent, switchLocalMode } from '../adapters/localArcher'
 import { pickChatGreeting } from '../lib/chatGreetings'
-import { extendedConversationModes, PERSONA_PRESETS, personaIdFromMode, tokenUsageSummary } from '../lib/conversationPersona'
+import { extendedConversationModes, PERSONA_PRESETS, personaIdFromMode } from '../lib/conversationPersona'
 import type { ArcherAdapter, ChatMessage, FileRef, MemoryContextMode, ObsidianContextMode, SessionDetail, ToolEvent } from '../types'
 import { ArcherRing, MarkdownMessage, ThinkingDots } from '../components/common'
 import { createInitialRuntimeState, createPersistentEventLog, reduceRuntimeEvent, routeTaskForRuntime, jobSnapshotToAgentEvent, buildPlanChildJobSpecs, buildPlanCoordinatorPrompt, buildPlanExecutionPrompt, planWithStatus } from '../../../agent'
-import type { AgentEvent, EventLog, JobEvent, OrchestrationEvent, PlanEvent, StatusEvent } from '../../../agent'
+import type { AgentEvent, EventLog, JobEvent, OrchestrationEvent, PlanEvent } from '../../../agent'
 
 const CHAT_STARTERS = [
   { label: '先听我说', prompt: '我先说一段，你不用急着给方案。' },
@@ -84,18 +84,6 @@ export function ChatPage({
   const [runtimeState, setRuntimeState] = React.useState(() => restoreRuntimeState(runtimeSessionId, eventLogRef.current))
   const runtimeJobs = Object.values(runtimeState.jobs).sort((a, b) => b.createdAt.localeCompare(a.createdAt))
   const runtimePlans = Object.values(runtimeState.plans).sort((a, b) => b.createdAt.localeCompare(a.createdAt))
-  const runtimeOrchestration = Object.values(runtimeState.orchestrations).sort(
-    (a, b) => b.createdAt.localeCompare(a.createdAt),
-  )[0] as OrchestrationEvent | undefined
-
-  const runtimeStatus: StatusEvent | undefined = React.useMemo(() => {
-    for (let i = runtimeState.events.length - 1; i >= 0; i--) {
-      const e = runtimeState.events[i]
-      if (e.type === 'status.event') return e as StatusEvent
-    }
-    return undefined
-  }, [runtimeState.events])
-
   function recordAgentEvent(event: AgentEvent) {
     eventLogRef.current?.append(event)
     setRuntimeState((current) => reduceRuntimeEvent(current, event))
@@ -1070,30 +1058,8 @@ export function ChatPage({
         ? '接着这段聊…'
         : '继续说…'
 
-  const tokenUsageLabel = tokenUsageSummary(data.status.tokenUsage)
-
   const composerEl = (
     <>
-      {messages.length > 0 && ((runtimeOrchestration && runtimeOrchestration.labels.length > 0) || runtimeStatus || tokenUsageLabel) ? (
-        <div className="orchestration-status-row" aria-label="当前对话状态">
-          {runtimeOrchestration?.labels.map((label) => (
-            <span key={label} className="orchestration-chip">{label}</span>
-          ))}
-          {runtimeStatus && (
-            <span className="status-event-line">
-              🧠 {runtimeStatus.intentLabel}
-              {runtimeStatus.memoryScope.length > 0 && ` · 记忆检索：${runtimeStatus.memoryScope.join(', ')}`}
-              {runtimeStatus.matchedSkills.length > 0 && ` · 已匹配：${runtimeStatus.matchedSkills.join(', ')}`}
-              {runtimeStatus.isBackground ? ' · 后台执行' : ' · 前台流式'}
-            </span>
-          )}
-          {tokenUsageLabel && (
-            <span className="token-usage-chip" title="本次 API 进程累计 token 用量">
-              {tokenUsageLabel}
-            </span>
-          )}
-        </div>
-      ) : null}
     <div className="composer" ref={composerRef}>
       {fileRefs.length > 0 && (
         <div className="file-ref-row" aria-label="已引用文件">
