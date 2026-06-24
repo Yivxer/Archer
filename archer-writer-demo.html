@@ -108,6 +108,7 @@
   .brand-name { font-size: 17px; font-weight: 700; color: var(--text); }
   .brand-name .ch { color: var(--orange); margin-left: 5px; font-family: "Ma Shan Zheng", serif; font-size: 19px; }
   .brand-sub { font-size: 11px; color: var(--text-mute); padding-left: 12px; border-left: 1px solid var(--line); margin-left: 4px; }
+  .brand-sub.hand { font-size: 13px; color: var(--orange); }
   .top-actions { display: flex; gap: 8px; align-items: center; }
   .icon-btn { width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--line); background: var(--surface); color: var(--text-soft); cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all .2s; }
   .icon-btn:hover { border-color: var(--cyan); color: var(--cyan); }
@@ -121,8 +122,20 @@
 
   .msg { display: flex; gap: 14px; margin-bottom: 24px; animation: fadeUp .4s ease both; }
   .msg.user { flex-direction: row-reverse; }
-  .avatar { width: 36px; height: 36px; border-radius: 50%; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; }
-  .msg.archer .avatar { background: linear-gradient(135deg, var(--cyan), var(--blue)); color: #fff; box-shadow: var(--glow-cyan); }
+  .avatar { width: 36px; height: 36px; border-radius: 50%; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; position: relative; }
+  /* Archer 头像：渐变圆环（五色光谱），中心镂空，带呼吸光晕 */
+  .msg.archer .avatar {
+    background: conic-gradient(from 195deg, #5ee8e0 0deg, #2aabf0 55deg, #1e7be8 110deg, #f5c842 170deg, #f5a030 215deg, #f5612a 260deg, #e8212a 305deg, #5ee8e0 360deg);
+    box-shadow: 0 0 14px rgba(77,217,212,.45), 0 0 4px rgba(245,97,42,.3);
+    animation: avatarPulse 3.2s ease-in-out infinite;
+  }
+  .msg.archer .avatar::after {
+    content: ""; position: absolute; inset: 5px; border-radius: 50%; background: var(--bg);
+  }
+  @keyframes avatarPulse {
+    0%,100% { box-shadow: 0 0 14px rgba(77,217,212,.45), 0 0 4px rgba(245,97,42,.3); }
+    50% { box-shadow: 0 0 20px rgba(77,217,212,.65), 0 0 7px rgba(245,97,42,.45); }
+  }
   .msg.user .avatar { background: var(--surface-3); color: var(--text-soft); border: 1px solid var(--line); }
   .bubble-wrap { max-width: 78%; display: flex; flex-direction: column; gap: 8px; }
   .msg.user .bubble-wrap { align-items: flex-end; }
@@ -134,7 +147,8 @@
     backdrop-filter: blur(8px); animation: refLight .4s ease both;
   }
   [data-theme="light"] .ref-card { background: linear-gradient(135deg, rgba(77,217,212,.10), rgba(30,123,232,.06)); }
-  .ref-head { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--cyan); font-weight: 600; letter-spacing: .06em; margin-bottom: 8px; text-transform: uppercase; }
+  .ref-head { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--cyan); font-weight: 400; letter-spacing: .02em; margin-bottom: 8px; }
+  .ref-head.hand { font-size: 15px; }
   .ref-head .ref-icon { font-size: 13px; }
   .ref-list { display: flex; flex-direction: column; gap: 6px; }
   .ref-item { display: flex; align-items: flex-start; gap: 8px; font-size: 13px; color: var(--text-soft); line-height: 1.5; }
@@ -155,7 +169,8 @@
 
   /* 记忆候选 */
   .cand-bubble { background: var(--surface-2); border: 1px dashed var(--gold); border-radius: var(--r); padding: 12px 14px; animation: fadeUp .4s ease both; }
-  .cand-head { font-size: 11px; color: var(--gold); font-weight: 600; letter-spacing: .06em; margin-bottom: 8px; display: flex; align-items: center; gap: 6px; }
+  .cand-head { font-size: 13px; color: var(--gold); font-weight: 400; letter-spacing: .02em; margin-bottom: 8px; display: flex; align-items: center; gap: 6px; }
+  .cand-head.hand { font-size: 15px; }
   .cand-list { display: flex; flex-direction: column; gap: 8px; }
   .cand-item { display: flex; align-items: center; gap: 10px; font-size: 13.5px; color: var(--text-soft); }
   .cand-item .ci-text { flex: 1; }
@@ -190,6 +205,9 @@
   .thread-head { padding: 18px 20px 14px; border-bottom: 1px solid var(--line-soft); }
   .thread-title { font-size: 16px; font-weight: 600; color: var(--text); display: flex; align-items: center; gap: 8px; }
   .thread-title .hand { color: var(--orange); }
+  .thread-close { margin-left: auto; width: 28px; height: 28px; border-radius: 50%; border: 1px solid var(--line); background: var(--surface); color: var(--text-soft); cursor: pointer; display: none; align-items: center; justify-content: center; font-size: 16px; line-height: 1; transition: all .2s; }
+  .thread-close:hover { border-color: var(--cyan); color: var(--cyan); }
+  @media (max-width: 900px) { .thread-close { display: flex; } }
   .thread-sub { font-size: 11.5px; color: var(--text-mute); margin-top: 4px; }
   .thread-ring-wrap { display: flex; align-items: center; gap: 16px; margin-top: 14px; }
   .thread-ring { position: relative; width: 80px; height: 80px; flex-shrink: 0; }
@@ -210,6 +228,7 @@
   .thread-list::-webkit-scrollbar { width: 4px; }
   .thread-list::-webkit-scrollbar-thumb { background: var(--line); border-radius: 2px; }
   .thread-empty { text-align: center; padding: 40px 16px; color: var(--text-mute); font-size: 13px; }
+  .thread-empty .te-title { font-size: 18px; color: var(--orange); margin-bottom: 6px; }
   .mem-item { padding: 10px 12px; background: var(--surface); border: 1px solid var(--line-soft); border-radius: var(--r-sm); margin-bottom: 8px; transition: all .2s; animation: fadeUp .3s ease both; }
   .mem-item:hover { border-color: var(--gold); transform: translateX(-2px); }
   .mem-item.recent { border-color: var(--cyan); box-shadow: 0 0 0 1px rgba(77,217,212,.15); }
@@ -268,7 +287,7 @@
       <div class="brand" onclick="App.reset()">
         <span class="archer-ring nav-ring"><span class="ring-base"></span><span class="ring-shine"></span><span class="ring-halo"></span></span>
         <span class="brand-name brand-font">Archer<span class="ch">初衍</span></span>
-        <span class="brand-sub" id="sessionLabel">会话</span>
+        <span class="brand-sub hand" id="sessionLabel">在场</span>
       </div>
       <div class="top-actions">
         <button class="icon-btn" id="threadToggle" onclick="App.toggleThread()" title="记忆脉络">
@@ -307,7 +326,7 @@
   <!-- ============ Thread 记忆脉络 ============ -->
   <aside class="thread" id="thread">
     <div class="thread-head">
-      <div class="thread-title"><span class="hand">记忆脉络</span></div>
+      <div class="thread-title"><span class="hand">记忆脉络</span><button class="thread-close" onclick="App.toggleThread(false)" aria-label="关闭">×</button></div>
       <div class="thread-sub">越被引用，越活跃；不用则渐淡</div>
       <div class="thread-ring-wrap">
         <div class="thread-ring">
@@ -319,7 +338,7 @@
       </div>
     </div>
     <div class="thread-list" id="threadList">
-      <div class="thread-empty">还没有记忆<br>建档后会出现在这里</div>
+      <div class="thread-empty"><div class="te-title hand">尚无记忆</div>建档后会出现在这里</div>
     </div>
   </aside>
 </div>
@@ -600,7 +619,7 @@ const App = {
 
   updateSessionLabel() {
     const s = Store.data.session;
-    document.getElementById('sessionLabel').textContent = s ? '会话 ' + s.id.slice(5, 15) : '会话';
+    document.getElementById('sessionLabel').textContent = s ? '在场 · ' + s.id.slice(5, 13) : '在场';
   },
 
   bindInput() {
@@ -698,12 +717,12 @@ const App = {
     const wrap = document.getElementById('msgWrap');
     const el = document.createElement('div');
     el.className = 'msg archer' + (opts.recall ? ' recall-msg' : '');
-    let html = '<div class="avatar">衍</div><div class="bubble-wrap">';
+    let html = '<div class="avatar"></div><div class="bubble-wrap">';
     // 引用卡
     if (refs && refs.length) {
       const mems = refs.map(id => Store.data.memories.find(m => m.id === id)).filter(Boolean);
       if (mems.length) {
-        html += '<div class="ref-card"><div class="ref-head"><span class="ref-icon">💡</span>我想起了</div><div class="ref-list">';
+        html += '<div class="ref-card"><div class="ref-head hand"><span class="ref-icon">✦</span>我想起了</div><div class="ref-list">';
         mems.forEach(m => {
           const typeLabel = { identity:'身份', preference:'偏好', goal:'目标', topic:'选题', insight:'洞察' }[m.type] || m.type;
           html += `<div class="ref-item"><span class="ref-tag ${m.type}">${typeLabel}</span><span>${this.esc(m.text)}</span></div>`;
@@ -743,7 +762,7 @@ const App = {
     const wrap = document.getElementById('msgWrap');
     const el = document.createElement('div');
     el.className = 'msg archer';
-    let html = '<div class="avatar">衍</div><div class="bubble-wrap"><div class="cand-bubble"><div class="cand-head">✦ 这句话值得记住吗？</div><div class="cand-list">';
+    let html = '<div class="avatar"></div><div class="bubble-wrap"><div class="cand-bubble"><div class="cand-head hand">✦ 这句话值得记住吗</div><div class="cand-list">';
     cands.forEach((c, i) => {
       html += `<div class="cand-item" data-idx="${i}"><span class="ci-text"><span class="ref-tag ${c.type}" style="margin-right:6px">${c.label}</span>${this.esc(c.text)}</span><div class="cand-btns"><button class="cand-mini cand-yes" onclick="App.acceptCand(${i})" title="记住">✓</button><button class="cand-mini cand-no" onclick="App.rejectCand(${i})" title="忽略">✕</button></div></div>`;
     });
@@ -803,7 +822,7 @@ const App = {
     ];
     legend.innerHTML = types.map(t => `<div class="lg-item"><span class="lg-dot" style="background:${t.color}"></span>${t.name}<span class="lg-count">${counts[t.t]}</span></div>`).join('');
     // 列表
-    if (!mems.length) { list.innerHTML = '<div class="thread-empty">还没有记忆<br>建档后会出现在这里</div>'; return; }
+    if (!mems.length) { list.innerHTML = '<div class="thread-empty"><div class="te-title hand">尚无记忆</div>建档后会出现在这里</div>'; return; }
     const typeLabel = { identity:'身份', preference:'偏好', goal:'目标', topic:'选题', insight:'洞察' };
     const typeColor = { identity:'#4dd9d4', preference:'#2aabf0', goal:'#f5c842', topic:'#f5612a', insight:'#e8212a' };
     list.innerHTML = mems.map(m => {
