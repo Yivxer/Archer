@@ -1,0 +1,1081 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Archer · 会记住你的写作伙伴</title>
+<meta name="description" content="Archer 写作伴生 Demo —— 拥有长期记忆的写作伙伴。关掉重开它还记得你。" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Comfortaa:wght@400;600;700&family=Ma+Shan+Zheng&family=Noto+Serif+SC:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #f7f3ec;
+    --bg-2: #f2ede3;
+    --bg-3: #ebe5d8;
+    --surface: #fffdf8;
+    --surface-2: #faf6ee;
+
+    --cyan: #4dd9d4;
+    --cyan-bright: #5ee8e0;
+    --blue: #1e7be8;
+    --blue-soft: #2aabf0;
+    --amber: #f5c842;
+    --orange: #f5612a;
+    --red: #e8212a;
+
+    --ink-green: #3d5240;
+    --ink-green-deep: #2d3d30;
+    --gold: #bfa06a;
+    --clay: #a07856;
+
+    --ink: #2a2a26;
+    --ink-soft: #595550;
+    --ink-mute: #8a857c;
+    --line: #e4dccd;
+    --line-soft: #ece5d6;
+
+    --shadow-sm: 0 1px 2px rgba(60, 50, 30, 0.04);
+    --shadow: 0 1px 2px rgba(60, 50, 30, 0.04), 0 10px 28px rgba(60, 50, 30, 0.06);
+    --shadow-lg: 0 6px 16px rgba(60, 50, 30, 0.06), 0 28px 56px rgba(60, 50, 30, 0.10);
+
+    --r-sm: 8px;
+    --r: 14px;
+    --r-lg: 20px;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  body {
+    font-family: "Noto Serif SC", "Charter", "Iowan Old Style", "Georgia", "Songti SC", serif;
+    background: var(--bg);
+    color: var(--ink);
+    line-height: 1.75;
+    font-size: 16px;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    overflow-x: hidden;
+    min-height: 100vh;
+  }
+  .hand { font-family: "Ma Shan Zheng", "Noto Serif SC", cursive; font-weight: 400; }
+  .brand-font { font-family: "Comfortaa", "Ma Shan Zheng", sans-serif; }
+
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 0 28px; }
+
+  /* ============ 圆环（Archer 五色光谱） ============ */
+  .archer-ring {
+    position: relative;
+    display: inline-block;
+    filter: drop-shadow(0 -3px 8px rgba(77, 217, 212, 0.18)) drop-shadow(0 8px 14px rgba(245, 97, 42, 0.12));
+  }
+  .ring-base, .ring-shine, .ring-halo {
+    position: absolute; inset: 0;
+    border-radius: 46% 54% 53% 47% / 48% 52% 44% 56%;
+  }
+  .ring-base {
+    background: conic-gradient(from 195deg,
+      #5ee8e0 0deg, #2aabf0 48deg, #1e7be8 92deg, #a4dcf5 128deg,
+      #f5c842 168deg, #f5a030 205deg, #f5612a 245deg, #e8212a 278deg,
+      #f07868 312deg, #8ad4f0 346deg, #5ee8e0 360deg);
+    -webkit-mask: radial-gradient(circle at center, transparent 38%, #000 39%);
+    mask: radial-gradient(circle at center, transparent 38%, #000 39%);
+    animation: organicMorph 16s ease-in-out infinite;
+  }
+  .ring-shine {
+    background: radial-gradient(circle at 32% 28%, rgba(255,255,255,0.55) 0%, rgba(255,255,255,0) 45%);
+    -webkit-mask: radial-gradient(circle at center, transparent 38%, #000 39%);
+    mask: radial-gradient(circle at center, transparent 38%, #000 39%);
+    animation: ringShineDrift 5.5s ease-in-out infinite;
+  }
+  .ring-halo {
+    border: 1px solid rgba(255,255,255,0.4);
+    -webkit-mask: radial-gradient(circle at center, transparent 38%, #000 39%, #000 44%, transparent 45%);
+    mask: radial-gradient(circle at center, transparent 38%, #000 39%, #000 44%, transparent 45%);
+  }
+  .ring-core {
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    flex-direction: column;
+  }
+  @keyframes organicMorph {
+    0%,100% { border-radius: 46% 54% 53% 47% / 48% 52% 44% 56%; }
+    33% { border-radius: 53% 47% 50% 50% / 56% 44% 56% 44%; }
+    66% { border-radius: 47% 53% 56% 44% / 44% 56% 48% 52%; }
+  }
+  @keyframes ringShineDrift {
+    0%,100% { background-position: 32% 28%; }
+    50% { background-position: 38% 34%; }
+  }
+  @keyframes orbBreathe { 0%,100%{transform:scale(1);opacity:.96} 50%{transform:scale(1.035);opacity:1} }
+  @keyframes floatY { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-7px)} }
+  @keyframes pulseDot { 0%,100%{opacity:.4;transform:scale(1)} 50%{opacity:1;transform:scale(1.15)} }
+  @keyframes fadeUp { from{opacity:0;transform:translateY(14px)} to{opacity:1;transform:translateY(0)} }
+  @keyframes segLight { from{filter:brightness(1)} to{filter:brightness(1.6) drop-shadow(0 0 12px currentColor)} }
+
+  /* ============ Nav ============ */
+  nav {
+    position: sticky; top: 0; z-index: 50;
+    backdrop-filter: saturate(180%) blur(14px);
+    -webkit-backdrop-filter: saturate(180%) blur(14px);
+    background: rgba(246, 242, 234, 0.86);
+    border-bottom: 1px solid var(--line-soft);
+  }
+  nav .wrap { display: flex; align-items: center; justify-content: space-between; height: 64px; }
+  .brand { display: flex; align-items: center; gap: 12px; cursor: pointer; }
+  .nav-ring { width: 28px; height: 28px; }
+  .brand-name { font-size: 18px; font-weight: 700; letter-spacing: 0.01em; color: var(--ink); }
+  .brand-name .ch { color: var(--orange); margin-left: 5px; font-family: "Ma Shan Zheng", serif; font-size: 19px; }
+  .nav-links { display: flex; gap: 26px; align-items: center; }
+  .nav-links a {
+    color: var(--ink-soft); text-decoration: none; font-size: 14px;
+    transition: color .2s; cursor: pointer; font-weight: 500;
+  }
+  .nav-links a:hover, .nav-links a.active { color: var(--orange); }
+  .nav-actions { display: flex; gap: 10px; align-items: center; }
+  @media (max-width: 820px) { .nav-links { display: none; } }
+
+  /* ============ Buttons ============ */
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+    padding: 11px 22px; border-radius: 999px; border: none; cursor: pointer;
+    font-family: inherit; font-size: 14.5px; font-weight: 600;
+    transition: transform .15s, box-shadow .2s, background .2s; white-space: nowrap;
+  }
+  .btn:active { transform: translateY(1px); }
+  .btn-primary { background: linear-gradient(120deg, var(--orange), var(--red)); color: #fff; box-shadow: 0 6px 18px rgba(245,97,42,.28); }
+  .btn-primary:hover { box-shadow: 0 8px 24px rgba(245,97,42,.36); transform: translateY(-1px); }
+  .btn-ghost { background: transparent; color: var(--ink-soft); border: 1px solid var(--line); }
+  .btn-ghost:hover { border-color: var(--orange); color: var(--orange); }
+  .btn-soft { background: var(--surface); color: var(--ink); border: 1px solid var(--line); box-shadow: var(--shadow-sm); }
+  .btn-soft:hover { border-color: var(--blue-soft); color: var(--blue); }
+  .btn-sm { padding: 7px 14px; font-size: 13px; }
+  .btn:disabled { opacity: .45; cursor: not-allowed; transform: none; }
+
+  /* ============ Views ============ */
+  .view { display: none; animation: fadeUp .5s ease both; }
+  .view.active { display: block; }
+
+  /* ============ Hero ============ */
+  .hero { position: relative; padding: 70px 0 90px; overflow: hidden; }
+  .hero::before {
+    content: ""; position: absolute; top: -25%; right: -20%;
+    width: 720px; height: 720px;
+    background: radial-gradient(circle, rgba(245,200,66,.18) 0%, rgba(245,97,42,.08) 40%, transparent 70%);
+    pointer-events: none;
+  }
+  .hero::after {
+    content: ""; position: absolute; bottom: -35%; left: -18%;
+    width: 640px; height: 640px;
+    background: radial-gradient(circle, rgba(77,217,212,.16) 0%, rgba(30,123,232,.06) 45%, transparent 70%);
+    pointer-events: none;
+  }
+  .hero .wrap { position: relative; z-index: 1; display: grid; grid-template-columns: 1.05fr .95fr; gap: 56px; align-items: center; }
+  @media (max-width: 900px) { .hero .wrap { grid-template-columns: 1fr; gap: 48px; text-align: center; } }
+
+  .eyebrow {
+    display: inline-flex; align-items: center; gap: 10px; font-size: 12px;
+    color: var(--orange); background: rgba(245,97,42,.08); border: 1px solid rgba(245,97,42,.20);
+    padding: 6px 14px; border-radius: 999px; letter-spacing: .08em; font-weight: 600;
+  }
+  .eyebrow .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--orange); box-shadow: 0 0 0 3px rgba(245,97,42,.15); }
+  .hero-title { font-size: clamp(34px, 5.4vw, 58px); line-height: 1.18; font-weight: 400; letter-spacing: .01em; margin: 24px 0 18px; color: var(--ink); }
+  .hero-title .accent { background: linear-gradient(120deg, var(--orange), var(--red)); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+  .hero-sub { font-size: clamp(16px, 1.8vw, 18px); color: var(--ink-soft); max-width: 46ch; margin-bottom: 30px; }
+  @media (max-width: 900px) { .hero-sub { margin-left: auto; margin-right: auto; } }
+  .hero-actions { display: flex; gap: 14px; flex-wrap: wrap; }
+  @media (max-width: 900px) { .hero-actions { justify-content: center; } }
+
+  .hero-visual { position: relative; min-height: 360px; display: flex; align-items: center; justify-content: center; }
+  .hero-ring-wrap { position: relative; width: 300px; height: 300px; animation: floatY 7s ease-in-out infinite; }
+  .hero-ring-wrap .archer-ring { width: 300px; height: 300px; }
+  .hero-ring-wrap .ring-core .hand { font-size: 30px; color: var(--ink); line-height: 1.2; }
+  .hero-ring-wrap .ring-core .sub { font-size: 12px; color: var(--ink-mute); letter-spacing: .14em; margin-top: 4px; }
+
+  .recall-card {
+    position: absolute; bottom: -10px; right: -8px; max-width: 280px;
+    background: var(--surface); border: 1px solid var(--line); border-radius: var(--r);
+    box-shadow: var(--shadow-lg); padding: 16px 18px; animation: floatY 6s ease-in-out infinite reverse;
+  }
+  .recall-card .rc-head { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--ink-mute); letter-spacing: .06em; font-weight: 600; margin-bottom: 8px; text-transform: uppercase; }
+  .recall-card .rc-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--cyan); animation: pulseDot 2.4s ease-in-out infinite; }
+  .recall-card .rc-body { font-size: 13.5px; color: var(--ink-soft); line-height: 1.6; }
+  .recall-card .rc-body .k { color: var(--orange); font-weight: 600; }
+  @media (max-width: 480px) { .recall-card { position: relative; bottom: 0; right: 0; max-width: 100%; margin-top: 20px; } }
+
+  /* ============ Section base ============ */
+  section.block { padding: 56px 0 80px; }
+  .section-head { margin-bottom: 40px; max-width: 68ch; }
+  .section-num { font-size: 12px; color: var(--orange); letter-spacing: .14em; font-weight: 600; margin-bottom: 10px; }
+  .section-title { font-size: clamp(26px, 3.4vw, 34px); font-weight: 400; line-height: 1.25; margin-bottom: 12px; color: var(--ink); }
+  .section-desc { font-size: 15px; color: var(--ink-soft); }
+
+  /* ============ Onboard ============ */
+  .onboard-card { max-width: 620px; margin: 30px auto 0; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); box-shadow: var(--shadow); overflow: hidden; }
+  .onboard-progress { display: flex; height: 5px; background: var(--bg-3); }
+  .onboard-progress .bar { height: 100%; background: linear-gradient(90deg, var(--cyan), var(--blue), var(--orange)); transition: width .4s ease; }
+  .onboard-body { padding: 38px 40px 34px; }
+  .onboard-step { display: none; animation: fadeUp .4s ease both; }
+  .onboard-step.active { display: block; }
+  .onboard-q { font-size: 22px; font-weight: 400; margin-bottom: 8px; color: var(--ink); }
+  .onboard-hint { font-size: 13.5px; color: var(--ink-mute); margin-bottom: 22px; }
+  .onboard-input {
+    width: 100%; padding: 14px 16px; border: 1px solid var(--line); border-radius: var(--r);
+    font-family: inherit; font-size: 16px; color: var(--ink); background: var(--surface-2);
+    transition: border .2s, box-shadow .2s; resize: none;
+  }
+  .onboard-input:focus { outline: none; border-color: var(--blue-soft); box-shadow: 0 0 0 3px rgba(42,171,240,.12); }
+  .chip-row { display: flex; flex-wrap: wrap; gap: 10px; }
+  .chip {
+    padding: 9px 16px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface-2);
+    font-size: 14px; color: var(--ink-soft); cursor: pointer; transition: all .18s; user-select: none;
+  }
+  .chip:hover { border-color: var(--orange); color: var(--orange); }
+  .chip.selected { background: linear-gradient(120deg, rgba(245,97,42,.12), rgba(232,33,42,.08)); border-color: var(--orange); color: var(--orange); font-weight: 600; }
+  .style-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .style-opt { padding: 16px 18px; border: 1px solid var(--line); border-radius: var(--r); cursor: pointer; transition: all .18s; background: var(--surface-2); }
+  .style-opt:hover { border-color: var(--blue-soft); }
+  .style-opt.selected { border-color: var(--blue); background: linear-gradient(135deg, rgba(77,217,212,.10), rgba(30,123,232,.06)); }
+  .style-opt .so-name { font-size: 15.5px; font-weight: 600; color: var(--ink); margin-bottom: 4px; }
+  .style-opt .so-desc { font-size: 12.5px; color: var(--ink-mute); }
+  .onboard-foot { display: flex; justify-content: space-between; align-items: center; margin-top: 28px; }
+  .onboard-foot .step-of { font-size: 13px; color: var(--ink-mute); }
+
+  /* ============ Workspace ============ */
+  .ws-grid { display: grid; grid-template-columns: 1.15fr .85fr; gap: 24px; align-items: start; }
+  @media (max-width: 900px) { .ws-grid { grid-template-columns: 1fr; } }
+  .panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); box-shadow: var(--shadow); overflow: hidden; }
+  .panel-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 20px; border-bottom: 1px solid var(--line-soft); background: var(--surface-2); }
+  .panel-head .dots { display: flex; gap: 6px; }
+  .panel-head .dots span { width: 9px; height: 9px; border-radius: 50%; }
+  .panel-head .dots span:nth-child(1) { background: var(--orange); }
+  .panel-head .dots span:nth-child(2) { background: var(--amber); }
+  .panel-head .dots span:nth-child(3) { background: var(--cyan); }
+  .panel-head .title { font-size: 12.5px; color: var(--ink-mute); letter-spacing: .04em; }
+  .panel-body { padding: 22px 24px; }
+
+  .draft-area { position: relative; }
+  .draft-input {
+    width: 100%; min-height: 220px; padding: 16px 18px; border: 1px solid var(--line); border-radius: var(--r);
+    font-family: inherit; font-size: 15.5px; line-height: 1.85; color: var(--ink); background: var(--surface-2);
+    resize: vertical; transition: border .2s, box-shadow .2s;
+  }
+  .draft-input:focus { outline: none; border-color: var(--blue-soft); box-shadow: 0 0 0 3px rgba(42,171,240,.10); }
+  .draft-input::placeholder { color: var(--ink-mute); font-style: italic; }
+  .draft-meta { display: flex; justify-content: space-between; align-items: center; margin-top: 12px; font-size: 12.5px; color: var(--ink-mute); }
+  .ws-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 16px; }
+
+  .suggest-empty { text-align: center; padding: 40px 20px; color: var(--ink-mute); }
+  .suggest-empty .se-icon { width: 48px; height: 48px; margin: 0 auto 14px; opacity: .5; }
+  .suggest-empty .se-text { font-size: 14px; }
+
+  .suggest-block { margin-bottom: 22px; animation: fadeUp .4s ease both; }
+  .suggest-block:last-child { margin-bottom: 0; }
+  .sb-label { display: flex; align-items: center; gap: 8px; font-size: 11.5px; color: var(--blue); font-weight: 700; letter-spacing: .08em; margin-bottom: 12px; text-transform: uppercase; }
+  .sb-label .sb-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--blue); }
+  .title-list { display: flex; flex-direction: column; gap: 8px; }
+  .title-item {
+    padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--surface-2);
+    font-size: 14.5px; color: var(--ink); cursor: pointer; transition: all .18s; display: flex; justify-content: space-between; align-items: center; gap: 10px;
+  }
+  .title-item:hover { border-color: var(--orange); background: rgba(245,97,42,.04); }
+  .title-item .ti-text { flex: 1; }
+  .title-item .ti-use { font-size: 11px; color: var(--orange); font-weight: 600; opacity: 0; transition: opacity .18s; }
+  .title-item:hover .ti-use { opacity: 1; }
+
+  .continuation {
+    padding: 14px 16px; background: linear-gradient(135deg, rgba(77,217,212,.08), rgba(30,123,232,.05));
+    border-left: 3px solid var(--blue); border-radius: var(--r-sm); font-size: 14px; color: var(--ink-soft); line-height: 1.8;
+  }
+  .continuation .cont-tag { font-size: 11px; color: var(--blue); font-weight: 600; letter-spacing: .06em; display: block; margin-bottom: 6px; }
+
+  .cand-list { display: flex; flex-direction: column; gap: 10px; }
+  .cand-item {
+    padding: 12px 14px; border: 1px dashed var(--gold); border-radius: var(--r-sm); background: rgba(191,160,106,.06);
+    display: flex; justify-content: space-between; align-items: center; gap: 12px; animation: fadeUp .35s ease both;
+  }
+  .cand-item .ci-left { flex: 1; }
+  .cand-item .ci-type { font-size: 10.5px; color: var(--clay); font-weight: 700; letter-spacing: .06em; text-transform: uppercase; margin-bottom: 3px; }
+  .cand-item .ci-text { font-size: 13.5px; color: var(--ink); }
+  .cand-item .ci-actions { display: flex; gap: 6px; }
+  .cand-btn { width: 30px; height: 30px; border-radius: 50%; border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 14px; transition: all .15s; }
+  .cand-accept { background: var(--ink-green); color: #fff; }
+  .cand-accept:hover { background: var(--ink-green-deep); transform: scale(1.1); }
+  .cand-reject { background: var(--bg-3); color: var(--ink-mute); }
+  .cand-reject:hover { background: var(--red); color: #fff; transform: scale(1.1); }
+
+  .toast {
+    position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%) translateY(20px);
+    background: var(--ink-green-deep); color: #fff; padding: 12px 22px; border-radius: 999px;
+    font-size: 14px; box-shadow: var(--shadow-lg); opacity: 0; pointer-events: none; transition: all .35s; z-index: 100;
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  /* ============ Profile ============ */
+  .profile-top { display: grid; grid-template-columns: 320px 1fr; gap: 36px; align-items: center; margin-bottom: 44px; }
+  @media (max-width: 820px) { .profile-top { grid-template-columns: 1fr; text-align: center; } }
+  .memory-ring-wrap { position: relative; width: 280px; height: 280px; margin: 0 auto; }
+  .memory-ring-wrap .archer-ring { width: 280px; height: 280px; }
+  .seg-overlay { position: absolute; inset: 0; pointer-events: none; }
+  .seg-overlay svg { width: 100%; height: 100%; }
+  .seg-overlay path { transition: opacity .6s ease, filter .6s ease; opacity: .14; }
+  .seg-overlay path.lit { opacity: .92; animation: segLight .8s ease; }
+  .ring-core .rc-count { font-size: 38px; font-weight: 700; color: var(--ink); line-height: 1; }
+  .ring-core .rc-label { font-size: 12px; color: var(--ink-mute); letter-spacing: .12em; margin-top: 6px; }
+
+  .profile-info .pi-name { font-size: 28px; font-weight: 400; margin-bottom: 6px; }
+  .profile-info .pi-meta { font-size: 14px; color: var(--ink-soft); margin-bottom: 16px; }
+  .pi-tags { display: flex; flex-wrap: wrap; gap: 8px; }
+  .pi-tag { padding: 5px 12px; border-radius: 999px; background: var(--surface); border: 1px solid var(--line); font-size: 12.5px; color: var(--ink-soft); }
+
+  .type-legend { display: flex; flex-wrap: wrap; gap: 18px; margin-bottom: 28px; padding: 16px 20px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); }
+  .legend-item { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--ink-soft); }
+  .legend-dot { width: 10px; height: 10px; border-radius: 50%; }
+  .legend-item .lc { color: var(--ink-mute); font-size: 12px; }
+
+  .mem-group { margin-bottom: 30px; }
+  .mem-group-head { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+  .mem-group-head .mg-dot { width: 8px; height: 8px; border-radius: 50%; }
+  .mem-group-head .mg-name { font-size: 15px; font-weight: 600; color: var(--ink); }
+  .mem-group-head .mg-count { font-size: 12px; color: var(--ink-mute); }
+  .mem-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+  .mem-card { padding: 14px 16px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); box-shadow: var(--shadow-sm); position: relative; transition: border .2s, transform .15s; animation: fadeUp .35s ease both; }
+  .mem-card:hover { border-color: var(--gold); transform: translateY(-2px); }
+  .mem-card .mc-text { font-size: 14px; color: var(--ink); line-height: 1.6; margin-bottom: 8px; }
+  .mem-card .mc-foot { display: flex; justify-content: space-between; align-items: center; font-size: 11px; color: var(--ink-mute); }
+  .mem-card .mc-del { background: none; border: none; color: var(--ink-mute); cursor: pointer; font-size: 12px; padding: 2px 6px; border-radius: 4px; transition: color .15s; }
+  .mem-card .mc-del:hover { color: var(--red); }
+  .empty-state { text-align: center; padding: 50px 20px; color: var(--ink-mute); }
+  .empty-state .es-text { font-size: 14px; margin-top: 10px; }
+
+  /* ============ Review ============ */
+  .review-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 18px; }
+  .theme-card { padding: 22px 24px; background: var(--ink-green-deep); border-radius: var(--r-lg); color: #f0ece2; position: relative; overflow: hidden; animation: fadeUp .45s ease both; }
+  .theme-card::before { content: ""; position: absolute; top: -30px; right: -30px; width: 120px; height: 120px; border-radius: 50%; background: radial-gradient(circle, rgba(245,200,66,.18), transparent 70%); }
+  .theme-card .tc-rank { font-size: 11px; letter-spacing: .14em; color: var(--amber); font-weight: 700; margin-bottom: 10px; }
+  .theme-card .tc-name { font-size: 24px; font-weight: 400; margin-bottom: 10px; position: relative; }
+  .theme-card .tc-count { font-size: 12px; color: rgba(240,236,226,.6); margin-bottom: 16px; }
+  .theme-card .tc-evidence { font-size: 12.5px; color: rgba(240,236,226,.7); line-height: 1.6; margin-bottom: 14px; padding-left: 12px; border-left: 2px solid rgba(245,200,66,.4); }
+  .theme-card .tc-suggestion { font-size: 13.5px; color: var(--amber); line-height: 1.6; position: relative; }
+
+  .review-summary { padding: 24px 28px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); box-shadow: var(--shadow); margin-bottom: 30px; display: flex; align-items: center; gap: 20px; }
+  .review-summary .rs-ring { width: 56px; height: 56px; flex-shrink: 0; }
+  .review-summary .rs-text { font-size: 15px; color: var(--ink-soft); line-height: 1.7; }
+  .review-summary .rs-text .k { color: var(--orange); font-weight: 600; }
+
+  footer { text-align: center; padding: 40px 0 50px; color: var(--ink-mute); font-size: 12.5px; border-top: 1px solid var(--line-soft); margin-top: 40px; }
+  footer .f-brand { color: var(--orange); font-weight: 600; }
+  footer .f-note { margin-top: 6px; max-width: 60ch; margin-left: auto; margin-right: auto; line-height: 1.6; }
+
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="wrap">
+    <div class="brand" onclick="App.go('hero')">
+      <span class="archer-ring nav-ring">
+        <span class="ring-base"></span><span class="ring-shine"></span><span class="ring-halo"></span>
+      </span>
+      <span class="brand-name brand-font">Archer<span class="ch">初衍</span></span>
+    </div>
+    <div class="nav-links">
+      <a data-nav="workspace" onclick="App.go('workspace')">工作台</a>
+      <a data-nav="profile" onclick="App.go('profile')">档案</a>
+      <a data-nav="review" onclick="App.go('review')">周复盘</a>
+    </div>
+    <div class="nav-actions">
+      <button class="btn btn-ghost btn-sm" onclick="App.newSession()" title="模拟关闭重开，证明记忆仍在">新会话</button>
+      <button class="btn btn-soft btn-sm" onclick="App.confirmReset()" title="清空所有记忆">重置</button>
+    </div>
+  </div>
+</nav>
+
+<!-- ============ Hero ============ -->
+<section class="view" data-view="hero">
+  <div class="hero">
+    <div class="wrap">
+      <div class="hero-left">
+        <span class="eyebrow"><span class="dot"></span>记忆 · 写作 · 在场</span>
+        <h1 class="hero-title hand">会记住你的<br><span class="accent">写作伙伴</span></h1>
+        <p class="hero-sub">它不是每次从零开始的聊天框。它记得你的领域、风格和目标，关掉重开还在——越写，越懂你。</p>
+        <div class="hero-actions">
+          <button class="btn btn-primary" id="heroStartBtn" onclick="App.heroStart()">开始建档</button>
+          <button class="btn btn-ghost" id="heroRecallBtn" onclick="App.go('workspace')" style="display:none">继续写作</button>
+        </div>
+      </div>
+      <div class="hero-visual">
+        <div class="hero-ring-wrap">
+          <span class="archer-ring">
+            <span class="ring-base"></span><span class="ring-shine"></span><span class="ring-halo"></span>
+          </span>
+          <div class="ring-core">
+            <span class="hand">初衍</span>
+            <span class="sub">ARCHER · WRITER</span>
+          </div>
+        </div>
+        <div class="recall-card hidden" id="recallCard">
+          <div class="rc-head"><span class="rc-dot"></span>记忆回唤</div>
+          <div class="rc-body" id="recallText"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ Onboard ============ -->
+<section class="view" data-view="onboard">
+  <div class="wrap" style="padding-top: 40px;">
+    <div class="section-head" style="text-align:center; margin: 0 auto 10px;">
+      <div class="section-num">建档 · 让它认识你</div>
+      <h2 class="section-title hand">先告诉它，你是谁</h2>
+      <p class="section-desc">这些会成为它的第一批记忆。之后每次写作，它都基于这些记忆陪你。</p>
+    </div>
+    <div class="onboard-card">
+      <div class="onboard-progress"><div class="bar" id="onboardBar" style="width:25%"></div></div>
+      <div class="onboard-body">
+        <!-- Step 1 -->
+        <div class="onboard-step active" data-step="0">
+          <div class="onboard-q">你希望它怎么称呼你？</div>
+          <div class="onboard-hint">这个名字会出现在每次开场回唤里。</div>
+          <input class="onboard-input" id="ob-name" placeholder="比如：枫弋" maxlength="20" />
+        </div>
+        <!-- Step 2 -->
+        <div class="onboard-step" data-step="1">
+          <div class="onboard-q">你主要写什么领域？</div>
+          <div class="onboard-hint">选 1–3 个，或自己补充。它会据此给选题建议。</div>
+          <div class="chip-row" id="ob-fields">
+            <span class="chip" onclick="App.toggleChip(this)">个人成长</span>
+            <span class="chip" onclick="App.toggleChip(this)">AI 工具</span>
+            <span class="chip" onclick="App.toggleChip(this)">效率方法</span>
+            <span class="chip" onclick="App.toggleChip(this)">读书笔记</span>
+            <span class="chip" onclick="App.toggleChip(this)">职场观察</span>
+            <span class="chip" onclick="App.toggleChip(this)">生活记录</span>
+            <span class="chip" onclick="App.toggleChip(this)">技术写作</span>
+          </div>
+          <input class="onboard-input" id="ob-field-custom" placeholder="或输入自定义领域，回车添加" style="margin-top:14px" onkeydown="if(event.key==='Enter'){App.addCustomChip();event.preventDefault()}" />
+        </div>
+        <!-- Step 3 -->
+        <div class="onboard-step" data-step="2">
+          <div class="onboard-q">你偏好哪种写作语气？</div>
+          <div class="onboard-hint">续写时会模仿这个风格。</div>
+          <div class="style-grid" id="ob-styles">
+            <div class="style-opt" data-style="warm" onclick="App.pickStyle(this)"><div class="so-name">温暖克制</div><div class="so-desc">像和老朋友说话，真诚不煽情</div></div>
+            <div class="style-opt" data-style="sharp" onclick="App.pickStyle(this)"><div class="so-name">锋利直接</div><div class="so-desc">戳要点，不留情面</div></div>
+            <div class="style-opt" data-style="relaxed" onclick="App.pickStyle(this)"><div class="so-name">松弛随性</div><div class="so-desc">想到哪写到哪，不端着</div></div>
+            <div class="style-opt" data-style="rigorous" onclick="App.pickStyle(this)"><div class="so-name">严谨理性</div><div class="so-desc">讲证据和逻辑，条理清楚</div></div>
+          </div>
+        </div>
+        <!-- Step 4 -->
+        <div class="onboard-step" data-step="3">
+          <div class="onboard-q">你最近的一个写作目标？</div>
+          <div class="onboard-hint">它会记下来，并在复盘时提醒你。</div>
+          <input class="onboard-input" id="ob-goal" placeholder="比如：每周写一篇深度长文" maxlength="40" />
+        </div>
+      </div>
+      <div class="onboard-body" style="padding-top:0">
+        <div class="onboard-foot">
+          <button class="btn btn-ghost btn-sm" id="obPrev" onclick="App.obPrev()">上一步</button>
+          <span class="step-of" id="obStepOf">1 / 4</span>
+          <button class="btn btn-primary btn-sm" id="obNext" onclick="App.obNext()">下一步</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ Workspace ============ -->
+<section class="view" data-view="workspace">
+  <div class="wrap" style="padding-top: 40px;">
+    <div class="section-head">
+      <div class="section-num">写作工作台</div>
+      <h2 class="section-title hand">写点什么，它来陪你</h2>
+      <p class="section-desc">把草稿或零散想法贴进来。它会基于你的档案，给标题、续写，并提炼值得记住的东西。</p>
+    </div>
+    <div class="ws-grid">
+      <div class="panel">
+        <div class="panel-head">
+          <div class="dots"><span></span><span></span><span></span></div>
+          <div class="title" id="wsSessionLabel">草稿</div>
+        </div>
+        <div class="panel-body">
+          <div class="draft-area">
+            <textarea class="draft-input" id="draftInput" placeholder="今天想写点什么？&#10;&#10;比如：我最近在研究长期记忆这件事，发现大多数 AI 工具每次对话都像重新开始，用户得反复解释自己。我想写一篇关于「为什么 AI 需要记住你」的文章……"></textarea>
+            <div class="draft-meta">
+              <span id="draftCount">0 字</span>
+              <span id="draftHint">输入后点「伴生」获取建议</span>
+            </div>
+          </div>
+          <div class="ws-actions">
+            <button class="btn btn-primary btn-sm" onclick="App.companion()">伴生</button>
+            <button class="btn btn-soft btn-sm" onclick="App.saveEntry()">存为记录</button>
+            <button class="btn btn-ghost btn-sm" onclick="App.clearDraft()">清空</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head">
+          <div class="dots"><span></span><span></span><span></span></div>
+          <div class="title">伴生建议</div>
+        </div>
+        <div class="panel-body" id="suggestBody">
+          <div class="suggest-empty">
+            <svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 2v4M12 18v4M2 12h4M18 12h4M4.9 4.9l2.8 2.8M16.3 16.3l2.8 2.8M4.9 19.1l2.8-2.8M16.3 7.7l2.8-2.8" stroke-linecap="round"/></svg>
+            <div class="se-text">写一段文字，再点「伴生」<br>它会给你标题、续写和记忆候选</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ Profile ============ -->
+<section class="view" data-view="profile">
+  <div class="wrap" style="padding-top: 40px;">
+    <div class="section-head">
+      <div class="section-num">写作档案</div>
+      <h2 class="section-title hand">它记住了什么</h2>
+      <p class="section-desc">所有记忆都存在你的浏览器里，关掉重开仍在。圆环的五色段对应五类记忆，越写越饱满。</p>
+    </div>
+    <div id="profileContent"></div>
+  </div>
+</section>
+
+<!-- ============ Review ============ -->
+<section class="view" data-view="review">
+  <div class="wrap" style="padding-top: 40px;">
+    <div class="section-head">
+      <div class="section-num">周复盘 · 主题发现</div>
+      <h2 class="section-title hand">反复出现的，值得深挖</h2>
+      <p class="section-desc">从你累积的写作记录里，它归纳出反复出现的主题——这些往往是你真正在意、却没系统写过的东西。</p>
+    </div>
+    <div id="reviewContent"></div>
+  </div>
+</section>
+
+<footer>
+  <div><span class="f-brand">Archer 初衍</span> · 会记住你的写作伙伴</div>
+  <div class="f-note">本 Demo 是终端版 Archer「长期记忆 + 写作伴生」能力的可体验切片，纯前端 localStorage 模拟，不接入真实 LLM。真正的 Archer 具备完整灵魂系统与 18 个技能。</div>
+</footer>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* ============ 记忆层 ============ */
+const Store = {
+  KEY: 'archer_writer_demo',
+  data: null,
+  _empty() { return { profile: null, memories: [], entries: [], session: null }; },
+  load() {
+    try { this.data = JSON.parse(localStorage.getItem(this.KEY)) || this._empty(); }
+    catch { this.data = this._empty(); }
+    return this.data;
+  },
+  save() { try { localStorage.setItem(this.KEY, JSON.stringify(this.data)); } catch(e){} },
+  hasProfile() { return !!(this.data && this.data.profile); },
+  setProfile(p) { this.data.profile = p; this.save(); },
+  addMemory(m) {
+    m.id = 'm' + Date.now() + Math.random().toString(36).slice(2,6);
+    m.created_at = new Date().toISOString();
+    m.status = 'active';
+    this.data.memories.push(m);
+    this.save();
+    return m;
+  },
+  removeMemory(id) { this.data.memories = this.data.memories.filter(m => m.id !== id); this.save(); },
+  addEntry(e) {
+    e.id = 'e' + Date.now();
+    e.created_at = new Date().toISOString();
+    e.session_id = this.data.session ? this.data.session.id : null;
+    this.data.entries.push(e);
+    this.save();
+    return e;
+  },
+  lastEntry() { const e = this.data.entries; return e.length ? e[e.length-1] : null; },
+  memoriesByType() {
+    const g = {};
+    this.data.memories.forEach(m => { if (m.status !== 'archived') { g[m.type] = g[m.type] || []; g[m.type].push(m); } });
+    return g;
+  },
+  countByType() {
+    const c = { identity:0, preference:0, goal:0, topic:0, insight:0 };
+    this.data.memories.forEach(m => { if (c[m.type] !== undefined) c[m.type]++; });
+    return c;
+  },
+  newSession() {
+    this.data.session = { id: this._sid(), opened_at: new Date().toISOString() };
+    this.save();
+  },
+  _sid() {
+    const d = new Date(); const p = n => String(n).padStart(2,'0');
+    return `${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}-${Math.random().toString(36).slice(2,8)}`;
+  },
+  reset() { try { localStorage.removeItem(this.KEY); } catch(e){} this.data = this._empty(); }
+};
+
+/* ============ 伴生引擎（真实 Archer 记忆提炼/检索的简化模拟） ============ */
+const Engine = {
+  styleMap: {
+    warm: { name: '温暖克制' },
+    sharp: { name: '锋利直接' },
+    relaxed: { name: '松弛随性' },
+    rigorous: { name: '严谨理性' }
+  },
+  STOP: new Set(['的','了','是','在','我','你','他','她','和','与','也','都','就','这','那','一个','一些','可以','什么','怎么','为什么','因为','所以','但是','不过','然后','已经','正在','觉得','感觉','知道','认为','可能','应该','需要','他们','我们','你们','自己','这个','那个','的话','一样','一直','一种','这样','那样','起来','下去','出来','过来','不是','没有','不会','不能','不要','的话','其实','真的','还是','或者','比如','如果','虽然','因此','于是','的话','一下','一点','一些','这种','那种','这是','那是','这是','那是']),
+  extractKeywords(text) {
+    if (!text) return [];
+    const tokens = text.split(/[，。！？；,.\n\s、：:""''""''()（）【】\[\]{}·…—\-]+/).filter(t => t.length >= 2);
+    const freq = {};
+    tokens.forEach(t => { if (!this.STOP.has(t)) freq[t] = (freq[t]||0)+1; });
+    return Object.entries(freq).sort((a,b) => b[1]-a[1]).map(e => e[0]);
+  },
+  generateTitles(draft, profile) {
+    const kws = this.extractKeywords(draft).slice(0, 3);
+    const field = (profile && profile.fields && profile.fields[0]) || '生活';
+    const main = kws[0] || '今天';
+    const second = kws[1] || '感受';
+    const s = (profile && profile.style) || 'warm';
+    const sets = {
+      sharp: [`别再回避${main}了`, `${field}的真相：${main}背后是什么`, `${second}不在${main}，在你没说出口的部分`],
+      rigorous: [`关于${main}的三个观察`, `${field}笔记：${main}的逻辑链`, `从${second}到${main}：一次拆解`],
+      relaxed: [`${main}，和一点${second}`, `聊聊${field}里的${main}`, `${main}这件事，慢慢说`],
+      warm: [`写给自己的${main}`, `${field}里，关于${main}的一点真心话`, `当${main}发生时，我想起了${second}`]
+    };
+    return (sets[s] || sets.warm).slice(0, 3);
+  },
+  generateContinuation(draft, profile) {
+    const kws = this.extractKeywords(draft).slice(0, 2);
+    const field = (profile && profile.fields && profile.fields[0]) || '写作';
+    const s = (profile && profile.style) || 'warm';
+    const k0 = kws[0] || '这里';
+    const k1 = kws[1] || '那些模糊的感受';
+    const cont = {
+      warm: `说到${k0}，背后其实藏着更细的东西。${field}从来不是一蹴而就的——它需要你停下来，把${k1}一点点说清楚。`,
+      sharp: `但问题在于：你真的想清楚${k0}了吗？大多数人停在${k0}就走了，真正值得挖的，恰恰是你还没说出口的那部分。`,
+      relaxed: `嗯，${k0}挺有意思的。顺着${k1}往下想，好像还能扯出不少东西，不急，慢慢写。`,
+      rigorous: `从${k0}出发，可以拆成两个层面：一是${k1}本身，二是它背后的成因。先看第一层——`
+    };
+    return cont[s] || cont.warm;
+  },
+  extractMemoryCandidates(draft) {
+    const cands = [];
+    const patterns = [
+      { re: /(?:我在|正在|打算|准备)(?:写|做|研究|开发|学|搞)([^，。！？\n；,.;]{2,20})/, type: 'topic', label: '选题' },
+      { re: /(?:我喜欢|偏好|习惯|倾向于|倾向于)([^，。！？\n；,.;]{2,20})/, type: 'preference', label: '偏好' },
+      { re: /(?:目标是|想完成|计划|打算完成|想做到)([^，。！？\n；,.;]{2,20})/, type: 'goal', label: '目标' },
+      { re: /(?:我发现|意识到|明白了|体会到|领悟到)([^，。！？\n；,.;]{2,20})/, type: 'insight', label: '洞察' },
+    ];
+    const seen = new Set();
+    patterns.forEach(p => {
+      const m = draft.match(p.re);
+      if (m && m[1]) {
+        const t = m[1].trim();
+        if (t.length >= 2 && !seen.has(t)) { seen.add(t); cands.push({ text: t, type: p.type, label: p.label, source: '工作台' }); }
+      }
+    });
+    if (cands.length === 0) {
+      const kws = this.extractKeywords(draft);
+      if (kws[0]) cands.push({ text: kws[0], type: 'topic', label: '选题', source: '工作台' });
+    }
+    return cands.slice(0, 3);
+  },
+  discoverThemes(entries) {
+    if (!entries || entries.length < 3) return [];
+    const allText = entries.map(e => (e.title || '') + ' ' + (e.body || '')).join('').replace(/\s+/g, '');
+    const freq = {};
+    for (let i = 0; i < allText.length - 1; i++) {
+      [allText.slice(i, i+2), allText.slice(i, i+3)].forEach(w => {
+        if (w.length >= 2 && !this.STOP.has(w) && !/[\d\s，。！？、：；""''()【】…—\-]/.test(w)) freq[w] = (freq[w]||0)+1;
+      });
+    }
+    // 去除被更长词包含的短词（保留更长的）
+    const candidates = Object.entries(freq).filter(e => e[1] >= 2).sort((a,b) => b[1]-a[1] || b[0].length-a[0].length);
+    const picked = [];
+    for (const [word, count] of candidates) {
+      if (picked.some(p => p.includes(word) || word.includes(p))) continue;
+      picked.push(word);
+      if (picked.length >= 3) break;
+    }
+    const suggestions = [
+      w => `「${w}」反复出现，值得专门写一篇深挖。`,
+      w => `你对「${w}」似乎有未说完的话，试着列三个为什么。`,
+      w => `「${w}」是你真正在意的主题，别让它只停留在草稿里。`
+    ];
+    return picked.map((word, i) => {
+      const evidence = entries.filter(e => ((e.title||'')+(e.body||'')).includes(word)).slice(0,2).map(e => e.title || (e.body||'').slice(0,18));
+      return { name: word, count: freq[word], evidence, suggestion: suggestions[i % suggestions.length](word) };
+    });
+  },
+  recallOnOpen(profile, lastEntry) {
+    if (!profile || !profile.name) return '';
+    const name = profile.name;
+    if (lastEntry && lastEntry.title) {
+      return `又见面了，<span class="k">${name}</span>。上次你在写《${lastEntry.title}》，今天想接着往下，还是开个新的？`;
+    }
+    if (lastEntry && lastEntry.body) {
+      const kw = this.extractKeywords(lastEntry.body)[0] || '生活';
+      return `又见面了，<span class="k">${name}</span>。上次你写下了一段关于「${kw}」的文字，今天想继续吗？`;
+    }
+    const field = (profile.fields && profile.fields[0]) || '写作';
+    const styleName = this.styleMap[profile.style] ? this.styleMap[profile.style].name : '你的风格';
+    return `欢迎回来，<span class="k">${name}</span>。你的写作档案还在——${field}、${styleName}，我都记得。今天写点什么？`;
+  }
+};
+
+/* ============ 应用层 ============ */
+const App = {
+  obStep: 0,
+  obStyle: null,
+  currentView: 'hero',
+
+  init() {
+    Store.load();
+    if (!Store.data.session) Store.newSession();
+    this.renderHero();
+    this.bindDraft();
+    this.go(Store.hasProfile() ? 'hero' : 'hero');
+  },
+
+  /* ----- 视图路由 ----- */
+  go(view) {
+    this.currentView = view;
+    document.querySelectorAll('.view').forEach(v => v.classList.toggle('active', v.dataset.view === view));
+    document.querySelectorAll('.nav-links a').forEach(a => a.classList.toggle('active', a.dataset.nav === view));
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    if (view === 'profile') this.renderProfile();
+    if (view === 'review') this.renderReview();
+    if (view === 'workspace') this.updateSessionLabel();
+  },
+
+  /* ----- Hero ----- */
+  renderHero() {
+    const has = Store.hasProfile();
+    document.getElementById('heroStartBtn').textContent = has ? '继续写作' : '开始建档';
+    document.getElementById('heroStartBtn').onclick = has ? () => this.go('workspace') : () => this.startOnboard();
+    const recallBtn = document.getElementById('heroRecallBtn');
+    const recallCard = document.getElementById('recallCard');
+    if (has) {
+      recallBtn.style.display = '';
+      recallCard.classList.remove('hidden');
+      document.getElementById('recallText').innerHTML = Engine.recallOnOpen(Store.data.profile, Store.lastEntry());
+    } else {
+      recallBtn.style.display = 'none';
+      recallCard.classList.add('hidden');
+    }
+  },
+  heroStart() {
+    if (Store.hasProfile()) this.go('workspace'); else this.startOnboard();
+  },
+  startOnboard() {
+    this.obStep = 0; this.obStyle = null;
+    document.querySelectorAll('#ob-fields .chip').forEach(c => c.classList.remove('selected'));
+    document.querySelectorAll('#ob-styles .style-opt').forEach(c => c.classList.remove('selected'));
+    document.getElementById('ob-name').value = '';
+    document.getElementById('ob-field-custom').value = '';
+    document.getElementById('ob-goal').value = '';
+    this.showObStep(0);
+    this.go('onboard');
+  },
+
+  /* ----- Onboard ----- */
+  showObStep(i) {
+    this.obStep = i;
+    document.querySelectorAll('.onboard-step').forEach(s => s.classList.toggle('active', +s.dataset.step === i));
+    document.getElementById('onboardBar').style.width = ((i+1)/4*100) + '%';
+    document.getElementById('obStepOf').textContent = (i+1) + ' / 4';
+    document.getElementById('obPrev').style.visibility = i === 0 ? 'hidden' : 'visible';
+    document.getElementById('obNext').textContent = i === 3 ? '完成建档' : '下一步';
+  },
+  obNext() {
+    if (this.obStep === 0) {
+      const name = document.getElementById('ob-name').value.trim();
+      if (!name) { this.toast('先填一个称呼吧'); return; }
+      this._obName = name;
+      this.showObStep(1);
+    } else if (this.obStep === 1) {
+      const fields = Array.from(document.querySelectorAll('#ob-fields .chip.selected')).map(c => c.textContent);
+      const custom = document.getElementById('ob-field-custom').value.trim();
+      if (custom && !fields.includes(custom)) fields.push(custom);
+      if (fields.length === 0) { this.toast('至少选一个领域'); return; }
+      this._obFields = fields;
+      this.showObStep(2);
+    } else if (this.obStep === 2) {
+      if (!this.obStyle) { this.toast('选一个写作语气'); return; }
+      this.showObStep(3);
+    } else if (this.obStep === 3) {
+      const goal = document.getElementById('ob-goal').value.trim();
+      if (!goal) { this.toast('写一个近期的写作目标'); return; }
+      this.finishOnboard(goal);
+    }
+  },
+  obPrev() { if (this.obStep > 0) this.showObStep(this.obStep - 1); },
+  toggleChip(el) { el.classList.toggle('selected'); },
+  addCustomChip() {
+    const input = document.getElementById('ob-field-custom');
+    const v = input.value.trim();
+    if (!v) return;
+    const row = document.getElementById('ob-fields');
+    const chip = document.createElement('span');
+    chip.className = 'chip selected'; chip.textContent = v; chip.onclick = () => this.toggleChip(chip);
+    row.appendChild(chip);
+    input.value = '';
+  },
+  pickStyle(el) {
+    document.querySelectorAll('#ob-styles .style-opt').forEach(c => c.classList.remove('selected'));
+    el.classList.add('selected');
+    this.obStyle = el.dataset.style;
+  },
+  finishOnboard(goal) {
+    const now = new Date().toISOString();
+    Store.setProfile({
+      name: this._obName,
+      fields: this._obFields,
+      style: this.obStyle,
+      goal: goal,
+      created_at: now,
+      last_session_at: now
+    });
+    // 写入第一批记忆
+    Store.addMemory({ type: 'identity', text: '称呼：' + this._obName, source: '建档' });
+    Store.addMemory({ type: 'preference', text: '写作领域：' + this._obFields.join('、'), source: '建档' });
+    Store.addMemory({ type: 'preference', text: '偏好' + Engine.styleMap[this.obStyle].name + '的写作语气', source: '建档' });
+    Store.addMemory({ type: 'goal', text: '目标：' + goal, source: '建档' });
+    this.toast('建档完成，它已经记住你了');
+    this.renderHero();
+    this.go('workspace');
+  },
+
+  /* ----- Workspace ----- */
+  bindDraft() {
+    const ta = document.getElementById('draftInput');
+    ta.addEventListener('input', () => {
+      document.getElementById('draftCount').textContent = ta.value.length + ' 字';
+      document.getElementById('draftHint').textContent = ta.value.length > 0 ? '点「伴生」获取建议' : '输入后点「伴生」获取建议';
+    });
+  },
+  updateSessionLabel() {
+    const s = Store.data.session;
+    document.getElementById('wsSessionLabel').textContent = s ? '会话 ' + s.id.slice(0, 15) : '草稿';
+  },
+  companion() {
+    const draft = document.getElementById('draftInput').value.trim();
+    if (!draft) { this.toast('先写点什么'); return; }
+    const profile = Store.data.profile || { fields: [], style: 'warm' };
+    const titles = Engine.generateTitles(draft, profile);
+    const cont = Engine.generateContinuation(draft, profile);
+    const cands = Engine.extractMemoryCandidates(draft);
+    const body = document.getElementById('suggestBody');
+    let html = '';
+    html += '<div class="suggest-block"><div class="sb-label"><span class="sb-dot"></span>标题建议</div><div class="title-list">';
+    titles.forEach(t => {
+      html += `<div class="title-item" onclick="App.useTitle(this)"><span class="ti-text">${this.esc(t)}</span><span class="ti-use">采用</span></div>`;
+    });
+    html += '</div></div>';
+    html += `<div class="suggest-block"><div class="sb-label"><span class="sb-dot"></span>续写片段</div><div class="continuation"><span class="cont-tag">按你的风格续写</span>${this.esc(cont)}</div></div>`;
+    if (cands.length) {
+      html += '<div class="suggest-block"><div class="sb-label"><span class="sb-dot"></span>记忆候选 · 值得记住</div><div class="cand-list">';
+      cands.forEach((c, i) => {
+        html += `<div class="cand-item" data-idx="${i}"><div class="ci-left"><div class="ci-type">${c.label}</div><div class="ci-text">${this.esc(c.text)}</div></div><div class="ci-actions"><button class="cand-btn cand-accept" title="记住" onclick="App.acceptCand(${i})">✓</button><button class="cand-btn cand-reject" title="忽略" onclick="App.rejectCand(${i})">✕</button></div></div>`;
+      });
+      html += '</div></div>';
+    }
+    body.innerHTML = html;
+    this._pendingCands = cands;
+  },
+  useTitle(el) {
+    const title = el.querySelector('.ti-text').textContent;
+    const ta = document.getElementById('draftInput');
+    ta.value = '【' + title + '】\n\n' + ta.value;
+    document.getElementById('draftCount').textContent = ta.value.length + ' 字';
+    this.toast('已采用标题');
+  },
+  acceptCand(i) {
+    const c = this._pendingCands && this._pendingCands[i];
+    if (!c) return;
+    // 去重
+    const exists = Store.data.memories.some(m => m.text.includes(c.text));
+    if (exists) { this.toast('已经记过了'); }
+    else {
+      Store.addMemory({ type: c.type, text: c.text, source: c.source });
+      this.toast('已记住：' + c.text);
+    }
+    const node = document.querySelector(`.cand-item[data-idx="${i}"]`);
+    if (node) { node.style.transition = 'opacity .3s'; node.style.opacity = '0'; setTimeout(() => node.remove(), 300); }
+  },
+  rejectCand(i) {
+    const node = document.querySelector(`.cand-item[data-idx="${i}"]`);
+    if (node) { node.style.transition = 'opacity .3s'; node.style.opacity = '0'; setTimeout(() => node.remove(), 300); }
+  },
+  saveEntry() {
+    const ta = document.getElementById('draftInput');
+    const body = ta.value.trim();
+    if (!body) { this.toast('草稿是空的'); return; }
+    // 提取标题（若有【】）
+    let title = '';
+    const tm = body.match(/^【([^】]+)】/);
+    if (tm) title = tm[1];
+    Store.addEntry({ title: title || body.slice(0, 16), body: body });
+    this.toast('已存为写作记录（' + Store.data.entries.length + ' 篇）');
+    this.clearDraft();
+  },
+  clearDraft() {
+    document.getElementById('draftInput').value = '';
+    document.getElementById('draftCount').textContent = '0 字';
+    document.getElementById('draftHint').textContent = '输入后点「伴生」获取建议';
+    document.getElementById('suggestBody').innerHTML = '<div class="suggest-empty"><svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 2v4M12 18v4M2 12h4M18 12h4M4.9 4.9l2.8 2.8M16.3 16.3l2.8 2.8M4.9 19.1l2.8-2.8M16.3 7.7l2.8-2.8" stroke-linecap="round"/></svg><div class="se-text">写一段文字，再点「伴生」<br>它会给你标题、续写和记忆候选</div></div>';
+    this._pendingCands = [];
+  },
+
+  /* ----- Profile ----- */
+  renderProfile() {
+    const root = document.getElementById('profileContent');
+    if (!Store.hasProfile()) {
+      root.innerHTML = '<div class="empty-state"><div class="es-text">还没有档案。先去建档，让它认识你。</div><button class="btn btn-primary btn-sm" style="margin-top:18px" onclick="App.startOnboard()">开始建档</button></div>';
+      return;
+    }
+    const p = Store.data.profile;
+    const counts = Store.countByType();
+    const total = Store.data.memories.filter(m => m.status !== 'archived').length;
+    const groups = Store.memoriesByType();
+    const typeMeta = {
+      identity: { name: '身份', color: 'var(--cyan)' },
+      preference: { name: '偏好', color: 'var(--blue)' },
+      goal: { name: '目标', color: 'var(--amber)' },
+      topic: { name: '选题', color: 'var(--orange)' },
+      insight: { name: '洞察', color: 'var(--red)' }
+    };
+
+    let html = '<div class="profile-top">';
+    html += '<div class="memory-ring-wrap"><span class="archer-ring"><span class="ring-base"></span><span class="ring-shine"></span><span class="ring-halo"></span></span>';
+    // 五色段叠加层
+    html += '<div class="seg-overlay"><svg viewBox="0 0 100 100">';
+    const segs = [
+      { type: 'identity', color: '#4dd9d4', start: 0 },
+      { type: 'preference', color: '#1e7be8', start: 72 },
+      { type: 'goal', color: '#f5c842', start: 144 },
+      { type: 'topic', color: '#f5612a', start: 216 },
+      { type: 'insight', color: '#e8212a', start: 288 }
+    ];
+    segs.forEach(s => {
+      const lit = counts[s.type] > 0;
+      // 画一段 72° 弧（中心线，stroke 描边），留 1° 间隙
+      const path = this.arcPath(50, 50, 43, s.start + 0.5, s.start + 71.5);
+      html += `<path d="${path}" stroke="${s.color}" stroke-width="7" fill="none" stroke-linecap="butt" class="${lit ? 'lit' : ''}" style="color:${s.color}"/>`;
+    });
+    html += '</svg></div>';
+    html += `<div class="ring-core"><div class="rc-count">${total}</div><div class="rc-label">条记忆</div></div></div>`;
+
+    html += '<div class="profile-info">';
+    html += `<div class="pi-name hand">${this.esc(p.name)}</div>`;
+    html += `<div class="pi-meta">${Engine.styleMap[p.style] ? Engine.styleMap[p.style].name : ''} · ${p.fields.join('、')}</div>`;
+    html += '<div class="pi-tags">';
+    html += `<span class="pi-tag">目标：${this.esc(p.goal)}</span>`;
+    html += `<span class="pi-tag">写作记录 ${Store.data.entries.length} 篇</span>`;
+    html += '</div></div></div>';
+
+    // 图例
+    html += '<div class="type-legend">';
+    segs.forEach(s => {
+      html += `<div class="legend-item"><span class="legend-dot" style="background:${s.color}"></span>${typeMeta[s.type].name} <span class="lc">${counts[s.type]}</span></div>`;
+    });
+    html += '</div>';
+
+    // 分组卡片
+    const order = ['identity','preference','goal','topic','insight'];
+    let any = false;
+    order.forEach(t => {
+      const list = groups[t] || [];
+      if (!list.length) return;
+      any = true;
+      const m = typeMeta[t];
+      html += `<div class="mem-group"><div class="mem-group-head"><span class="mg-dot" style="background:${m.color}"></span><span class="mg-name">${m.name}</span><span class="mg-count">${list.length} 条</span></div><div class="mem-cards">`;
+      list.forEach(mem => {
+        const date = new Date(mem.created_at).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' });
+        html += `<div class="mem-card"><div class="mc-text">${this.esc(mem.text)}</div><div class="mc-foot"><span>${this.esc(mem.source)} · ${date}</span><button class="mc-del" onclick="App.delMemory('${mem.id}')">删除</button></div></div>`;
+      });
+      html += '</div></div>';
+    });
+    if (!any) {
+      html += '<div class="empty-state"><div class="es-text">还没有记忆。去工作台写一段，让它提炼值得记住的东西。</div></div>';
+    }
+    root.innerHTML = html;
+  },
+  delMemory(id) {
+    Store.removeMemory(id);
+    this.renderProfile();
+    this.toast('已删除');
+  },
+  // SVG 圆弧路径（角度制，0°=12点方向，顺时针），返回中心线弧
+  arcPath(cx, cy, r, startA, endA) {
+    const polar = (rad, a) => [cx + rad * Math.sin(a * Math.PI / 180), cy - rad * Math.cos(a * Math.PI / 180)];
+    const [x1, y1] = polar(r, startA);
+    const [x2, y2] = polar(r, endA);
+    const large = (endA - startA) > 180 ? 1 : 0;
+    return `M ${x1} ${y1} A ${r} ${r} 0 ${large} 1 ${x2} ${y2}`;
+  },
+
+  /* ----- Review ----- */
+  renderReview() {
+    const root = document.getElementById('reviewContent');
+    const entries = Store.data.entries;
+    if (entries.length < 3) {
+      root.innerHTML = `<div class="empty-state"><div class="es-text">还差 ${3 - entries.length} 篇就能做主题发现。</div><div style="font-size:13px;color:var(--ink-mute);margin-top:6px">在工作台写几段并存为记录，它会从反复出现的词里发现你真正在意的主题。</div><button class="btn btn-primary btn-sm" style="margin-top:18px" onclick="App.go('workspace')">去写作</button></div>`;
+      return;
+    }
+    const themes = Engine.discoverThemes(entries);
+    const topWord = themes[0] ? themes[0].name : '—';
+    let html = `<div class="review-summary"><span class="archer-ring rs-ring"><span class="ring-base"></span><span class="ring-shine"></span><span class="ring-halo"></span></span><div class="rs-text">你写了 <span class="k">${entries.length}</span> 篇记录，其中 <span class="k">${topWord}</span> 反复出现——这往往不是巧合，而是你真正想写清楚的东西。</div></div>`;
+    html += '<div class="review-grid">';
+    themes.forEach((t, i) => {
+      html += `<div class="theme-card"><div class="tc-rank">主题 ${String(i+1).padStart(2,'0')}</div><div class="tc-name hand">${this.esc(t.name)}</div><div class="tc-count">出现 ${t.count} 次</div>`;
+      if (t.evidence.length) {
+        html += '<div class="tc-evidence">相关记录：' + t.evidence.map(e => '《' + this.esc(e) + '》').join('、') + '</div>';
+      }
+      html += `<div class="tc-suggestion">${this.esc(t.suggestion)}</div></div>`;
+    });
+    html += '</div>';
+    root.innerHTML = html;
+  },
+
+  /* ----- 跨会话 ----- */
+  newSession() {
+    Store.newSession();
+    this.clearDraft();
+    this.renderHero();
+    this.go('hero');
+    // 让回唤卡片高亮一下
+    setTimeout(() => {
+      const card = document.getElementById('recallCard');
+      if (card && !card.classList.contains('hidden')) {
+        card.style.transition = 'transform .4s'; card.style.transform = 'scale(1.04)';
+        setTimeout(() => card.style.transform = '', 400);
+      }
+    }, 300);
+    this.toast('新会话已开始 · 记忆仍在');
+  },
+  confirmReset() {
+    if (confirm('确定清空所有记忆和记录吗？此操作不可撤销。')) {
+      Store.reset();
+      Store.newSession();
+      this.renderHero();
+      this.go('hero');
+      this.toast('已重置');
+    }
+  },
+
+  /* ----- 工具 ----- */
+  toast(msg) {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.classList.add('show');
+    clearTimeout(this._toastT);
+    this._toastT = setTimeout(() => t.classList.remove('show'), 2200);
+  },
+  esc(s) { return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+};
+
+App.init();
+</script>
+</body>
+</html>

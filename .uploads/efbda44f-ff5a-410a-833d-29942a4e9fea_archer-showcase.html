@@ -1,0 +1,1452 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Archer 初衍 — 一个拥有长期记忆的个人成长与写作伴生体</title>
+<style>
+  :root {
+    /* 暖白 / 浅灰 底 */
+    --bg: #f7f3ec;
+    --bg-2: #f2ede3;
+    --bg-3: #ebe5d8;
+    --surface: #fffdf8;
+    --surface-2: #faf6ee;
+
+    /* Archer 五色光谱 */
+    --cyan: #4dd9d4;
+    --cyan-bright: #5ee8e0;
+    --blue: #1e7be8;
+    --blue-soft: #2aabf0;
+    --amber: #f5c842;
+    --orange: #f5612a;
+    --red: #e8212a;
+
+    /* 墨绿（辅助强调） */
+    --ink-green: #3d5240;
+    --ink-green-deep: #2d3d30;
+
+    /* 淡金 / 浅棕（保留温暖感） */
+    --gold: #bfa06a;
+    --clay: #a07856;
+
+    /* 墨色文字 */
+    --ink: #2a2a26;
+    --ink-soft: #595550;
+    --ink-mute: #8a857c;
+    --line: #e4dccd;
+    --line-soft: #ece5d6;
+
+    --shadow-sm: 0 1px 2px rgba(60, 50, 30, 0.04);
+    --shadow: 0 1px 2px rgba(60, 50, 30, 0.04), 0 10px 28px rgba(60, 50, 30, 0.06);
+    --shadow-lg: 0 6px 16px rgba(60, 50, 30, 0.06), 0 28px 56px rgba(60, 50, 30, 0.08);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+      "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    line-height: 1.75;
+    font-size: 16px;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    overflow-x: hidden;
+  }
+
+  .serif {
+    font-family: "Charter", "Iowan Old Style", "Georgia", "Songti SC", "Noto Serif SC", serif;
+  }
+
+  .wrap {
+    max-width: 1140px;
+    margin: 0 auto;
+    padding: 0 28px;
+  }
+
+  /* ============ 圆环（Archer 五色光谱） ============ */
+  .archer-ring {
+    position: relative;
+    display: inline-block;
+    filter:
+      drop-shadow(0 -3px 8px rgba(77, 217, 212, 0.18))
+      drop-shadow(0 8px 14px rgba(245, 97, 42, 0.12));
+  }
+  .ring-base, .ring-shine, .ring-halo {
+    position: absolute;
+    inset: 0;
+    border-radius: 46% 54% 53% 47% / 48% 52% 44% 56%;
+  }
+  .ring-base {
+    background: conic-gradient(from 195deg,
+      #5ee8e0 0deg, #2aabf0 48deg, #1e7be8 92deg, #a4dcf5 128deg,
+      #f5c842 168deg, #f5a030 205deg, #f5612a 245deg, #e8212a 278deg,
+      #f07868 312deg, #8ad4f0 346deg, #5ee8e0 360deg);
+    -webkit-mask: radial-gradient(circle at center, transparent 38%, #000 39%);
+    mask: radial-gradient(circle at center, transparent 38%, #000 39%);
+    animation: organicMorph 16s ease-in-out infinite;
+  }
+  .ring-shine {
+    background: radial-gradient(circle at 32% 28%, rgba(255, 255, 255, 0.55) 0%, rgba(255, 255, 255, 0) 45%);
+    -webkit-mask: radial-gradient(circle at center, transparent 38%, #000 39%);
+    mask: radial-gradient(circle at center, transparent 38%, #000 39%);
+    animation: ringShineDrift 5.5s ease-in-out infinite;
+  }
+  .ring-halo {
+    border: 1px solid rgba(255, 255, 255, 0.4);
+    -webkit-mask: radial-gradient(circle at center, transparent 38%, #000 39%, #000 44%, transparent 45%);
+    mask: radial-gradient(circle at center, transparent 38%, #000 39%, #000 44%, transparent 45%);
+  }
+
+  @keyframes organicMorph {
+    0%, 100% { border-radius: 46% 54% 53% 47% / 48% 52% 44% 56%; }
+    33% { border-radius: 53% 47% 50% 50% / 56% 44% 56% 44%; }
+    66% { border-radius: 47% 53% 56% 44% / 44% 56% 48% 52%; }
+  }
+  @keyframes ringShineDrift {
+    0%, 100% { background-position: 32% 28%; }
+    50% { background-position: 38% 34%; }
+  }
+  @keyframes orbBreathe {
+    0%, 100% { transform: scale(1); opacity: 0.96; }
+    50% { transform: scale(1.035); opacity: 1; }
+  }
+  @keyframes floatY {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-7px); }
+  }
+  @keyframes orbitSpin { to { transform: rotate(360deg); } }
+  @keyframes pulseDot {
+    0%, 100% { opacity: 0.4; transform: scale(1); }
+    50% { opacity: 1; transform: scale(1.15); }
+  }
+  @keyframes drawLine {
+    from { stroke-dashoffset: 200; }
+    to { stroke-dashoffset: 0; }
+  }
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(12px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  /* ============ Nav ============ */
+  nav {
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    backdrop-filter: saturate(180%) blur(14px);
+    -webkit-backdrop-filter: saturate(180%) blur(14px);
+    background: rgba(246, 242, 234, 0.84);
+    border-bottom: 1px solid var(--line-soft);
+  }
+  nav .wrap {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 64px;
+  }
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .nav-ring { width: 26px; height: 26px; }
+  .brand-name {
+    font-size: 17px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    color: var(--ink);
+  }
+  .brand-name .ch {
+    color: var(--orange);
+    margin-left: 4px;
+  }
+  .brand-sub {
+    font-size: 12px;
+    color: var(--ink-mute);
+    margin-left: 4px;
+    padding-left: 12px;
+    border-left: 1px solid var(--line);
+  }
+  .nav-links { display: flex; gap: 28px; }
+  .nav-links a {
+    color: var(--ink-soft);
+    text-decoration: none;
+    font-size: 14px;
+    transition: color 0.2s;
+  }
+  .nav-links a:hover { color: var(--orange); }
+  @media (max-width: 820px) {
+    .nav-links { display: none; }
+    .brand-sub { display: none; }
+  }
+
+  /* ============ Hero ============ */
+  .hero {
+    position: relative;
+    padding: 72px 0 88px;
+    overflow: hidden;
+  }
+  .hero::before {
+    content: "";
+    position: absolute;
+    top: -25%; right: -20%;
+    width: 720px; height: 720px;
+    background: radial-gradient(circle, rgba(245, 200, 66, 0.18) 0%, rgba(245, 97, 42, 0.08) 40%, transparent 70%);
+    pointer-events: none;
+  }
+  .hero::after {
+    content: "";
+    position: absolute;
+    bottom: -35%; left: -18%;
+    width: 640px; height: 640px;
+    background: radial-gradient(circle, rgba(77, 217, 212, 0.16) 0%, rgba(30, 123, 232, 0.06) 45%, transparent 70%);
+    pointer-events: none;
+  }
+  .hero .wrap {
+    position: relative;
+    z-index: 1;
+    display: grid;
+    grid-template-columns: 1.05fr 0.95fr;
+    gap: 56px;
+    align-items: center;
+  }
+  @media (max-width: 900px) {
+    .hero .wrap { grid-template-columns: 1fr; gap: 48px; }
+  }
+
+  .eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 12px;
+    color: var(--orange);
+    background: rgba(245, 97, 42, 0.08);
+    border: 1px solid rgba(245, 97, 42, 0.20);
+    padding: 6px 14px;
+    border-radius: 999px;
+    margin-bottom: 28px;
+    letter-spacing: 0.08em;
+    font-weight: 600;
+  }
+  .eyebrow .dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--orange);
+    box-shadow: 0 0 0 3px rgba(245, 97, 42, 0.15);
+  }
+
+  h1.hero-title {
+    font-size: clamp(34px, 5.2vw, 56px);
+    line-height: 1.16;
+    font-weight: 600;
+    letter-spacing: -0.015em;
+    margin-bottom: 22px;
+    color: var(--ink);
+  }
+  h1.hero-title .accent {
+    background: linear-gradient(120deg, var(--orange), var(--red));
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    font-style: italic;
+    font-weight: 500;
+  }
+  .hero-slogan {
+    font-size: clamp(17px, 2vw, 19px);
+    color: var(--ink-soft);
+    max-width: 48ch;
+    margin-bottom: 36px;
+  }
+  .hero-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 26px 44px;
+    padding-top: 30px;
+    border-top: 1px solid var(--line);
+  }
+  .hero-meta .item .k {
+    font-size: 11px;
+    color: var(--ink-mute);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    margin-bottom: 5px;
+    font-weight: 600;
+  }
+  .hero-meta .item .v {
+    font-size: 14.5px;
+    color: var(--ink);
+    font-weight: 500;
+  }
+
+  /* Hero 视觉：写作面板 + 记忆卡片 */
+  .hero-visual {
+    position: relative;
+    min-height: 420px;
+  }
+  .panel {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    box-shadow: var(--shadow);
+    overflow: hidden;
+  }
+  .writing-panel {
+    position: relative;
+    z-index: 2;
+    animation: floatY 7s ease-in-out infinite;
+  }
+  .panel-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--line-soft);
+    background: var(--surface-2);
+  }
+  .panel-head .dots { display: flex; gap: 6px; }
+  .panel-head .dots span {
+    width: 9px; height: 9px;
+    border-radius: 50%;
+    background: var(--line);
+  }
+  .panel-head .dots span:nth-child(1) { background: var(--orange); }
+  .panel-head .dots span:nth-child(2) { background: var(--amber); }
+  .panel-head .dots span:nth-child(3) { background: var(--cyan); }
+  .panel-head .title {
+    font-size: 12.5px;
+    color: var(--ink-mute);
+    letter-spacing: 0.04em;
+  }
+  .panel-body { padding: 20px 22px; }
+  .panel-body .line {
+    height: 8px;
+    border-radius: 4px;
+    background: var(--bg-3);
+    margin-bottom: 10px;
+  }
+  .panel-body .line.short { width: 60%; }
+  .panel-body .line.mid { width: 85%; }
+  .panel-body .line.long { width: 95%; }
+  .panel-body .suggest {
+    margin-top: 16px;
+    padding: 12px 14px;
+    background: linear-gradient(135deg, rgba(77, 217, 212, 0.08), rgba(30, 123, 232, 0.05));
+    border-left: 2px solid var(--blue);
+    border-radius: 4px;
+    font-size: 13px;
+    color: var(--ink-soft);
+    line-height: 1.6;
+  }
+  .panel-body .suggest .label {
+    font-size: 11px;
+    color: var(--blue);
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    margin-bottom: 4px;
+    display: block;
+  }
+
+  /* 记忆卡片浮层 */
+  .memory-card {
+    position: absolute;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    box-shadow: var(--shadow-lg);
+    padding: 14px 16px;
+    width: 220px;
+    z-index: 3;
+  }
+  .memory-card.mc-1 {
+    top: -18px;
+    right: -10px;
+    animation: floatY 6s ease-in-out infinite;
+  }
+  .memory-card.mc-2 {
+    bottom: -24px;
+    left: -20px;
+    animation: floatY 8s ease-in-out infinite reverse;
+  }
+  @media (max-width: 480px) {
+    .memory-card { width: 180px; padding: 12px 14px; }
+    .memory-card.mc-1 { right: 0; }
+    .memory-card.mc-2 { left: 0; }
+  }
+  .mc-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 11px;
+    color: var(--ink-mute);
+    letter-spacing: 0.06em;
+    font-weight: 600;
+    margin-bottom: 8px;
+    text-transform: uppercase;
+  }
+  .mc-head .mc-dot {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    animation: pulseDot 2.4s ease-in-out infinite;
+  }
+  .mc-1 .mc-head .mc-dot { background: var(--cyan); }
+  .mc-2 .mc-head .mc-dot { background: var(--amber); }
+  .mc-body {
+    font-size: 12.5px;
+    color: var(--ink-soft);
+    line-height: 1.55;
+  }
+  .mc-body .k {
+    color: var(--orange);
+    font-weight: 600;
+  }
+
+  /* ============ Section base ============ */
+  section.block { padding: 84px 0; }
+  .section-head { margin-bottom: 52px; max-width: 68ch; }
+  .section-head.with-ring { display: flex; align-items: flex-start; gap: 18px; }
+  .section-ring { width: 34px; height: 34px; flex-shrink: 0; margin-top: 4px; }
+  .section-num {
+    font-size: 12px;
+    color: var(--orange);
+    letter-spacing: 0.14em;
+    font-weight: 600;
+    margin-bottom: 12px;
+  }
+  .section-title {
+    font-size: clamp(25px, 3.4vw, 34px);
+    font-weight: 600;
+    letter-spacing: -0.015em;
+    margin-bottom: 14px;
+    line-height: 1.24;
+    color: var(--ink);
+  }
+  .section-title .accent {
+    background: linear-gradient(120deg, var(--cyan), var(--blue));
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    font-style: italic;
+    font-weight: 500;
+  }
+  .section-desc {
+    color: var(--ink-soft);
+    max-width: 62ch;
+    font-size: 16px;
+  }
+
+  /* ============ Pain ============ */
+  .pain-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1px;
+    background: var(--line);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    overflow: hidden;
+  }
+  @media (max-width: 720px) { .pain-grid { grid-template-columns: 1fr; } }
+  .pain-cell {
+    background: var(--surface);
+    padding: 32px 30px;
+    transition: background 0.25s;
+  }
+  .pain-cell:hover { background: #fbf7ee; }
+  .pain-cell .label {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 12px;
+    color: var(--ink-mute);
+    margin-bottom: 14px;
+    letter-spacing: 0.06em;
+    font-weight: 600;
+  }
+  .pain-cell .idx {
+    width: 24px; height: 24px;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 700;
+    color: #fff;
+  }
+  .pain-cell:nth-child(1) .idx { background: var(--cyan); }
+  .pain-cell:nth-child(2) .idx { background: var(--blue); }
+  .pain-cell:nth-child(3) .idx { background: var(--amber); color: var(--ink); }
+  .pain-cell:nth-child(4) .idx { background: var(--orange); }
+  .pain-cell h3 {
+    font-size: 18px;
+    font-weight: 600;
+    margin-bottom: 8px;
+    line-height: 1.4;
+  }
+  .pain-cell p {
+    color: var(--ink-soft);
+    font-size: 14.5px;
+  }
+
+  /* ============ Users ============ */
+  .users {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 20px;
+  }
+  @media (max-width: 860px) { .users { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 480px) { .users { grid-template-columns: 1fr; } }
+  .user-card {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 28px 24px;
+    transition: transform 0.25s, box-shadow 0.25s, border-color 0.25s;
+    position: relative;
+    overflow: hidden;
+  }
+  .user-card::before {
+    content: "";
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+    opacity: 0;
+    transition: opacity 0.25s;
+  }
+  .user-card:nth-child(1)::before { background: linear-gradient(90deg, var(--cyan), var(--blue)); }
+  .user-card:nth-child(2)::before { background: linear-gradient(90deg, var(--blue), var(--amber)); }
+  .user-card:nth-child(3)::before { background: linear-gradient(90deg, var(--amber), var(--orange)); }
+  .user-card:nth-child(4)::before { background: linear-gradient(90deg, var(--orange), var(--red)); }
+  .user-card:hover {
+    transform: translateY(-3px);
+    box-shadow: var(--shadow);
+    border-color: transparent;
+  }
+  .user-card:hover::before { opacity: 1; }
+  .user-icon {
+    width: 42px; height: 42px;
+    border-radius: 11px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 18px;
+  }
+  .user-card:nth-child(1) .user-icon { background: rgba(77,217,212,0.14); color: var(--blue); }
+  .user-card:nth-child(2) .user-icon { background: rgba(30,123,232,0.12); color: var(--blue); }
+  .user-card:nth-child(3) .user-icon { background: rgba(245,200,66,0.18); color: var(--orange); }
+  .user-card:nth-child(4) .user-icon { background: rgba(245,97,42,0.12); color: var(--red); }
+  .user-icon svg { width: 21px; height: 21px; }
+  .user-card h4 {
+    font-size: 16px;
+    font-weight: 600;
+    margin-bottom: 6px;
+  }
+  .user-card p {
+    font-size: 13.5px;
+    color: var(--ink-soft);
+    line-height: 1.65;
+  }
+
+  /* ============ Features ============ */
+  .features {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 22px;
+  }
+  @media (max-width: 860px) { .features { grid-template-columns: 1fr; } }
+  .feature {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    padding: 30px 28px;
+    position: relative;
+    overflow: hidden;
+    transition: transform 0.25s, box-shadow 0.25s;
+  }
+  .feature:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow);
+  }
+  .feature-ring-mini {
+    width: 30px;
+    height: 30px;
+    margin-bottom: 18px;
+  }
+  .feature .num {
+    font-family: "Charter", "Georgia", serif;
+    font-size: 12.5px;
+    color: var(--orange);
+    letter-spacing: 0.12em;
+    margin-bottom: 12px;
+    font-weight: 600;
+  }
+  .feature h3 {
+    font-size: 18px;
+    font-weight: 600;
+    margin-bottom: 9px;
+    line-height: 1.35;
+  }
+  .feature p {
+    color: var(--ink-soft);
+    font-size: 14px;
+    line-height: 1.7;
+  }
+  .feature .tag {
+    display: inline-block;
+    margin-top: 16px;
+    font-size: 11.5px;
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-weight: 500;
+  }
+  .feature:nth-child(1) .tag { color: var(--blue); background: rgba(30,123,232,0.10); }
+  .feature:nth-child(2) .tag { color: var(--orange); background: rgba(245,97,42,0.10); }
+  .feature:nth-child(3) .tag { color: var(--ink-mute); background: var(--bg-2); }
+  .feature:nth-child(4) .tag { color: var(--cyan); background: rgba(77,217,212,0.14); }
+  .feature:nth-child(5) .tag { color: var(--red); background: rgba(232,33,42,0.08); }
+  .feature:nth-child(6) .tag { color: var(--amber); background: rgba(245,200,66,0.18); }
+
+  /* ============ Scenarios ============ */
+  .scenarios-wrap {
+    background: var(--surface-2);
+    border-radius: 20px;
+    padding: 48px;
+    border: 1px solid var(--line);
+    position: relative;
+    overflow: hidden;
+  }
+  .scenarios-wrap::before {
+    content: "";
+    position: absolute;
+    top: -80px; right: -80px;
+    width: 280px; height: 280px;
+    background: radial-gradient(circle, rgba(245,200,66,0.16) 0%, rgba(245,97,42,0.06) 45%, transparent 70%);
+    pointer-events: none;
+  }
+  @media (max-width: 720px) { .scenarios-wrap { padding: 32px 24px; } }
+  .scenario-list {
+    position: relative;
+    z-index: 1;
+  }
+  .scenario {
+    display: grid;
+    grid-template-columns: 60px 1fr;
+    gap: 24px;
+    padding: 22px 0;
+    border-bottom: 1px dashed var(--line);
+    align-items: flex-start;
+  }
+  .scenario:last-child { border-bottom: none; }
+  @media (max-width: 600px) {
+    .scenario { grid-template-columns: 44px 1fr; gap: 16px; }
+  }
+  .scenario .s-num {
+    font-family: "Charter", "Georgia", serif;
+    font-size: 22px;
+    color: var(--orange);
+    font-weight: 500;
+    line-height: 1;
+    padding-top: 2px;
+    position: relative;
+  }
+  .scenario .s-num::after {
+    content: "";
+    position: absolute;
+    left: 0; right: 0;
+    bottom: -8px;
+    height: 1px;
+    background: linear-gradient(90deg, var(--orange), transparent);
+  }
+  .scenario .s-body h4 {
+    font-size: 16px;
+    font-weight: 600;
+    margin-bottom: 5px;
+    color: var(--ink);
+  }
+  .scenario .s-body p {
+    font-size: 14px;
+    color: var(--ink-soft);
+    line-height: 1.7;
+  }
+
+  /* ============ Value + 第二大脑网络 ============ */
+  .value-section .wrap {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 56px;
+    align-items: center;
+  }
+  @media (max-width: 880px) {
+    .value-section .wrap { grid-template-columns: 1fr; gap: 40px; }
+    .brain-network { order: -1; }
+  }
+  .value-list { display: flex; flex-direction: column; gap: 22px; }
+  .value-item {
+    display: flex;
+    gap: 16px;
+    align-items: flex-start;
+  }
+  .value-item .v-icon {
+    flex-shrink: 0;
+    width: 38px; height: 38px;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(30,123,232,0.10);
+    color: var(--blue);
+  }
+  .value-item:nth-child(2) .v-icon { background: rgba(77,217,212,0.14); color: var(--cyan); }
+  .value-item:nth-child(3) .v-icon { background: rgba(245,200,66,0.18); color: var(--amber); }
+  .value-item:nth-child(4) .v-icon { background: rgba(245,97,42,0.12); color: var(--orange); }
+  .value-item .v-icon svg { width: 19px; height: 19px; }
+  .value-item h4 {
+    font-size: 15.5px;
+    font-weight: 600;
+    margin-bottom: 4px;
+  }
+  .value-item p {
+    font-size: 13.5px;
+    color: var(--ink-soft);
+    line-height: 1.65;
+  }
+
+  /* 第二大脑网络可视化 */
+  .brain-network {
+    position: relative;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    padding: 32px;
+    box-shadow: var(--shadow);
+    aspect-ratio: 1 / 1;
+    max-width: 440px;
+    margin: 0 auto;
+  }
+  .brain-svg { width: 100%; height: 100%; }
+  .brain-svg .node {
+    fill: var(--surface);
+    stroke: var(--blue);
+    stroke-width: 1.5;
+  }
+  .brain-svg .node.sage { stroke: var(--cyan); }
+  .brain-svg .node.gold { stroke: var(--amber); }
+  .brain-svg .node.clay { stroke: var(--orange); }
+  .brain-svg .node-dot {
+    fill: var(--blue);
+  }
+  .brain-svg .node-dot.sage { fill: var(--cyan); }
+  .brain-svg .node-dot.gold { fill: var(--amber); }
+  .brain-svg .node-dot.clay { fill: var(--orange); }
+  .brain-svg .edge {
+    stroke: var(--line);
+    stroke-width: 1;
+    fill: none;
+    stroke-dasharray: 3 4;
+  }
+  .brain-svg .edge.active {
+    stroke: var(--cyan);
+    stroke-dasharray: none;
+    opacity: 0.65;
+  }
+  .brain-svg .label {
+    font-size: 9px;
+    fill: var(--ink-soft);
+    font-family: -apple-system, sans-serif;
+    text-anchor: middle;
+  }
+  .brain-center {
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    width: 56px; height: 56px;
+    z-index: 2;
+  }
+  .brain-caption {
+    position: absolute;
+    bottom: 20px; left: 0; right: 0;
+    text-align: center;
+    font-size: 12px;
+    color: var(--ink-mute);
+    letter-spacing: 0.04em;
+  }
+
+  /* ============ Roadmap ============ */
+  .roadmap-track {
+    position: relative;
+    padding-left: 38px;
+  }
+  .roadmap-track::before {
+    content: "";
+    position: absolute;
+    left: 10px; top: 12px; bottom: 12px;
+    width: 2px;
+    background: linear-gradient(180deg,
+      var(--cyan) 0%, var(--blue) 30%,
+      var(--amber) 60%, var(--orange) 80%, var(--red) 100%);
+    opacity: 0.55;
+  }
+  .phase {
+    position: relative;
+    padding-bottom: 42px;
+  }
+  .phase:last-child { padding-bottom: 0; }
+  .phase .node {
+    position: absolute;
+    left: -38px; top: 2px;
+    width: 22px; height: 22px;
+    z-index: 1;
+  }
+  .phase .status {
+    display: inline-block;
+    font-size: 11.5px;
+    padding: 4px 11px;
+    border-radius: 6px;
+    margin-bottom: 12px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+  }
+  .phase.done .status { background: rgba(77,217,212,0.16); color: var(--blue); }
+  .phase.active .status { background: rgba(245,97,42,0.14); color: var(--orange); }
+  .phase.future .status { background: var(--bg-2); color: var(--ink-mute); }
+  .phase h3 {
+    font-size: 18px;
+    font-weight: 600;
+    margin-bottom: 7px;
+  }
+  .phase p {
+    color: var(--ink-soft);
+    font-size: 14.5px;
+    max-width: 62ch;
+    line-height: 1.7;
+  }
+  .phase .items {
+    margin-top: 12px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .phase .items span {
+    font-size: 12px;
+    color: var(--ink-soft);
+    background: var(--bg-2);
+    padding: 4px 10px;
+    border-radius: 6px;
+    border: 1px solid var(--line-soft);
+  }
+
+  /* ============ Closing CTA ============ */
+  .closing {
+    text-align: center;
+    padding: 100px 0 84px;
+    position: relative;
+    overflow: hidden;
+  }
+  .closing::before {
+    content: "";
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    width: 820px; height: 460px;
+    background: radial-gradient(ellipse, rgba(245,200,66,0.16) 0%, rgba(245,97,42,0.06) 40%, rgba(77,217,212,0.04) 70%, transparent 100%);
+    pointer-events: none;
+  }
+  .closing .wrap { position: relative; z-index: 1; }
+  .closing-ring {
+    width: 72px;
+    height: 72px;
+    margin: 0 auto 28px;
+    animation: floatY 5s ease-in-out infinite;
+  }
+  .closing h2 {
+    font-size: clamp(27px, 3.8vw, 40px);
+    font-weight: 600;
+    line-height: 1.3;
+    margin-bottom: 18px;
+    letter-spacing: -0.015em;
+  }
+  .closing h2 .accent {
+    background: linear-gradient(120deg, var(--orange), var(--red));
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    font-style: italic;
+    font-weight: 500;
+  }
+  .closing p {
+    color: var(--ink-soft);
+    font-size: 16.5px;
+    max-width: 52ch;
+    margin: 0 auto 36px;
+  }
+  .cta-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    padding: 14px 30px;
+    background: linear-gradient(120deg, var(--orange), var(--red));
+    color: #fffdf8;
+    text-decoration: none;
+    border-radius: 999px;
+    font-size: 15px;
+    font-weight: 500;
+    letter-spacing: 0.02em;
+    transition: transform 0.2s, box-shadow 0.2s, filter 0.2s;
+    box-shadow: 0 6px 18px rgba(245, 97, 42, 0.28);
+  }
+  .cta-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 10px 24px rgba(245, 97, 42, 0.36);
+    filter: brightness(1.05);
+  }
+  .cta-btn svg { width: 16px; height: 16px; }
+  .closing .sign {
+    margin-top: 48px;
+    padding-top: 32px;
+    border-top: 1px solid var(--line);
+    font-size: 13px;
+    color: var(--ink-mute);
+    letter-spacing: 0.06em;
+  }
+
+  /* ============ Footer ============ */
+  footer {
+    border-top: 1px solid var(--line-soft);
+    padding: 30px 0;
+    font-size: 13px;
+    color: var(--ink-mute);
+    background: var(--bg-2);
+  }
+  footer .wrap {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  footer .footer-brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  footer .footer-ring { width: 20px; height: 20px; }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="wrap">
+    <div class="brand">
+      <div class="archer-ring nav-ring">
+        <span class="ring-base"></span>
+        <span class="ring-shine"></span>
+      </div>
+      <span class="brand-name serif">Archer<span class="ch">初衍</span></span>
+      <span class="brand-sub">一个拥有长期记忆的个人成长与写作伴生体</span>
+    </div>
+    <div class="nav-links">
+      <a href="#pain">痛点</a>
+      <a href="#users">用户</a>
+      <a href="#features">功能</a>
+      <a href="#scenarios">场景</a>
+      <a href="#value">价值</a>
+      <a href="#roadmap">路线</a>
+    </div>
+  </div>
+</nav>
+
+<!-- ============ HERO ============ -->
+<header class="hero">
+  <div class="wrap">
+    <div class="hero-text">
+      <span class="eyebrow"><span class="dot"></span>TRAE AI 创造力大赛 · 报名作品</span>
+      <h1 class="hero-title serif">
+        让 AI 不再每次<br/><span class="accent">重新认识你</span>。
+      </h1>
+      <p class="hero-slogan serif">
+        Archer 初衍是一个拥有长期记忆的个人成长与写作伴生体。<br/>
+        它逐渐理解你的目标、写作风格、知识库和长期变化，而不是每次对话都从零开始。
+      </p>
+      <div class="hero-meta">
+        <div class="item">
+          <div class="k">定位</div>
+          <div class="v">长期记忆型个人 AI 伴生系统</div>
+        </div>
+        <div class="item">
+          <div class="k">面向</div>
+          <div class="v">写作者 · 知识管理者 · 独立创作者</div>
+        </div>
+        <div class="item">
+          <div class="k">阶段</div>
+          <div class="v">原型期 · 核心记忆系统已跑通</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="hero-visual">
+      <!-- 写作面板 -->
+      <div class="panel writing-panel">
+        <div class="panel-head">
+          <div class="dots"><span></span><span></span><span></span></div>
+          <div class="title">写作 · 关于长期主义</div>
+        </div>
+        <div class="panel-body">
+          <div class="line long"></div>
+          <div class="line mid"></div>
+          <div class="line short"></div>
+          <div class="line long"></div>
+          <div class="suggest">
+            <span class="label">Archer 初衍 · 基于你的记忆</span>
+            你在三月写过一篇关于"延迟满足"的文章，这次可以从"复利"的角度切入，延续你一贯的克制语气。
+          </div>
+        </div>
+      </div>
+      <!-- 记忆卡片 1 -->
+      <div class="memory-card mc-1">
+        <div class="mc-head"><span class="mc-dot"></span>已记住 · 写作风格</div>
+        <div class="mc-body">
+          偏好<span class="k">短句</span>、<span class="k">克制</span>，少用形容词，多用具体场景。
+        </div>
+      </div>
+      <!-- 记忆卡片 2 -->
+      <div class="memory-card mc-2">
+        <div class="mc-head"><span class="mc-dot"></span>已记住 · 长期目标</div>
+        <div class="mc-body">
+          今年完成一本关于<span class="k">个人成长系统</span>的书稿。
+        </div>
+      </div>
+    </div>
+  </div>
+</header>
+
+<!-- ============ PAIN ============ -->
+<section class="block" id="pain">
+  <div class="wrap">
+    <div class="section-head with-ring">
+      <div class="archer-ring section-ring">
+        <span class="ring-base"></span>
+        <span class="ring-shine"></span>
+      </div>
+      <div>
+        <div class="section-num">01 — 痛点</div>
+        <h2 class="section-title serif">每一次对话，都像在<span class="accent">重新开始</span>。</h2>
+        <p class="section-desc">
+          现在的 AI 工具很聪明，但每一次对话都像重新开始。你要不断重复解释自己的背景、目标、项目进度、写作风格和个人偏好。对于长期写作、知识管理和自我复盘的人来说，这种上下文断裂，让 AI 很难真正成为一个长期可用的助手。
+        </p>
+      </div>
+    </div>
+    <div class="pain-grid">
+      <div class="pain-cell">
+        <div class="label"><span class="idx">1</span>上下文断裂</div>
+        <h3>每次都要从头解释自己</h3>
+        <p>你的身份、项目、写作偏好、长期目标，AI 都不记得。第二天的对话和昨天毫无关联。</p>
+      </div>
+      <div class="pain-cell">
+        <div class="label"><span class="idx">2</span>风格失忆</div>
+        <h3>它写不出"你的"文字</h3>
+        <p>没有对过往文章的记忆，AI 给出的是平均化的、没有个人气质的内容，无法真正协作创作。</p>
+      </div>
+      <div class="pain-cell">
+        <div class="label"><span class="idx">3</span>知识孤岛</div>
+        <h3>笔记散落各处，无法被理解</h3>
+        <p>Obsidian、Flomo、备忘录里的碎片彼此隔离，AI 看不到全貌，也无法帮你发现关联。</p>
+      </div>
+      <div class="pain-cell">
+        <div class="label"><span class="idx">4</span>复盘缺失</div>
+        <h3>成长没有连续的轨迹</h3>
+        <p>情绪、项目进展、阶段状态没有被持续记录，你很难看清自己这段时间到底发生了什么。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ USERS ============ -->
+<section class="block" id="users" style="background: var(--bg-2);">
+  <div class="wrap">
+    <div class="section-head with-ring">
+      <div class="archer-ring section-ring">
+        <span class="ring-base"></span>
+        <span class="ring-shine"></span>
+      </div>
+      <div>
+        <div class="section-num">02 — 用户</div>
+        <h2 class="section-title serif">为<span class="accent">长期主义</span>的人而做。</h2>
+        <p class="section-desc">Archer 服务于那些把写作、知识和成长当作长期工程的人。</p>
+      </div>
+    </div>
+    <div class="users">
+      <div class="user-card">
+        <div class="user-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 19h16M4 19V5l8 4 8-4v14"/></svg>
+        </div>
+        <h4>长期写作者</h4>
+        <p>公众号、小红书、B 站的持续创作者，需要稳定的风格记忆与内容协作。</p>
+      </div>
+      <div class="user-card">
+        <div class="user-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2"/></svg>
+        </div>
+        <h4>第二大脑搭建者</h4>
+        <p>用 Obsidian、Flomo 等工具积累笔记，希望知识被连接而非堆积的人。</p>
+      </div>
+      <div class="user-card">
+        <div class="user-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 2l2.5 6.5L21 9l-5 4.5L17.5 21 12 17l-5.5 4L8 13.5 3 9l6.5-.5z"/></svg>
+        </div>
+        <h4>独立创作者</h4>
+        <p>自由职业者、独立开发者、个人品牌运营者，一个人就是一支队伍。</p>
+      </div>
+      <div class="user-card">
+        <div class="user-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg>
+        </div>
+        <h4>重建秩序的人</h4>
+        <p>正通过阅读、写作、运动、复盘重新搭建生活系统，需要持续陪伴与反馈的人。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ FEATURES ============ -->
+<section class="block" id="features">
+  <div class="wrap">
+    <div class="section-head with-ring">
+      <div class="archer-ring section-ring">
+        <span class="ring-base"></span>
+        <span class="ring-shine"></span>
+      </div>
+      <div>
+        <div class="section-num">03 — 功能</div>
+        <h2 class="section-title serif">六个相互<span class="accent">咬合</span>的系统。</h2>
+        <p class="section-desc">记忆是地基，写作是出口，知识是原料，复盘是回路，状态感知让一切主动发生，项目推进把想法变成行动。</p>
+      </div>
+    </div>
+    <div class="features">
+      <div class="feature">
+        <div class="archer-ring feature-ring-mini">
+          <span class="ring-base"></span>
+          <span class="ring-shine"></span>
+        </div>
+        <div class="num">01</div>
+        <h3>长期记忆系统</h3>
+        <p>记录你的重要经历、长期目标、写作风格、偏好和阶段状态。Archer 在每一次对话中调用这些记忆，而不是每次都问你一遍。</p>
+        <span class="tag">核心地基</span>
+      </div>
+      <div class="feature">
+        <div class="archer-ring feature-ring-mini">
+          <span class="ring-base"></span>
+          <span class="ring-shine"></span>
+        </div>
+        <div class="num">02</div>
+        <h3>写作协作系统</h3>
+        <p>根据你过往的文章和观点，帮助生成选题、标题、结构、开头和精修建议。它写出来的，是带着你气质的文字。</p>
+        <span class="tag">主要出口</span>
+      </div>
+      <div class="feature">
+        <div class="archer-ring feature-ring-mini">
+          <span class="ring-base"></span>
+          <span class="ring-shine"></span>
+        </div>
+        <div class="num">03</div>
+        <h3>第二大脑连接</h3>
+        <p>未来可连接 Obsidian、Flomo 等个人知识库，帮助整理知识、发现关联。让散落的碎片重新连成一张网。</p>
+        <span class="tag">规划中</span>
+      </div>
+      <div class="feature">
+        <div class="archer-ring feature-ring-mini">
+          <span class="ring-base"></span>
+          <span class="ring-shine"></span>
+        </div>
+        <div class="num">04</div>
+        <h3>复盘与洞察</h3>
+        <p>根据日常记录、项目进展和阶段目标，帮你发现反复出现的问题。成长因此变得可观察、可追溯。</p>
+        <span class="tag">反馈回路</span>
+      </div>
+      <div class="feature">
+        <div class="archer-ring feature-ring-mini">
+          <span class="ring-base"></span>
+          <span class="ring-shine"></span>
+        </div>
+        <div class="num">05</div>
+        <h3>状态感知交互</h3>
+        <p>减少你反复下指令的负担。Archer 能基于上下文主动提供建议，在合适的时机说合适的话。</p>
+        <span class="tag">体验目标</span>
+      </div>
+      <div class="feature">
+        <div class="archer-ring feature-ring-mini">
+          <span class="ring-base"></span>
+          <span class="ring-shine"></span>
+        </div>
+        <div class="num">06</div>
+        <h3>项目推进</h3>
+        <p>帮助用户把想法拆解成任务、计划和可执行步骤。让模糊的念头，变成可以一步步推进的清晰路径。</p>
+        <span class="tag">行动落地</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ SCENARIOS ============ -->
+<section class="block" id="scenarios">
+  <div class="wrap">
+    <div class="section-head with-ring">
+      <div class="archer-ring section-ring">
+        <span class="ring-base"></span>
+        <span class="ring-shine"></span>
+      </div>
+      <div>
+        <div class="section-num">04 — 场景</div>
+        <h2 class="section-title serif">在真实的<span class="accent">日常</span>里，Archer 这样陪你。</h2>
+        <p class="section-desc">不是工具的堆叠，而是融入写作、复盘、产品和阅读节奏的陪伴。</p>
+      </div>
+    </div>
+    <div class="scenarios-wrap">
+      <div class="scenario-list">
+        <div class="scenario">
+          <div class="s-num">01</div>
+          <div class="s-body">
+            <h4>写文章前，整理观点</h4>
+            <p>让 Archer 根据你过往的记录、文章和笔记，整理出可以展开的观点，而不是从空白页开始硬写。</p>
+          </div>
+        </div>
+        <div class="scenario">
+          <div class="s-num">02</div>
+          <div class="s-body">
+            <h4>一周复盘，看清状态</h4>
+            <p>让 Archer 总结最近的状态、行动和问题，对照你的长期目标，指出哪些在推进、哪些在偏离。</p>
+          </div>
+        </div>
+        <div class="scenario">
+          <div class="s-num">03</div>
+          <div class="s-body">
+            <h4>做产品时，理清方向</h4>
+            <p>让 Archer 帮助整理需求、计划和迭代方向，把零散的想法变成可以推进的版本节奏。</p>
+          </div>
+        </div>
+        <div class="scenario">
+          <div class="s-num">04</div>
+          <div class="s-body">
+            <h4>阅读之后，发现关联</h4>
+            <p>把读完的笔记交给 Archer，让它从你已有的知识库里发现关联，提示哪些值得写成文章。</p>
+          </div>
+        </div>
+        <div class="scenario">
+          <div class="s-num">05</div>
+          <div class="s-body">
+            <h4>状态混乱时，重新厘清</h4>
+            <p>当事情堆在一起、不知道先做什么时，让 Archer 帮你重新厘清：现在真正要解决的问题是什么。</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ VALUE + 第二大脑网络 ============ -->
+<section class="block value-section" id="value" style="background: var(--bg-2);">
+  <div class="wrap">
+    <div class="value-text">
+      <div class="section-head with-ring" style="margin-bottom: 36px;">
+        <div class="archer-ring section-ring">
+          <span class="ring-base"></span>
+          <span class="ring-shine"></span>
+        </div>
+        <div>
+          <div class="section-num">05 — 价值</div>
+          <h2 class="section-title serif">Archer 改变的，是你和 AI <span class="accent">相处</span>的方式。</h2>
+        </div>
+      </div>
+      <div class="value-list">
+        <div class="value-item">
+          <div class="v-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 8v4l3 2"/><circle cx="12" cy="12" r="9"/></svg>
+          </div>
+          <div>
+            <h4>连续的上下文</h4>
+            <p>不再重复解释自己，对话有了时间的厚度，每一次都站在过去所有对话的肩膀上。</p>
+          </div>
+        </div>
+        <div class="value-item">
+          <div class="v-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 19h16M7 19V5h10v14M10 9h4M10 13h4"/></svg>
+          </div>
+          <div>
+            <h4>有风格的写作</h4>
+            <p>协作产出带着你的语气和节奏，而不是平均化的模板文字。</p>
+          </div>
+        </div>
+        <div class="value-item">
+          <div class="v-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="6" cy="6" r="2"/><circle cx="18" cy="6" r="2"/><circle cx="12" cy="18" r="2"/><path d="M7.5 7.5l3 9M16.5 7.5l-3 9M8 6h8"/></svg>
+          </div>
+          <div>
+            <h4>被连接的知识</h4>
+            <p>散落的笔记重新成网，沉睡的碎片被唤醒，关联自然浮现。</p>
+          </div>
+        </div>
+        <div class="value-item">
+          <div class="v-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M3 17l5-5 4 4 8-8M21 8v5M21 8h-5"/></svg>
+          </div>
+          <div>
+            <h4>可观察的成长</h4>
+            <p>情绪、项目、状态被持续记录，成长有迹可循，问题反复出现时能被看见。</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 第二大脑网络可视化 -->
+    <div class="brain-network">
+      <svg class="brain-svg" viewBox="0 0 320 320">
+        <!-- 连线 -->
+        <line class="edge active" x1="160" y1="160" x2="70" y2="70"/>
+        <line class="edge active" x1="160" y1="160" x2="250" y2="80"/>
+        <line class="edge" x1="160" y1="160" x2="280" y2="180"/>
+        <line class="edge" x1="160" y1="160" x2="220" y2="260"/>
+        <line class="edge" x1="160" y1="160" x2="90" y2="250"/>
+        <line class="edge" x1="160" y1="160" x2="40" y2="170"/>
+        <line class="edge" x1="70" y1="70" x2="250" y2="80"/>
+        <line class="edge" x1="250" y1="80" x2="280" y2="180"/>
+        <line class="edge" x1="90" y1="250" x2="220" y2="260"/>
+        <line class="edge" x1="40" y1="170" x2="90" y2="250"/>
+        <line class="edge" x1="70" y1="70" x2="40" y2="170"/>
+
+        <!-- 节点 -->
+        <circle class="node sage" cx="70" cy="70" r="14"/>
+        <circle class="node-dot sage" cx="70" cy="70" r="3"/>
+        <text class="label" x="70" y="98">写作风格</text>
+
+        <circle class="node gold" cx="250" cy="80" r="14"/>
+        <circle class="node-dot gold" cx="250" cy="80" r="3"/>
+        <text class="label" x="250" y="108">长期目标</text>
+
+        <circle class="node" cx="280" cy="180" r="11"/>
+        <circle class="node-dot" cx="280" cy="180" r="2.5"/>
+        <text class="label" x="280" y="205">阶段状态</text>
+
+        <circle class="node clay" cx="220" cy="260" r="13"/>
+        <circle class="node-dot clay" cx="220" cy="260" r="3"/>
+        <text class="label" x="220" y="287">过往文章</text>
+
+        <circle class="node sage" cx="90" cy="250" r="11"/>
+        <circle class="node-dot sage" cx="90" cy="250" r="2.5"/>
+        <text class="label" x="90" y="277">笔记碎片</text>
+
+        <circle class="node gold" cx="40" cy="170" r="10"/>
+        <circle class="node-dot gold" cx="40" cy="170" r="2.5"/>
+        <text class="label" x="40" y="195">偏好</text>
+      </svg>
+      <!-- 中心圆环 -->
+      <div class="archer-ring brain-center">
+        <span class="ring-base"></span>
+        <span class="ring-shine"></span>
+        <span class="ring-halo"></span>
+      </div>
+      <div class="brain-caption">第二大脑 · 记忆网络</div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ ROADMAP ============ -->
+<section class="block" id="roadmap">
+  <div class="wrap">
+    <div class="section-head with-ring">
+      <div class="archer-ring section-ring">
+        <span class="ring-base"></span>
+        <span class="ring-shine"></span>
+      </div>
+      <div>
+        <div class="section-num">06 — 路线</div>
+        <h2 class="section-title serif">一步一步，把<span class="accent">伴生体</span>长出来。</h2>
+        <p class="section-desc">Archer 不会一蹴而就。我们按记忆—写作—知识—洞察的顺序，逐层把它搭起来。</p>
+      </div>
+    </div>
+    <div class="roadmap-track">
+      <div class="phase done">
+        <div class="archer-ring node">
+          <span class="ring-base"></span>
+          <span class="ring-shine"></span>
+        </div>
+        <span class="status">已完成</span>
+        <h3>长期记忆原型</h3>
+        <p>核心记忆结构跑通，能够稳定存储和调用用户的背景、偏好与目标。</p>
+        <div class="items"><span>记忆结构</span><span>目标管理</span><span>偏好记录</span></div>
+      </div>
+      <div class="phase active">
+        <div class="archer-ring node">
+          <span class="ring-base"></span>
+          <span class="ring-shine"></span>
+        </div>
+        <span class="status">进行中</span>
+        <h3>写作协作系统</h3>
+        <p>基于过往内容生成选题、结构、开头和精修建议，让 Archer 真正参与你的创作流程。</p>
+        <div class="items"><span>风格学习</span><span>选题生成</span><span>精修建议</span></div>
+      </div>
+      <div class="phase future">
+        <div class="archer-ring node">
+          <span class="ring-base"></span>
+          <span class="ring-shine"></span>
+        </div>
+        <span class="status">规划中</span>
+        <h3>第二大脑连接</h3>
+        <p>接入 Obsidian、Flomo 等笔记工具，让 Archer 看见你的全部知识，并帮你发现关联。</p>
+        <div class="items"><span>Obsidian 集成</span><span>知识图谱</span><span>关联推荐</span></div>
+      </div>
+      <div class="phase future">
+        <div class="archer-ring node">
+          <span class="ring-base"></span>
+          <span class="ring-shine"></span>
+        </div>
+        <span class="status">未来</span>
+        <h3>复盘洞察与主动建议</h3>
+        <p>根据长期记录发现反复出现的问题，并在合适的时机主动开口，而不是等你发问。</p>
+        <div class="items"><span>模式识别</span><span>主动提醒</span><span>项目推进</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ CLOSING CTA ============ -->
+<section class="closing">
+  <div class="wrap">
+    <div class="archer-ring closing-ring">
+      <span class="ring-base"></span>
+      <span class="ring-shine"></span>
+      <span class="ring-halo"></span>
+    </div>
+    <h2 class="serif">AI 不该只回答问题，<br/>它应该<span class="accent">认识你</span>。</h2>
+    <p>Archer 想做的，是让每一次对话都站在过去所有对话的肩膀上。让长期主义的人，终于有一个能陪自己走下去的伴生体。</p>
+    <a href="#" class="cta-btn">
+      了解 Archer
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+    </a>
+    <div class="sign">TRAE AI 创造力大赛 · 报名作品 · Archer 初衍</div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <div class="footer-brand">
+      <div class="archer-ring footer-ring">
+        <span class="ring-base"></span>
+        <span class="ring-shine"></span>
+      </div>
+      <span>Archer 初衍 — 一个拥有长期记忆的个人成长与写作伴生体</span>
+    </div>
+    <span>Built for TRAE AI Creativity Contest</span>
+  </div>
+</footer>
+
+</body>
+</html>
