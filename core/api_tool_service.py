@@ -9,6 +9,7 @@ from __future__ import annotations
 from uuid import uuid4
 
 from core.policy import Decision, check as policy_check
+from core.permission_levels import permission_level_for_tool
 from core.tool_runtime import ToolResult, invoke as runtime_invoke
 
 
@@ -49,6 +50,7 @@ def make_tool_request(
             "risk": pr.risk,
             "reason": pr.reason,
         },
+        "permissionLevel": permission_level_for_tool(skill_name, args),
         "requiresApproval": (not blocked) and (
             force_approval or pr.decision in (Decision.CONFIRM, Decision.STRONG_CONFIRM)
         ),
@@ -81,13 +83,15 @@ def execute_tool_request(request: dict, skills: dict, cfg: dict | None = None) -
         }
 
     tr = runtime_invoke(skill_name, args, skills)
-    return _tool_result_payload(skill_name, tr, pr)
+    return _tool_result_payload(skill_name, args, tr, pr)
 
 
-def _tool_result_payload(skill_name: str, tr: ToolResult, pr) -> dict:
+def _tool_result_payload(skill_name: str, args: dict, tr: ToolResult, pr) -> dict:
     output = tr.content_preview or tr.summary
     if tr.truncated and tr.artifact_path:
         output = f"{output}\n[完整结果已保存：{tr.artifact_path}]"
+    metadata = dict(tr.meta.get("metadata") or {})
+    work_receipt = metadata.get("workReceipt")
     return {
         "ok": tr.ok,
         "executed": tr.ok,
@@ -98,6 +102,9 @@ def _tool_result_payload(skill_name: str, tr: ToolResult, pr) -> dict:
         "truncated": tr.truncated,
         "runtime": tr.meta.get("runtime", "py"),
         "runner": tr.meta.get("runner", ""),
+        "metadata": metadata,
+        "workReceipt": work_receipt if isinstance(work_receipt, dict) else None,
         "policy": {"decision": pr.decision.value, "risk": pr.risk, "reason": pr.reason},
+        "permissionLevel": permission_level_for_tool(skill_name, args),
         "error": tr.error,
     }

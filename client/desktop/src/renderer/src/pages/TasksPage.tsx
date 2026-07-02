@@ -161,7 +161,7 @@ export function TasksPage({ data }: { data: ArcherAdapter }) {
           >
             <div>
               <strong>{job.title || job.id}</strong>
-              <span>{jobStatusLabel(job.status)} · {job.kind}</span>
+              <span>{jobStatusLabel(job.status, job.stale)} · {job.kind}</span>
               <span className="session-preview">{job.result || job.error || job.prompt}</span>
             </div>
             <ChevronRight size={16} />
@@ -262,7 +262,7 @@ function TaskDetail({
         </div>
         <div>
           <h2>{job.title || job.id}</h2>
-          <p>{job.id} · {jobStatusLabel(job.status)} · {formatDate(job.updatedAt)}</p>
+          <p>{job.id} · {jobStatusLabel(job.status, job.stale)} · {formatDate(job.updatedAt)}</p>
         </div>
         <div className="task-actions">
           <button className="quiet-button" type="button" onClick={() => setShowChildForm((value) => !value)}>
@@ -431,12 +431,13 @@ export function buildChildJobsSummary(children: BackgroundJobChildSummary[]): st
   return lines.join('\n')
 }
 
-function jobStatusLabel(status: BackgroundJob['status']): string {
+function jobStatusLabel(status: BackgroundJob['status'], stale?: boolean): string {
   if (status === 'queued') return '等待中'
   if (status === 'running') return '执行中'
   if (status === 'waiting_approval') return '等待确认'
   if (status === 'complete') return '已完成'
   if (status === 'failed') return '失败'
+  if (status === 'cancelled' && stale) return '已取消（无进展超时）'
   if (status === 'cancelled') return '已取消'
   return status
 }

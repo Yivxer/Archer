@@ -20,7 +20,7 @@ Legacy：`--legacy` 使用 `BaseHTTPRequestHandler`。
 | 方式 | Bearer Token |
 | Header | `Authorization: Bearer <desktop_api_token>` |
 | 启动参数 | `--token <desktop_api_token>` |
-| 公开路径 | `GET /health`（无需 token） |
+| 公开路径 | `GET /health`、`GET /ready`（无需 token） |
 
 未授权响应：
 
@@ -74,6 +74,14 @@ WebSocket：`/ws/chat?token=<token>` 或 `Authorization: Bearer …`。
 { "ok": true }
 ```
 
+### `GET /ready`
+
+Readiness check. Public endpoint.
+
+```json
+{ "ok": true, "ready": true, "runtime": "fastapi" }
+```
+
 ---
 
 ### `GET /status`
@@ -84,6 +92,9 @@ WebSocket：`/ws/chat?token=<token>` 或 `Authorization: Bearer …`。
 {
   "adapter": "local",
   "model": "deepseek-chat",
+  "modelProfile": "lite",
+  "expertId": "default",
+  "expertLabel": "基础 Archer",
   "mode": "auto",
   "memoryCount": 42,
   "pendingMemoryCount": 3,
@@ -270,13 +281,17 @@ Query：`include_rejected=true` 含已拒绝 pending。
 | `/sessions/{id}` | 会话消息 + tokenUsage |
 | `/skills` | 技能列表（name, description, risk, enabled） |
 | `/modes` | 对话姿态（current, modes[]） |
+| `/experts` | 专家工作台（current, experts[]） |
 | `/settings` | Desktop 可编辑配置快照 |
 | `/schedules` | 定时任务列表 + jsonPath |
 | `/soul-files` | SOUL / MEMORY 等文件内容 |
 | `/soul-profile` | 结构化灵魂画像摘要 |
+| `/hypotheses` | Soul Insight hypotheses 列表 |
 | `/proactive-touch` |  proactive 扫描项 |
 | `/reviews?period=weekly` | 周期回顾 |
 | `/journal-review?days=30` | 日记回顾 |
+| `/sensors/status` | 当前传感器状态；包含 Obsidian focus |
+| `/vault/current-focus` | 当前 Obsidian focus；可带 `?detect=1` 使用 mtime fallback |
 
 ---
 
@@ -284,19 +299,118 @@ Query：`include_rejected=true` 含已拒绝 pending。
 
 | 路径 | 说明 |
 |------|------|
-| `/sessions` | 保存新会话 `{ messages }` |
+| `/sessions` | 保存新会话 `{ messages, expertId?, expertLabel? }` |
 | `/sessions/{id}/append` | 追加消息 |
 | `/modes/current` | `{ "mode": "coach" \| "auto" \| … }` |
+| `/experts/current` | `{ "expert": "developer" \| "default" \| … }`；校验 id，写入 `current_expert`（不自动切换模型档位） |
 | `/settings/validate` | 校验 draft，不写盘 |
 | `/settings/save` | 写入 archer.toml 允许字段 |
 | `/skills/toggle` | `{ "name", "enabled" }` |
 | `/soul/import` | `{ "soulData": { … } }` |
+| `/hypotheses` | 手动创建 hypothesis `{ title, statement, confidence?, validateAfterDays?, sessionId? }` |
+| `/hypotheses/import-obsidian` | 从配置的 Obsidian vault 导入显式 `假设：` / `Hypothesis:` 日记标记 |
+| `/sensors/obsidian/focus` | Obsidian 插件上报当前笔记 focus；要求 Bearer token，路径必须位于 `[obsidian].vault_path` |
 | `/tool-approvals` | `{ "eventId", "decision": "approved"\|"denied" }` |
 | `/schedules` | 添加 `{ skillName, interval, label?, catchup? }` |
 | `/schedules/{id}/remove` | 删除 |
 | `/schedules/{id}/enable` | 启用 |
 | `/schedules/{id}/disable` | 禁用 |
 | `/schedules/{id}/run` | 立即执行 |
+
+---
+
+### `POST /sensors/obsidian/focus`
+
+Obsidian 传感器入口，用于把当前打开的笔记作为只读上下文同步给 Desktop 聊天流。
+
+```json
+{
+  "file_path": "/abs/path/to/vault/note.md",
+  "relativePath": "folder/note.md",
+  "title": "note",
+  "selected_text": "optional selected text",
+  "visible_headings": ["Heading"],
+  "tags": ["writing"],
+  "content_preview": "short excerpt"
+}
+```
+
+响应成功后，`/chat/stream` 在 `obsidianMode != "off"` 时会注入该 focus，并发出 `vault.context` / `vault_sources` 事件。
+
+---
+
+### `GET /settings` 模型档位字段
+
+`/settings` 返回的模型配置包含三档：
+
+```json
+{
+  "activeProfile": "lite",
+  "activeExpert": "default",
+  "experts": [
+    { "id": "default", "label": "基础 Archer", "note": "灵魂陪伴，不担任特定工作角色", "modelProfile": "lite", "skillCount": 0, "configured": true },
+    { "id": "developer", "label": "开发工程师", "note": "查代码、排错、看结构、委派实现", "modelProfile": "pro", "skillCount": 6, "configured": false }
+  ],
+  "modelProfiles": [
+    { "id": "lite", "label": "Lite", "provider": "DeepSeek", "baseUrl": "https://api.deepseek.com/v1", "model": "deepseek-chat", "configured": true },
+    { "id": "pro", "label": "Pro", "provider": "Kimi", "baseUrl": "", "model": "", "configured": false },
+    { "id": "max", "label": "Max", "provider": "GLM", "baseUrl": "", "model": "", "configured": false }
+  ]
+}
+```
+
+`activeProfile` 只允许 `lite` / `pro` / `max`。`pro` 和 `max` 先作为预留档位，等 API key 与模型名确定后再补全。
+
+---
+
+### `GET /experts`
+
+**响应 200**
+
+```json
+{
+  "current": "default",
+  "experts": [
+    {
+      "id": "default",
+      "label": "基础 Archer",
+      "note": "灵魂陪伴，不担任特定工作角色",
+      "modelProfile": "lite",
+      "skillCount": 0,
+      "configured": true,
+      "starters": [
+        { "label": "先听我说", "prompt": "我先说一段，你不用急着给方案。" }
+      ]
+    }
+  ]
+}
+```
+
+`skillCount` 为 allowlist 大小；`default` 为 0 表示不限制技能池。`configured` 表示该专家可用。`starters` 为首页快捷开场（每专家 4 条）。`custom` / `source` 标识自定义或插件专家。
+
+`GET /settings` 的 `experts[]` 与 `GET /experts` 使用同一 catalog 结构（含 starters）。
+
+### `POST /experts/current`
+
+**请求**
+
+```json
+{ "expert": "developer" }
+```
+
+**响应 200**
+
+```json
+{
+  "ok": true,
+  "current": "developer",
+  "label": "开发工程师",
+  "modelProfile": "pro",
+  "previous": "default"
+}
+```
+
+未知 id 或目标模型档位未配置时返回 **400** `{ "ok": false, "error": "…" }`。
 
 ---
 

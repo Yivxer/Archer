@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<!--
+  Archer · 灵魂伴生体 — 可交互概念演示页（TRAE 初赛 Demo 蓝图）
+  ───────────────────────────────────────────────────────────
+  用途：作为用 TRAE Work / TRAE IDE 创作时的结构与内容参考。
+  实际参赛交付物须用 TRAE 工具从 0 重新生成，并保留创作过程证据
+  （对话截图 / 任务 Session ID / 阶段截图）。不要直接拿本文件提交。
+  ───────────────────────────────────────────────────────────
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Archer · 灵魂伴生体</title>
+<style>
+  :root{
+    --bg:#f6f3ee; --surface:#ffffff; --ink:#1f2328; --ink-soft:#5b6470;
+    --line:#e6e0d6; --accent:#2f5573; --accent-soft:#e8eff5;
+    --warm:#c2693f; --warm-soft:#f7ece4; --ok:#3f7a52; --ok-soft:#e7f1ea;
+    --shadow:0 1px 2px rgba(31,35,40,.04), 0 8px 24px rgba(31,35,40,.06);
+    --radius:14px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
+  body{
+    font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Helvetica Neue","Segoe UI",sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.7;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:880px;margin:0 auto;padding:0 24px}
+  section{padding:72px 0;border-bottom:1px solid var(--line)}
+  section:last-of-type{border-bottom:none}
+
+  /* Hero */
+  .hero{padding:96px 0 64px;text-align:center}
+  .kicker{display:inline-block;font-size:13px;letter-spacing:.18em;color:var(--accent);
+    background:var(--accent-soft);padding:6px 14px;border-radius:999px;margin-bottom:24px;font-weight:600}
+  h1{font-size:46px;font-weight:700;letter-spacing:-.01em;line-height:1.2;margin-bottom:18px}
+  .hero p.lead{font-size:19px;color:var(--ink-soft);max-width:560px;margin:0 auto 32px}
+  .pillars-tags{display:flex;gap:10px;justify-content:center;flex-wrap:wrap}
+  .tag{font-size:14px;color:var(--ink);background:var(--surface);border:1px solid var(--line);
+    padding:8px 16px;border-radius:999px;box-shadow:var(--shadow)}
+  .tag b{color:var(--accent)}
+
+  /* 对比 */
+  .compare{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:36px}
+  .col{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:28px;box-shadow:var(--shadow)}
+  .col h3{font-size:15px;margin-bottom:16px;color:var(--ink-soft);font-weight:600;letter-spacing:.02em}
+  .col ul{list-style:none}
+  .col li{padding:8px 0;border-bottom:1px dashed var(--line);font-size:15px;color:var(--ink-soft)}
+  .col li:last-child{border-bottom:none}
+  .col.b2 h3{color:var(--accent)}
+  .col.b2 li{color:var(--ink)}
+  .col.b2 li::before{content:"";display:inline-block;width:6px;height:6px;background:var(--accent);
+    border-radius:50%;margin-right:10px;vertical-align:middle}
+
+  /* 四大支柱卡片 */
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:36px}
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);
+    padding:26px;box-shadow:var(--shadow);transition:transform .18s,box-shadow .18s}
+  .card:hover{transform:translateY(-2px);box-shadow:0 4px 8px rgba(31,35,40,.05),0 16px 36px rgba(31,35,40,.09)}
+  .card .ico{width:38px;height:38px;border-radius:10px;display:flex;align-items:center;justify-content:center;
+    font-size:18px;margin-bottom:14px}
+  .card h4{font-size:17px;margin-bottom:8px}
+  .card p{font-size:14px;color:var(--ink-soft)}
+
+  /* 交互演示：记忆审阅 */
+  .demo{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);
+    padding:30px;box-shadow:var(--shadow);margin-top:32px}
+  .demo-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;flex-wrap:wrap;gap:10px}
+  .demo-head h3{font-size:18px}
+  .demo-note{font-size:13px;color:var(--ink-soft)}
+  .propose-btn{background:var(--accent);color:#fff;border:none;padding:10px 18px;border-radius:10px;
+    font-size:14px;font-weight:600;cursor:pointer;font-family:inherit;transition:background .15s}
+  .propose-btn:hover{background:#26465f}
+  .propose-btn:disabled{background:#9fb3c2;cursor:not-allowed}
+  .memory-proposal{display:none;background:var(--accent-soft);border-left:3px solid var(--accent);
+    padding:16px 18px;border-radius:8px;margin:16px 0}
+  .memory-proposal.show{display:block;animation:fade .3s ease}
+  @keyframes fade{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}
+  .proposal-label{font-size:12px;color:var(--accent);font-weight:600;letter-spacing:.05em;margin-bottom:6px}
+  .proposal-text{font-size:15px;margin-bottom:14px}
+  .proposal-actions{display:flex;gap:10px}
+  .act{padding:8px 18px;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;border:1px solid transparent;font-family:inherit}
+  .act.accept{background:var(--ok-soft);color:var(--ok);border-color:var(--ok)}
+  .act.reject{background:var(--warm-soft);color:var(--warm);border-color:var(--warm)}
+  .memory-list{margin-top:20px;border-top:1px solid var(--line);padding-top:16px}
+  .memory-list h5{font-size:13px;color:var(--ink-soft);margin-bottom:10px;font-weight:600}
+  .mem-item{font-size:14px;padding:8px 12px;background:var(--bg);border-radius:8px;margin-bottom:6px;
+    display:flex;align-items:center;gap:8px;animation:fade .3s ease}
+  .mem-item .dot{width:7px;height:7px;border-radius:50%;background:var(--ok);flex-shrink:0}
+  .mem-empty{font-size:13px;color:#aaa;font-style:italic;padding:8px 12px}
+
+  /* 四种在场模式 */
+  .modes-tabs{display:flex;gap:8px;margin-bottom:20px;flex-wrap:wrap}
+  .mode-tab{padding:9px 18px;border-radius:999px;border:1px solid var(--line);background:var(--surface);
+    font-size:14px;cursor:pointer;font-family:inherit;color:var(--ink-soft);transition:all .15s}
+  .mode-tab.active{background:var(--ink);color:#fff;border-color:var(--ink)}
+  .chat-box{background:var(--bg);border-radius:12px;padding:20px;min-height:160px}
+  .chat-user{text-align:right;margin-bottom:14px}
+  .chat-user span{display:inline-block;background:var(--accent);color:#fff;padding:9px 14px;
+    border-radius:14px 14px 4px 14px;font-size:14px;max-width:80%}
+  .chat-archer span{display:inline-block;background:var(--surface);border:1px solid var(--line);
+    padding:9px 14px;border-radius:14px 14px 14px 4px;font-size:14px;max-width:80%;box-shadow:var(--shadow)}
+  .mode-desc{font-size:13px;color:var(--ink-soft);margin-top:14px;padding-top:14px;border-top:1px dashed var(--line)}
+
+  /* 三端入口 */
+  .ends{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:32px}
+  .end{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:24px;text-align:center;box-shadow:var(--shadow)}
+  .end .e-ico{font-size:28px;margin-bottom:10px}
+  .end h5{font-size:15px;margin-bottom:6px}
+  .end p{font-size:13px;color:var(--ink-soft)}
+
+  /* 原则 */
+  .principles{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:32px}
+  .pr{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:18px 22px;box-shadow:var(--shadow)}
+  .pr b{display:block;font-size:15px;color:var(--accent);margin-bottom:4px}
+  .pr span{font-size:13px;color:var(--ink-soft)}
+
+  footer{padding:48px 0 64px;text-align:center}
+  .foot-note{font-size:13px;color:var(--ink-soft);max-width:560px;margin:0 auto;line-height:1.8}
+  .foot-badge{display:inline-block;font-size:12px;color:var(--warm);background:var(--warm-soft);
+    padding:5px 14px;border-radius:999px;margin-bottom:18px;font-weight:600}
+
+  @media(max-width:640px){
+    h1{font-size:32px}
+    .compare,.grid,.principles{grid-template-columns:1fr}
+    .ends{grid-template-columns:1fr}
+  }
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap">
+    <span class="kicker">ARCHER · 灵魂伴生体</span>
+    <h1>一个记得你、有边界、<br>陪你长期生长的本地 AI 伙伴</h1>
+    <p class="lead">现在的 AI 每次对话都从零开始。Archer 反过来——它跨会话记得你，有可演化的灵魂档案，有不可绕过的边界，在边界之内陪你思考和执行。</p>
+    <div class="pillars-tags">
+      <span class="tag">本地优先</span>
+      <span class="tag">记忆<b>可审阅</b></span>
+      <span class="tag">边界<b>不可绕过</b></span>
+    </div>
+  </div>
+</header>
+
+<section>
+  <div class="wrap">
+    <h2 style="font-size:26px;margin-bottom:6px">为什么不是又一个 AI 助手</h2>
+    <p style="color:var(--ink-soft)">工具关系与伴生关系的根本区别</p>
+    <div class="compare">
+      <div class="col b1">
+        <h3>一次性 AI 助手</h3>
+        <ul>
+          <li>每次对话从零开始，不记得你是谁</li>
+          <li>没有自己的立场，只会顺从</li>
+          <li>数据在云端，你不真正拥有</li>
+          <li>边界可以被一句指令改写</li>
+          <li>用完即弃，没有连续性</li>
+        </ul>
+      </div>
+      <div class="col b2">
+        <h3>Archer 灵魂伴生体</h3>
+        <ul>
+          <li>跨会话记得你，记忆要不要存由你审阅</li>
+          <li>有可演化的灵魂档案，分歧时会守住那一面</li>
+          <li>数据本地优先，留在你的机器上</li>
+          <li>根契约不可在会话中自动修改</li>
+          <li>连续性来自被确认的记忆与清晰边界</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2 style="font-size:26px;margin-bottom:6px">四大支柱</h2>
+    <p style="color:var(--ink-soft)">构成伴生关系的基本结构</p>
+    <div class="grid">
+      <div class="card">
+        <div class="ico" style="background:var(--accent-soft);color:var(--accent)">❖</div>
+        <h4>长期记忆</h4>
+        <p>跨会话保存，需经你审阅后才写入。绝不自动把一次情绪当成长期结论。</p>
+      </div>
+      <div class="card">
+        <div class="ico" style="background:var(--warm-soft);color:var(--warm)">✦</div>
+        <h4>灵魂档案</h4>
+        <p>定义你是谁、价值观与协作方式，在决策类对话中被读取，并可在交互中演化。</p>
+      </div>
+      <div class="card">
+        <div class="ico" style="background:var(--ok-soft);color:var(--ok)">§</div>
+        <h4>根契约与在场方式</h4>
+        <p>约束行为边界与回应节奏，不可在会话中自动修改，保护你也被它保护。</p>
+      </div>
+      <div class="card">
+        <div class="ico" style="background:#f0eef6;color:#5b4b8a">⚙</div>
+        <h4>技能系统</h4>
+        <p>内置 Shell、文件、网页抓取、Obsidian 等技能，支持第三方插件与 MCP。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2 style="font-size:26px;margin-bottom:6px">交互演示：记忆可审阅</h2>
+    <p style="color:var(--ink-soft)">Archer 不会自动写入记忆。每条记忆提案，都由你接受或拒绝。</p>
+    <div class="demo">
+      <div class="demo-head">
+        <h3>记忆审阅台</h3>
+        <span class="demo-note">点击下方按钮，模拟 Archer 提议一条记忆</span>
+      </div>
+      <button class="propose-btn" id="proposeBtn" onclick="proposeMemory()">让 Archer 提议一条记忆</button>
+      <div class="memory-proposal" id="proposal">
+        <div class="proposal-label">记忆提案 · 待你审阅</div>
+        <div class="proposal-text" id="proposalText"></div>
+        <div class="proposal-actions">
+          <button class="act accept" onclick="acceptMemory()">接受并写入</button>
+          <button class="act reject" onclick="rejectMemory()">拒绝，不写入</button>
+        </div>
+      </div>
+      <div class="memory-list">
+        <h5>已确认记忆</h5>
+        <div id="memList"><div class="mem-empty">还没有被确认的记忆。Archer 不会替你决定记什么。</div></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2 style="font-size:26px;margin-bottom:6px">交互演示：四种在场方式</h2>
+    <p style="color:var(--ink-soft)">同一个你，Archer 可以用四种节奏陪你。切换看看回应如何变化。</p>
+    <div class="demo" style="margin-top:24px">
+      <div class="modes-tabs">
+        <button class="mode-tab active" data-mode="coach" onclick="switchMode('coach')">coach 推动</button>
+        <button class="mode-tab" data-mode="mirror" onclick="switchMode('mirror')">mirror 镜像</button>
+        <button class="mode-tab" data-mode="critic" onclick="switchMode('critic')">critic 挑战</button>
+        <button class="mode-tab" data-mode="operator" onclick="switchMode('operator')">operator 执行</button>
+      </div>
+      <div class="chat-box">
+        <div class="chat-user"><span>我这周又开始拖延健身计划了。</span></div>
+        <div class="chat-archer"><span id="modeReply"></span></div>
+      </div>
+      <div class="mode-desc" id="modeDesc"></div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2 style="font-size:26px;margin-bottom:6px">三端入口，同一核心</h2>
+    <p style="color:var(--ink-soft)">记忆、灵魂、技能共享，数据本地同步</p>
+    <div class="ends">
+      <div class="end"><div class="e-ico">🌐</div><h5>网页</h5><p>试用、灵魂建档</p></div>
+      <div class="end"><div class="e-ico">💻</div><h5>桌面客户端</h5><p>日常对话、记忆审阅</p></div>
+      <div class="end"><div class="e-ico">⌨️</div><h5>终端</h5><p>完整控制、技能调用</p></div>
+    </div>
+    <div class="principles">
+      <div class="pr"><b>本地优先</b><span>数据默认留在你的机器，不经过任何 Archer 服务器</span></div>
+      <div class="pr"><b>命令分级确认</b><span>高风险命令需确认，危险命令直接拒绝</span></div>
+      <div class="pr"><b>你拥有你的文件</b><span>配置、记忆、灵魂档案完全在你控制下</span></div>
+      <div class="pr"><b>诚实于边界</b><span>不确定就说不确定，不把能力缺失伪装成立场</span></div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <span class="foot-badge">概念演示页 · 非成品</span>
+    <p class="foot-note">
+      这是一个可交互概念演示，用于直观呈现「灵魂伴生体」的理念结构。<br>
+      真正的 Archer 运行在本地终端，记忆存于 SQLite，灵魂档案由你审定。<br>
+      本页为 TRAE AI 创造力大赛初赛 Demo 的结构参考。
+    </p>
+  </div>
+</footer>
+
+<script>
+  // 记忆审阅演示
+  const proposals = [
+    "枫弋本周正在推进 Archer 灵魂伴生体的参赛 Demo。",
+    "枫弋对健身计划有反复拖延的模式，倾向在疲惫期中断。",
+    "枫弋偏好克制、结构化的回应，反感空泛鼓励。",
+    "枫弋当前主线是个人 IP + 健身视频拍摄。"
+  ];
+  let pIdx = 0;
+  let accepted = [];
+  function proposeMemory(){
+    const text = proposals[pIdx % proposals.length];
+    pIdx++;
+    document.getElementById('proposalText').textContent = text;
+    document.getElementById('proposal').classList.add('show');
+    document.getElementById('proposeBtn').textContent = '再提议一条';
+  }
+  function acceptMemory(){
+    const text = document.getElementById('proposalText').textContent;
+    if(!accepted.includes(text)) accepted.push(text);
+    renderMemList();
+    document.getElementById('proposal').classList.remove('show');
+  }
+  function rejectMemory(){
+    document.getElementById('proposal').classList.remove('show');
+  }
+  function renderMemList(){
+    const list = document.getElementById('memList');
+    if(accepted.length===0){ list.innerHTML='<div class="mem-empty">还没有被确认的记忆。Archer 不会替你决定记什么。</div>'; return; }
+    list.innerHTML = accepted.map(t=>`<div class="mem-item"><span class="dot"></span>${t}</div>`).join('');
+  }
+
+  // 四种在场模式
+  const modes = {
+    coach: { reply:"拖延往往不是意志问题，是计划太大。你这周原计划练几次？我们把第一次压到最小——哪怕15分钟。定个今晚就能开始的时间。", desc:"coach 推动行动，总问「下一步是什么？」" },
+    mirror: { reply:"你这周又开始拖延了。你说「又开始」——这个「又」里，有没有你熟悉的东西？", desc:"mirror 只提问，不给建议，把空间留给你" },
+    critic: { reply:"你说「又开始拖延」，但你真的在拖延，还是计划本身就不现实？如果是后者，归因为意志力只会让你更想放弃。先看计划合不合理。", desc:"critic 挑战你的假设和盲点" },
+    operator: { reply:"已记录本周中断。建议：今晚 20:00 15 分钟轻量训练。确认我帮你定提醒？", desc:"operator 简洁、任务导向，无额外内容" }
+  };
+  function switchMode(m){
+    document.querySelectorAll('.mode-tab').forEach(t=>t.classList.toggle('active', t.dataset.mode===m));
+    document.getElementById('modeReply').textContent = modes[m].reply;
+    document.getElementById('modeDesc').textContent = modes[m].desc;
+  }
+  switchMode('coach');
+</script>
+</body>
+</html>

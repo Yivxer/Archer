@@ -3,27 +3,30 @@ import ReactDOM from 'react-dom/client'
 import {
   Brain,
   ChevronRight,
-  History,
-  ListChecks,
-  Layers,
-  Moon,
+  Folder,
+  FolderPlus,
   MessageSquare,
   PanelLeft,
-  Settings,
   SquarePen,
-  Sun,
+  UserRoundCog,
+  Wrench,
   X,
 } from 'lucide-react'
-import { checkLocalApiHealth, getDesktopApiToken, loadLocalArcher, loadLocalSession } from './adapters/localArcher'
-import { connectionStatusLabel, modeLabelFromId, modelLabelFromStatus, personaPresetFromMode } from './lib/conversationPersona'
+import { fetchLocalExpertWorkbench, loadLocalSession, switchLocalExpert } from './adapters/localArcher'
+import { connectionStatusLabel, expertShortLabel, modelProfileShortLabel } from './lib/conversationPersona'
+import { mergeInitiativeShadowEvent } from './lib/initiativeShadow'
+import { createOfflineLocalShell, syncBrainData, wasBrainEverLinked } from './lib/brainConnection'
 import { mockArcher } from './adapters/mockArcher'
-import { ArcherRing, EmptyDetail, ErrorBoundary, SearchBox } from './components/common'
+import { ArcherRing, ErrorBoundary } from './components/common'
 import { ChatPage } from './pages/ChatPage'
 import { MemoryPage } from './pages/MemoryPage'
+import { ReviewPage } from './pages/ReviewPage'
+import { ProjectsPage } from './pages/ProjectsPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { SkillsPage } from './pages/SkillsPage'
 import { SoulPage } from './pages/SoulPage'
 import { TasksPage } from './pages/TasksPage'
+import { TodayPage } from './pages/TodayPage'
 import type {
   ArcherAdapter,
   ApiConnectionState,
@@ -31,9 +34,18 @@ import type {
   MemoryContextMode,
   ObsidianContextMode,
   Route,
+  SavedSession,
   SessionDetail,
   Theme
 } from './types'
+import {
+  buildSidebarTaskGroups,
+  createSidebarProject,
+  readSidebarProjects,
+  writeSidebarProjects,
+  type ProjectRecord,
+} from './lib/sidebarProjects'
+import type { InitiativeEvent } from '../../agent/contracts'
 import './styles.css'
 
 function App() {
@@ -43,15 +55,23 @@ function App() {
     return saved === null ? true : saved === '1'
   })
   const [chatKey, setChatKey] = React.useState(0)
-  const [data, setData] = React.useState<ArcherAdapter>(mockArcher)
-  const [apiState, setApiState] = React.useState<ApiConnectionState>('idle')
+  const [data, setData] = React.useState<ArcherAdapter>(() => (
+    wasBrainEverLinked() ? createOfflineLocalShell() : mockArcher
+  ))
+  const [apiState, setApiState] = React.useState<ApiConnectionState>('loading')
+  const [apiReason, setApiReason] = React.useState('')
   const [apiBannerDismissed, setApiBannerDismissed] = React.useState(false)
   const [activeSession, setActiveSession] = React.useState<SessionDetail | null>(null)
   const [sessionLoadState, setSessionLoadState] = React.useState<'idle' | 'loading' | 'error'>('idle')
   const [sessionLoadError, setSessionLoadError] = React.useState('')
   const [profileOpen, setProfileOpen] = React.useState(false)
-  const [profileName, setProfileName] = React.useState(() => {
+  const [projects, setProjects] = React.useState<ProjectRecord[]>(() => readSidebarProjects())
+  const [selectedProjectId, setSelectedProjectId] = React.useState('')
+  const [profileName] = React.useState(() => {
     return localStorage.getItem('archer-profile-name') || 'Archer'
+  })
+  const [profileAvatarUrl, setProfileAvatarUrl] = React.useState(() => {
+    return localStorage.getItem('archer-profile-avatar-url') || ''
   })
   const [theme, setTheme] = React.useState<Theme>(() => {
     return (localStorage.getItem('archer-desktop-theme') as Theme) || 'light'
@@ -77,7 +97,7 @@ function App() {
   async function openSession(session: ArcherAdapter['sessions'][number]) {
     setRoute('Chat')
     setSessionLoadError('')
-    if (data.status.adapter !== 'local') {
+    if (data.status.adapter !== 'local' && !wasBrainEverLinked()) {
       setActiveSession({
         ...session,
         messages: [
@@ -97,6 +117,18 @@ function App() {
       const detail = await loadLocalSession(session.id)
       setActiveSession(detail)
       setSessionLoadState('idle')
+      if (
+        detail.expertId
+        && detail.expertId !== (data.experts?.current || data.status.expertId)
+        && data.status.adapter === 'local'
+      ) {
+        try {
+          await switchLocalExpert(detail.expertId)
+          await patchExpertWorkbench()
+        } catch {
+          // Keep session readable even if expert restore fails.
+        }
+      }
     } catch (error) {
       setSessionLoadState('error')
       setSessionLoadError(error instanceof Error ? error.message : '无法读取这个历史会话')
@@ -121,6 +153,14 @@ function App() {
   }, [profileName])
 
   React.useEffect(() => {
+    if (profileAvatarUrl) {
+      localStorage.setItem('archer-profile-avatar-url', profileAvatarUrl)
+    } else {
+      localStorage.removeItem('archer-profile-avatar-url')
+    }
+  }, [profileAvatarUrl])
+
+  React.useEffect(() => {
     localStorage.setItem('archer-conversation-mode', conversationMode)
   }, [conversationMode])
 
@@ -128,54 +168,162 @@ function App() {
     localStorage.setItem('archer-sidebar-open', sidebarOpen ? '1' : '0')
   }, [sidebarOpen])
 
-  async function connectLocalApi() {
-    setApiState('loading')
-    try {
-      const ensured = await window.archerDesktop?.ensureApi?.()
-      if (ensured && !ensured.ok) {
-        if (ensured.reason === 'token_mismatch') {
-          setApiState(getDesktopApiToken() ? 'bad_token' : 'missing_token')
-          return
-        }
-        if (ensured.reason === 'missing_python') {
-          setApiState('error')
-          return
-        }
-        setApiState('api_offline')
-        return
+  const connectInFlightRef = React.useRef<Promise<void> | null>(null)
+
+  async function connectLocalApi(options: { silent?: boolean } = {}) {
+    if (connectInFlightRef.current) {
+      await connectInFlightRef.current
+      return
+    }
+
+    const run = (async () => {
+      if (!options.silent) {
+        setApiState('loading')
+        setApiReason('')
       }
-      const adapter = await loadLocalArcher()
-      setData(adapter)
-      setConversationMode(adapter.modes.current || 'auto')
-      setApiState('connected')
-    } catch (error) {
-      setData((current) => (current.status.adapter === 'local' ? current : mockArcher))
-      const message = error instanceof Error ? error.message : ''
-      if (message.includes('[unauthorized]')) setApiState(getDesktopApiToken() ? 'bad_token' : 'missing_token')
-      else if (message.includes('[missing_token]')) setApiState('missing_token')
-      else if (message.includes('[network]')) setApiState('api_offline')
-      else setApiState('error')
+      const result = await syncBrainData({ previous: data, silent: options.silent })
+      if (result.adapter) {
+        setData(result.adapter)
+        if (result.state === 'connected') {
+          setConversationMode(result.adapter.modes.current || 'auto')
+        }
+      } else if (!wasBrainEverLinked()) {
+        setData(mockArcher)
+      }
+      setApiState(result.state)
+      setApiReason(result.reason || '')
+      if (result.state === 'connected') {
+        setApiBannerDismissed(false)
+      }
+    })()
+
+    connectInFlightRef.current = run
+    try {
+      await run
+    } finally {
+      if (connectInFlightRef.current === run) {
+        connectInFlightRef.current = null
+      }
     }
   }
 
-  const pendingMemoryCount = data.memory.filter((m) => m.status === 'pending').length
+  async function patchExpertWorkbench() {
+    const snapshot = await fetchLocalExpertWorkbench()
+    setData((current) => ({
+      ...current,
+      experts: snapshot.experts,
+      status: {
+        ...current.status,
+        ...snapshot.status,
+        adapter: 'local',
+      },
+      settings: {
+        ...current.settings,
+        activeExpert: snapshot.experts.current,
+        experts: snapshot.experts.experts,
+      },
+    }))
+  }
 
-  const sidebarNavItems: Array<{ route: Route; icon: React.ElementType; label: string; hint: string; touchCount?: number }> = [
-    { route: 'Chat', icon: MessageSquare, label: '对话', hint: activeSession ? '查看中' : '' },
-    { route: 'Sessions', icon: History, label: '会话', hint: `${data.sessions.length} 条` },
-    { route: 'Tasks', icon: ListChecks, label: '任务', hint: data.status.adapter === 'local' ? '后台' : '' },
-    { route: 'Memory', icon: Brain, label: '记忆', hint: `${pendingMemoryCount ? `${pendingMemoryCount} 待确认 · ` : ''}${data.memory.filter((m) => m.status === 'confirmed').length} 已保存`, touchCount: pendingMemoryCount || undefined },
-    { route: 'Soul', icon: Layers, label: 'Soul', hint: '人格档案' },
-    { route: 'Settings', icon: Settings, label: '设置', hint: '' },
+  function patchMemoryItems(memory: ArcherAdapter['memory']) {
+    setData((current) => ({
+      ...current,
+      memory,
+      status: {
+        ...current.status,
+        pendingMemoryCount: memory.filter((item) => item.status === 'pending').length,
+        memoryCount: memory.filter((item) => item.status === 'confirmed').length,
+      },
+    }))
+  }
+
+  function handleInitiativeEvent(event: InitiativeEvent) {
+    setData((current) => ({
+      ...current,
+      initiativeShadow: mergeInitiativeShadowEvent(current.initiativeShadow, event),
+    }))
+  }
+
+  const pendingMemoryCount = data.memory.filter((m) => m.status === 'pending').length
+  const sidebarTaskGroups = React.useMemo(() => buildSidebarTaskGroups(data.sessions, projects, data.threads), [data.sessions, projects, data.threads])
+
+  const sidebarNavItems: Array<{ route: Route; icon: React.ElementType; label: string; touchCount?: number }> = [
+    { route: 'Chat', icon: MessageSquare, label: '对话' },
+    { route: 'Memory', icon: Brain, label: '记忆', touchCount: pendingMemoryCount || undefined },
+    { route: 'Skills', icon: Wrench, label: '技能' },
+    { route: 'Projects', icon: Folder, label: '项目' },
   ]
 
+  function createProject() {
+    const nextProjects = writeSidebarProjects(createSidebarProject(projects, '新项目'))
+    setProjects(nextProjects)
+    const nextProject = nextProjects[nextProjects.length - 1]
+    setSelectedProjectId(nextProject?.id || '')
+    setRoute('Projects')
+  }
+
+  function buildSessionDetailFromSave(messages: SessionDetail['messages'], savedSession: SavedSession): SessionDetail {
+    const firstUser = messages.find((message) => message.role === 'user')?.text.trim().replace(/\s+/g, ' ') || savedSession.id
+    return {
+      id: savedSession.id,
+      title: firstUser.slice(0, 42),
+      date: savedSession.id.slice(0, 8),
+      turns: Math.max(1, Math.floor(messages.filter((message) => message.role !== 'system').length / 2)),
+      tone: 'saved',
+      threadId: savedSession.threadId,
+      messages,
+    }
+  }
+
+  function upsertSavedSessionSnapshot(messages: SessionDetail['messages'], savedSession: SavedSession) {
+    const detail = buildSessionDetailFromSave(messages, savedSession)
+    setData((current) => {
+      const sessionItem = {
+        id: detail.id,
+        title: detail.title,
+        date: detail.date,
+        turns: detail.turns,
+        tone: detail.tone,
+        threadId: detail.threadId,
+        preview: messages.find((message) => message.role === 'user')?.text.slice(0, 60),
+      }
+      const nextSessions = current.sessions.some((session) => session.id === detail.id)
+        ? current.sessions.map((session) => session.id === detail.id ? { ...session, ...sessionItem } : session)
+        : [sessionItem, ...current.sessions]
+      if (!detail.threadId) {
+        return { ...current, sessions: nextSessions }
+      }
+      const summary = summarizeThreadMessages(messages)
+      const existingThread = current.threads.find((thread) => thread.id === detail.threadId)
+      const thread = {
+        id: detail.threadId,
+        title: existingThread?.title || detail.title,
+        summary,
+        createdAt: existingThread?.createdAt || new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        sessionIds: Array.from(new Set([...(existingThread?.sessionIds || []), detail.id])),
+        projectId: existingThread?.projectId,
+        archived: existingThread?.archived,
+      }
+      return {
+        ...current,
+        sessions: nextSessions,
+        threads: existingThread
+          ? current.threads.map((item) => item.id === thread.id ? thread : item)
+          : [thread, ...current.threads],
+      }
+    })
+  }
+
   React.useEffect(() => {
-    const timer = setTimeout(connectLocalApi, 800)
+    const timer = setTimeout(() => { void connectLocalApi() }, 200)
     return () => clearTimeout(timer)
   }, [])
 
   React.useEffect(() => {
-    setApiBannerDismissed(false)
+    if (apiState === 'connected' || apiState === 'loading') return
+    const timer = setInterval(() => { void connectLocalApi({ silent: true }) }, 3000)
+    return () => clearInterval(timer)
   }, [apiState])
 
   React.useEffect(() => {
@@ -190,7 +338,6 @@ function App() {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [])
 
-  const showApiError = (apiState === 'bad_token' || apiState === 'error' || apiState === 'api_offline' || apiState === 'missing_token') && !apiBannerDismissed
 
   return (
     <div className={`app-shell ${sidebarOpen ? 'has-sidebar' : 'focus-mode'}`}>
@@ -234,63 +381,132 @@ function App() {
           </button>
         </div>
 
-        <div className="sidebar-body" aria-label="主导航">
-          {sidebarNavItems.map((item) => {
-            const Icon = item.icon
-            return (
-              <button
-                key={item.route}
-                className={`sidebar-nav-item ${route === item.route ? 'active' : ''}`}
-                type="button"
-                onClick={() => setRoute(item.route)}
-              >
-                <Icon size={17} />
-                <span>
-                  <strong>{item.label}</strong>
-                  <em>{item.hint}</em>
-                </span>
-                                {Boolean(item.touchCount) && <small className="sidebar-nav-badge">{item.touchCount}</small>}
+        <div className="sidebar-body">
+          <nav className="sidebar-main-nav" aria-label="主导航">
+            {sidebarNavItems.map((item) => {
+              const Icon = item.icon
+              return (
+                <button
+                  key={item.route}
+                  className={`sidebar-nav-item ${route === item.route ? 'active' : ''}`}
+                  type="button"
+                  onClick={() => setRoute(item.route)}
+                >
+                  <Icon size={17} />
+                  <span>
+                    <strong>{item.label}</strong>
+                  </span>
+                  {Boolean(item.touchCount) && <small className="sidebar-nav-badge">{item.touchCount}</small>}
+                </button>
+              )
+            })}
+          </nav>
+
+          <section className="sidebar-task-list" aria-label="任务列表">
+            <div className="sidebar-list-head">
+              <span>任务列表</span>
+              <small>{sidebarTaskGroups.unassignedThreads.length}</small>
+            </div>
+            <div className="sidebar-rows">
+              {sidebarTaskGroups.unassignedThreads.map((thread) => (
+                <button
+                  key={thread.id}
+                  className={`sidebar-session-row ${thread.id === activeSession?.threadId || thread.sessionIds.includes(activeSession?.id || '') ? 'active' : ''}`}
+                  type="button"
+                  onClick={() => void openSession(thread.latestSession)}
+                  title={thread.title}
+                >
+                  <span>{thread.title}</span>
+                  <em>{thread.sessions.length > 1 ? `${thread.sessions.length} 次` : thread.date}</em>
+                </button>
+              ))}
+              {!sidebarTaskGroups.unassignedThreads.length && (
+                <p className="sidebar-empty-hint">没有未归属项目的对话</p>
+              )}
+            </div>
+          </section>
+
+          <section className="sidebar-project-list" aria-label="项目文件夹">
+            <div className="sidebar-list-head">
+              <span>文件夹</span>
+              <button type="button" onClick={createProject} title="创建项目" aria-label="创建项目">
+                <FolderPlus size={14} />
               </button>
-            )
-          })}
+            </div>
+            <div className="sidebar-rows">
+              {projects.map((project) => (
+                <button
+                  key={project.id}
+                  className={`sidebar-project-row ${route === 'Projects' && selectedProjectId === project.id ? 'active' : ''}`}
+                  type="button"
+                  onClick={() => {
+                    setSelectedProjectId(project.id)
+                    setRoute('Projects')
+                  }}
+                  title={project.name}
+                >
+                  <Folder size={15} />
+                  <span>{project.name}</span>
+                  <em>{project.threadIds.length || project.sessionIds.length}</em>
+                </button>
+              ))}
+              {!projects.length && (
+                <button className="sidebar-project-empty" type="button" onClick={createProject}>
+                  <FolderPlus size={15} />
+                  创建项目
+                </button>
+              )}
+            </div>
+          </section>
         </div>
 
         <footer className="sidebar-footer">
+          {apiState !== 'connected' && apiState !== 'loading' && !apiBannerDismissed && (
+            <div className="api-error" role="status">
+              <span>
+                <strong>本地 API 未连接</strong>
+                <em>{apiReason || '需要启动本地 API'}</em>
+              </span>
+              <button type="button" onClick={() => setApiBannerDismissed(true)} title="隐藏连接提示">
+                隐藏连接提示
+              </button>
+            </div>
+          )}
           <button
             type="button"
             className="profile-footer"
             onClick={() => setProfileOpen((open) => !open)}
-            title="连接与模型状态"
+            title="个人中心"
           >
-            <span>
-              <strong>{connectionStatusLabel(apiState, data.status.adapter === 'local')}</strong>
-              <em>
-                {modelLabelFromStatus(data.status.model)}
-                {' · '}
-                {modeLabelFromId(data.status.mode || data.modes.current, data.modes.modes)}
-              </em>
+            <ProfileAvatar avatarUrl={profileAvatarUrl} size="footer" />
+            <span className="profile-footer-copy">
+              <strong>{profileName}</strong>
+              <em>{connectionStatusLabel(apiState, data.status.adapter === 'local')}</em>
             </span>
             <span className={`conn-dot ${apiState === 'connected' ? 'live' : ''}`} aria-hidden="true" />
           </button>
+          {profileOpen && (
+            <ProfilePanel
+              data={data}
+              apiState={apiState}
+              profileName={profileName}
+              profileAvatarUrl={profileAvatarUrl}
+              setProfileAvatarUrl={setProfileAvatarUrl}
+              theme={theme}
+              setTheme={setTheme}
+              onClose={() => setProfileOpen(false)}
+              onNavigate={(nextRoute) => {
+                setRoute(nextRoute)
+                setProfileOpen(false)
+              }}
+            />
+          )}
         </footer>
       </aside>
 
       {/* ── Main workspace ── */}
       <main className="workspace">
         <section className="page-frame">
-          {showApiError && (
-            <div className="api-error">
-              <span>
-                <strong>{apiStateLabel(apiState)}</strong>
-                <em>{apiStateHelp(apiState)}</em>
-              </span>
-              <button type="button" onClick={connectLocalApi}>重试</button>
-              <button type="button" onClick={() => setRoute('Settings')}>设置</button>
-              <button type="button" onClick={() => setApiBannerDismissed(true)} aria-label="隐藏连接提示">
-                <X size={13} />
-              </button>
-            </div>
-          )}
           {route === 'Chat' && (
             <ChatPage
               key={chatKey}
@@ -300,21 +516,55 @@ function App() {
               activeSession={activeSession}
               sessionLoadState={sessionLoadState}
               sessionLoadError={sessionLoadError}
+              resetRuntimeOnMount={chatKey > 0 && !activeSession}
               onNavigate={setRoute}
+              onInitiativeEvent={handleInitiativeEvent}
               onRefresh={connectLocalApi}
-              onSessionAppended={(messages) => {
-                setActiveSession((current) =>
-                  current
-                    ? { ...current, messages, turns: Math.max(1, Math.floor(messages.filter((message) => message.role !== 'system').length / 2)) }
-                    : current
-                )
+              onExpertSwitch={patchExpertWorkbench}
+              onSessionAppended={(messages, savedSession) => {
+                if (savedSession) upsertSavedSessionSnapshot(messages, savedSession)
+                setActiveSession((current) => {
+                  if (current) {
+                    return {
+                      ...current,
+                      threadId: savedSession?.threadId || current.threadId,
+                      messages,
+                      turns: Math.max(1, Math.floor(messages.filter((message) => message.role !== 'system').length / 2)),
+                    }
+                  }
+                  return savedSession ? buildSessionDetailFromSave(messages, savedSession) : current
+                })
               }}
             />
           )}
-          {route === 'Sessions' && <SessionsPage data={data} onRefresh={connectLocalApi} onOpenSession={openSession} />}
+          {route === 'Sessions' && (
+            <ReviewPage
+              data={data}
+              onRefresh={connectLocalApi}
+              onOpenSession={openSession}
+              onNavigate={setRoute}
+              onMemoryItemsChange={patchMemoryItems}
+            />
+          )}
+          {route === 'Today' && <TodayPage data={data} onRefresh={connectLocalApi} />}
           {route === 'Tasks' && <TasksPage data={data} />}
-          {route === 'Memory' && <MemoryPage data={data} onRefresh={connectLocalApi} />}
+          {route === 'Memory' && <MemoryPage
+            data={data}
+            onRefresh={connectLocalApi}
+            onMemoryItemsChange={patchMemoryItems}
+          />}
           {route === 'Skills' && <SkillsPage data={data} onRefresh={connectLocalApi} />}
+          {route === 'Projects' && (
+            <ProjectsPage
+              data={data}
+              projects={projects}
+              selectedProjectId={selectedProjectId}
+              onProjectsChange={setProjects}
+              onProjectSelect={setSelectedProjectId}
+              onOpenSession={(session) => void openSession(session)}
+              onCreateProject={createProject}
+            />
+          )}
           {route === 'Soul' && <SoulPage data={data} onRefresh={connectLocalApi} />}
           {route === 'Settings' && (
             <SettingsPage
@@ -328,36 +578,45 @@ function App() {
               conversationMode={conversationMode}
               setConversationMode={setConversationMode}
               apiState={apiState}
+              apiReason={apiReason}
               onRefresh={connectLocalApi}
               onNavigate={setRoute}
             />
           )}
         </section>
-        {profileOpen && (
-          <ProfilePanel
-            data={data}
-            apiState={apiState}
-            profileName={profileName}
-            setProfileName={setProfileName}
-            theme={theme}
-            setTheme={setTheme}
-            onClose={() => setProfileOpen(false)}
-            onNavigate={(nextRoute) => {
-              setRoute(nextRoute)
-              setProfileOpen(false)
-            }}
-          />
-        )}
       </main>
     </div>
   )
+}
+
+function summarizeThreadMessages(messages: SessionDetail['messages']): string {
+  const firstUser = messages.find((message) => message.role === 'user')?.text.trim()
+  const recentUser = [...messages].reverse().find((message) => message.role === 'user')?.text.trim()
+  const recentAssistant = [...messages].reverse().find((message) => message.role === 'assistant')?.text.trim()
+  const parts: string[] = []
+  if (firstUser) parts.push(`目标：${compactSummaryText(firstUser, 120)}`)
+  if (recentUser && recentUser !== firstUser) parts.push(`最近问题：${compactSummaryText(recentUser, 120)}`)
+  if (recentAssistant) parts.push(`最近结论：${compactSummaryText(recentAssistant, 180)}`)
+  return parts.join('\n')
+}
+
+function compactSummaryText(value: string, limit: number): string {
+  return value.replace(/\s+/g, ' ').trim().slice(0, limit)
+}
+
+function ProfileAvatar({ avatarUrl, size = 'menu' }: { avatarUrl: string; size?: 'menu' | 'footer' }) {
+  if (avatarUrl) {
+    return <img className={`profile-avatar profile-avatar-${size}`} src={avatarUrl} alt="" />
+  }
+  return <ArcherRing living />
 }
 
 function ProfilePanel({
   data,
   apiState,
   profileName,
-  setProfileName,
+  profileAvatarUrl,
+  setProfileAvatarUrl,
   theme,
   setTheme,
   onClose,
@@ -366,265 +625,103 @@ function ProfilePanel({
   data: ArcherAdapter
   apiState: ApiConnectionState
   profileName: string
-  setProfileName: (value: string) => void
+  profileAvatarUrl: string
+  setProfileAvatarUrl: (value: string) => void
   theme: Theme
   setTheme: (value: Theme) => void
   onClose: () => void
   onNavigate: (route: Route) => void
 }) {
-  const soulLoaded = Object.values(data.soulFiles).some((content) => content.trim().length > 0)
+  const avatarInputRef = React.useRef<HTMLInputElement>(null)
   const statusText = connectionStatusLabel(apiState, data.status.adapter === 'local')
-  const modeText = modeLabelFromId(data.status.mode || data.modes.current, data.modes.modes)
-  const personaNote = personaPresetFromMode(data.modes.current).label
+  const expertText = expertShortLabel(
+    data.experts?.current || data.status.expertId,
+    data.experts?.experts ?? [],
+    data.status.expertLabel,
+  )
+  const modelText = modelProfileShortLabel(data.settings.activeProfile || data.status.modelProfile)
+  const themeLabel = theme === 'dark' ? '深色' : '亮色'
+
+  function openSettings(tab: 'model' | 'context' | 'local' | 'appearance' | 'schedules' | 'diagnostics' = 'model') {
+    sessionStorage.setItem('archer-settings-tab', tab)
+    onNavigate('Settings')
+  }
+
+  function chooseAvatar(file: File | undefined) {
+    if (!file || !file.type.startsWith('image/')) return
+    const reader = new FileReader()
+    reader.onload = () => {
+      if (typeof reader.result === 'string') {
+        setProfileAvatarUrl(reader.result)
+      }
+    }
+    reader.readAsDataURL(file)
+  }
 
   return (
     <aside className="profile-panel">
-      <div className="panel-head">
-        <div>
-          <span className="panel-kicker">个人中心</span>
-          <h2>本地 Archer</h2>
+      <div className="profile-menu-head">
+        <ProfileAvatar avatarUrl={profileAvatarUrl} />
+        <div className="profile-menu-identity">
+          <strong>{profileName}</strong>
+          <span>{expertText}</span>
         </div>
+        <span className="profile-menu-pill">{modelText}</span>
         <button className="icon-button" type="button" onClick={onClose} aria-label="关闭个人中心">
           <X size={15} />
         </button>
       </div>
 
-      <label className="profile-field">
-        <span>昵称</span>
-        <input value={profileName} onChange={(event) => setProfileName(event.target.value)} placeholder="Archer 怎么称呼你？" />
-      </label>
+      <input
+        ref={avatarInputRef}
+        className="profile-avatar-input"
+        type="file"
+        accept="image/*"
+        onChange={(event) => chooseAvatar(event.currentTarget.files?.[0])}
+      />
 
-      <label className="profile-field">
-        <span>邮箱</span>
-        <input value={data.status.accountName || '本地模式未绑定邮箱'} readOnly aria-readonly />
-      </label>
+      <button className="profile-account-card" type="button" onClick={() => avatarInputRef.current?.click()}>
+        <UserRoundCog size={16} />
+        <span>
+          <strong>个人资料</strong>
+          <em>修改头像与昵称</em>
+        </span>
+        <ChevronRight size={15} />
+      </button>
 
-      <div className="profile-mode-row">
-        <button className={theme === 'light' ? 'active' : ''} type="button" onClick={() => setTheme('light')}>
-          <Sun size={14} />
-          浅色
-        </button>
-        <button className={theme === 'dark' ? 'active' : ''} type="button" onClick={() => setTheme('dark')}>
-          <Moon size={14} />
-          深色
+      <div className="profile-menu-section">
+        <button className="profile-menu-item" type="button" onClick={() => openSettings('local')}>
+          <span>管理账号</span>
+          <ChevronRight size={16} />
         </button>
       </div>
 
-      <div className="profile-status-grid">
-        <div>
-          <span>连接</span>
-          <strong>{statusText}</strong>
-        </div>
-        <div>
-          <span>模型</span>
-          <strong>{modelLabelFromStatus(data.status.model) || '未读取'}</strong>
-        </div>
-        <div>
-          <span>姿态</span>
-          <strong>{modeText}{data.modes.current === 'auto' ? '' : ` · ${personaNote}`}</strong>
-        </div>
-        <div>
-          <span>记忆</span>
-          <strong>{data.status.memoryCount}{data.status.pendingMemoryCount ? ` (+${data.status.pendingMemoryCount} 待确认)` : ''}</strong>
-        </div>
+      <div className="profile-menu-section">
+        <button className="profile-menu-item" type="button" onClick={() => openSettings('appearance')}>
+          <span>语言</span>
+          <strong>简体中文</strong>
+          <ChevronRight size={16} />
+        </button>
+        <button className="profile-menu-item" type="button" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>
+          <span>主题</span>
+          <strong>{themeLabel}</strong>
+          <ChevronRight size={16} />
+        </button>
+        <button className="profile-menu-item" type="button" onClick={() => openSettings('model')}>
+          <span>设置</span>
+          <ChevronRight size={16} />
+        </button>
+        <button className="profile-menu-item" type="button" onClick={() => openSettings('diagnostics')}>
+          <span>报告问题</span>
+          <ChevronRight size={16} />
+        </button>
       </div>
 
-      <div className="panel-actions">
-        <button type="button" onClick={() => onNavigate('Soul')}>
-          <Layers size={14} />
-          打开 Soul
-        </button>
-        <button type="button" onClick={() => onNavigate('Settings')}>
-          <Settings size={14} />
-          连接设置
-        </button>
-        <button type="button" onClick={() => onNavigate('Memory')}>
-          <Brain size={14} />
-          查看本地状态
-        </button>
+      <div className="profile-menu-status">
+        <span>{statusText}</span>
+        <span>记忆 {data.status.memoryCount}</span>
       </div>
     </aside>
-  )
-}
-
-function apiStateLabel(apiState: ApiConnectionState, isLocal = false): string {
-  return connectionStatusLabel(apiState, isLocal)
-}
-
-function apiStateHelp(apiState: ApiConnectionState): string {
-  if (apiState === 'missing_token') return '在设置中填入本地 API 的连接口令。'
-  if (apiState === 'bad_token') return '口令与终端启动参数不一致。'
-  if (apiState === 'api_offline') return '点「重试」会自动从 ~/Projects/Archer 拉起大脑进程。'
-  if (apiState === 'error') return '需要启动本地 API，或检查口令和模型配置。'
-  return '大脑未连接，当前为示例数据。'
-}
-
-function SessionsPage({
-  data,
-  onRefresh,
-  onOpenSession
-}: {
-  data: ArcherAdapter
-  onRefresh: () => Promise<void>
-  onOpenSession: (session: ArcherAdapter['sessions'][number]) => void
-}) {
-  const [selectedId, setSelectedId] = React.useState(data.sessions[0]?.id ?? '')
-  const [detail, setDetail] = React.useState<SessionDetail | null>(null)
-  const [detailState, setDetailState] = React.useState<'idle' | 'loading' | 'error'>('idle')
-  const [query, setQuery] = React.useState('')
-
-  React.useEffect(() => {
-    setSelectedId(data.sessions[0]?.id ?? '')
-    setDetail(null)
-    setDetailState('idle')
-  }, [data])
-
-  React.useEffect(() => {
-    if (!selectedId || data.status.adapter !== 'local') {
-      setDetail(null)
-      setDetailState('idle')
-      return
-    }
-    let cancelled = false
-    setDetailState('loading')
-    loadLocalSession(selectedId)
-      .then((value) => {
-        if (cancelled) return
-        setDetail(value)
-        setDetailState('idle')
-      })
-      .catch(() => {
-        if (cancelled) return
-        setDetail(null)
-        setDetailState('error')
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [selectedId, data.status.adapter])
-
-  const now = new Date()
-  const todayStr = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`
-  const yd = new Date(now); yd.setDate(yd.getDate() - 1)
-  const yesterdayStr = `${yd.getFullYear()}${String(yd.getMonth() + 1).padStart(2, '0')}${String(yd.getDate()).padStart(2, '0')}`
-
-  function groupLabel(date: string): string {
-    if (date === todayStr || date === '今天') return '今天'
-    if (date === yesterdayStr || date === '昨天') return '昨天'
-    return '更早'
-  }
-
-  const cleanQuery = query.trim().toLowerCase()
-  const visibleSessions = React.useMemo(() => (
-    cleanQuery
-      ? data.sessions.filter((session) => {
-        const haystack = [session.title, session.preview, session.date, session.tone].filter(Boolean).join(' ').toLowerCase()
-        return haystack.includes(cleanQuery)
-      })
-      : data.sessions
-  ), [cleanQuery, data.sessions])
-  const selected = visibleSessions.find((session) => session.id === selectedId) ?? visibleSessions[0]
-
-  React.useEffect(() => {
-    if (visibleSessions.length && !visibleSessions.some((session) => session.id === selectedId)) {
-      setSelectedId(visibleSessions[0].id)
-    }
-  }, [selectedId, visibleSessions])
-
-  const grouped: { label: string; sessions: typeof data.sessions }[] = []
-  for (const session of visibleSessions) {
-    const label = groupLabel(session.date)
-    const existing = grouped.find((g) => g.label === label)
-    if (existing) existing.sessions.push(session)
-    else grouped.push({ label, sessions: [session] })
-  }
-
-  return (
-    <div className="split-page">
-      <div className="list-column">
-        <div className="sessions-head">
-          <div>
-            <h1>历史对话</h1>
-            <p>{data.status.adapter === 'local' ? '本地会话' : '示例会话'}</p>
-          </div>
-          <span>{visibleSessions.length}</span>
-        </div>
-        <div className="list-toolbar">
-          <SearchBox placeholder="搜索会话" value={query} onChange={setQuery} />
-          <button className="quiet-button" type="button" onClick={onRefresh}>
-            刷新
-          </button>
-        </div>
-        {grouped.length ? grouped.map((group) => (
-          <React.Fragment key={group.label}>
-            <div className="session-group-label">{group.label}</div>
-            {group.sessions.map((session) => (
-              <button
-                className={`list-row ${selected?.id === session.id ? 'active' : ''}`}
-                key={session.id}
-                type="button"
-                onClick={() => setSelectedId(session.id)}
-              >
-                <div>
-                  <strong>{session.title}</strong>
-                  <span>
-                    {session.turns} 轮 · {session.tone}
-                  </span>
-                  {session.preview && (
-                    <span className="session-preview">"{session.preview}"</span>
-                  )}
-                </div>
-                <ChevronRight size={16} />
-              </button>
-            ))}
-          </React.Fragment>
-        )) : (
-          <div className="empty-inline">无匹配会话</div>
-        )}
-      </div>
-      {selected ? (
-        <div className="session-detail">
-          <div className="session-detail-head">
-            <div className="session-detail-icon"><History size={18} /></div>
-            <div>
-              <h2>{selected.title}</h2>
-              <p>{data.status.adapter === 'local' ? '只读预览，恢复后可续写。' : '连接本地服务后读取完整消息。'}</p>
-            </div>
-            <button className="quiet-button strong session-open-button" type="button" onClick={() => onOpenSession(selected)}>
-              恢复
-            </button>
-          </div>
-          <dl>
-            <div>
-              <dt>日期</dt>
-              <dd>{selected.date}</dd>
-            </div>
-            <div>
-              <dt>轮次</dt>
-              <dd>{selected.turns}</dd>
-            </div>
-            <div>
-              <dt>模式</dt>
-              <dd>{selected.tone}</dd>
-            </div>
-          </dl>
-          {detailState === 'loading' && <p className="detail-muted">读取中…</p>}
-          {detailState === 'error' && <p className="detail-error">会话读取失败</p>}
-          {detail?.messages.length ? (
-            <div className="session-message-list">
-              {detail.messages.map((message) => (
-                <article className={`session-message ${message.role}`} key={message.id}>
-                  <span>{message.role}</span>
-                  <p>{message.text}</p>
-                </article>
-              ))}
-            </div>
-          ) : null}
-        </div>
-      ) : (
-        <EmptyDetail icon={History} title="暂无会话" text="本地 sessions 目录为空。" />
-      )}
-    </div>
   )
 }
 

@@ -1,0 +1,9 @@
+{
+  "id": "archer-sensor",
+  "name": "Archer Sensor",
+  "version": "0.1.0",
+  "minAppVersion": "1.5.0",
+  "description": "Send the current Obsidian note focus to Archer Desktop.",
+  "author": "Yivxer",
+  "isDesktopOnly": true
+}

@@ -159,7 +159,7 @@ def _onboard() -> dict | None:
         }
     }
     try:
-        CONFIG_PATH.write_bytes(tomli_w.dumps(cfg))
+        CONFIG_PATH.write_text(tomli_w.dumps(cfg), encoding="utf-8")
         console.print()
         console.print(f"  [#4dd9d4]✓[/#4dd9d4] 配置已写入 [dim]{CONFIG_PATH}[/dim]")
         console.print()
@@ -235,10 +235,13 @@ def _help(show_all: bool = False):
 def _status(session, skills: dict, cfg: dict, active_project_id: int | None = None):
     from memory.store import list_all as mem_list_all
     from core.artifacts import dir_size, fmt_size
+    from core.model_profiles import active_api_config, active_model_profile_id
     mem_count     = len(mem_list_all(999))
     pending_count = count_pending()
     history_turns = len(session.history) // 2
-    model         = cfg["api"]["model"]
+    api           = active_api_config(cfg)
+    profile       = active_model_profile_id(cfg)
+    model         = api["model"]
     modes         = cfg.get("persona", {}).get("modes", {})
     current_mode  = cfg["persona"].get("current_mode", cfg["persona"].get("default_mode", "coach"))
     mode_name     = modes.get(current_mode, {}).get("name", current_mode)
@@ -248,7 +251,7 @@ def _status(session, skills: dict, cfg: dict, active_project_id: int | None = No
     last_usage = get_last_usage()
     last_total = last_usage.get("total_tokens", 0)
     console.print(f"  [#4dd9d4 bold]Archer {_VERSION}[/#4dd9d4 bold]")
-    console.print(f"  模型        {model}")
+    console.print(f"  模型        {profile} · {model}")
     console.print(f"  模式        [dim]{mode_name}[/dim]")
     console.print(f"  上下文      {used} / {limit}")
     if last_total:

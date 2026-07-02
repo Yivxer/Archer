@@ -213,7 +213,7 @@ def schema() -> dict:
     }
 
 
-def run(args: dict) -> str:
+def _run_impl(args: dict) -> str:
     action = args.get("action", "").strip()
     session_id = args.get("session_id", "").strip()
     screenshot = bool(args.get("take_screenshot", False))
@@ -271,3 +271,10 @@ def run(args: dict) -> str:
         f"错误：未知 action「{action}」\n"
         "可用 action：navigate / click / type_text / scroll / screenshot / extract / close"
     )
+
+
+def run(args: dict) -> str:
+    try:
+        return _run_impl(args)
+    except Exception as e:
+        return f"浏览器自动化失败：{type(e).__name__}: {e}"

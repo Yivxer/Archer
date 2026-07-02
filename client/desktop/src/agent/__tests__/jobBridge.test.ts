@@ -47,4 +47,21 @@ describe('job bridge', () => {
     expect(event.status).toBe('failed')
     expect(event.detail).toBe('boom')
   })
+
+  it('marks stale cancelled jobs with a timeout detail', () => {
+    const event = jobSnapshotToAgentEvent('session-1', {
+      id: 'job-1',
+      title: '后台分析',
+      status: 'cancelled',
+      result: '',
+      error: 'job stale: no progress for 900s',
+      stale: true,
+      createdAt: '2026-06-02T10:00:00.000Z',
+      updatedAt: '2026-06-02T10:15:00.000Z',
+    })
+
+    expect(event.status).toBe('cancelled')
+    expect(event.stale).toBe(true)
+    expect(event.detail).toBe('任务长时间没有进展，已自动取消。job stale: no progress for 900s')
+  })
 })

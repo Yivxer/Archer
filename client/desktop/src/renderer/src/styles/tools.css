@@ -146,6 +146,66 @@
   line-height: 1.55;
 }
 
+/* ── Obsidian 写入 diff 预览 ─────────────────────────────────────────── */
+.obsidian-diff-preview {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.diff-side {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.diff-side em {
+  color: var(--muted);
+  font-size: 10px;
+  font-style: normal;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.diff-side pre {
+  margin: 0;
+  max-height: 220px;
+  overflow: auto;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--field) 50%, transparent);
+  color: var(--text);
+  font-family: "SF Mono", "Fira Code", monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.diff-before pre {
+  border-color: color-mix(in srgb, var(--orange) 30%, var(--line));
+}
+
+.diff-after pre {
+  border-color: color-mix(in srgb, var(--cyan) 30%, var(--line));
+}
+
+.diff-empty {
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  border: 1px dashed var(--line);
+  border-radius: 6px;
+}
+
+@media (max-width: 720px) {
+  .obsidian-diff-preview {
+    grid-template-columns: 1fr;
+  }
+}
+
 .tool-notice {
   padding: 6px 0 6px 38px;
   color: var(--cyan);

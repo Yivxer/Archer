@@ -302,3 +302,52 @@ def test_sync_schedules_json_writes_mirror(tmp_path):
         assert payload["tasks"][0]["intervalLabel"] == "每天"
     finally:
         sched_mod.SCHEDULES_JSON_PATH = orig_json
+
+
+def test_reflection_scheduler_registers_single_hypothesis_scan_task(tmp_path, monkeypatch):
+    import memory.store as store
+    from core.reflection_scheduler import HYPOTHESIS_SCAN_TASK, ensure_hypothesis_scan_schedule
+
+    monkeypatch.setattr(store, "DB_PATH", tmp_path / "archer.db")
+    store.init_db()
+
+    first_id = ensure_hypothesis_scan_schedule(interval_spec="daily", db_path=store.DB_PATH)
+    second_id = ensure_hypothesis_scan_schedule(interval_spec="daily", db_path=store.DB_PATH)
+    tasks = list_tasks(db_path=store.DB_PATH)
+
+    assert first_id == second_id
+    assert [task["skill_name"] for task in tasks].count(HYPOTHESIS_SCAN_TASK) == 1
+
+
+def test_run_due_tasks_executes_internal_hypothesis_scan(tmp_path, monkeypatch):
+    import memory.store as store
+    from core.reflection_scheduler import HYPOTHESIS_SCAN_TASK
+    from memory.hypothesis_tracker import create_hypothesis
+
+    monkeypatch.setattr(store, "DB_PATH", tmp_path / "archer.db")
+    store.init_db()
+    create_hypothesis(
+        "到期假设",
+        "这条应该被 ReflectionScheduler 扫描到。",
+        validate_after_days=1,
+        now=datetime.now() - timedelta(days=3),
+    )
+    past = (datetime.now() - timedelta(hours=1)).isoformat(timespec="seconds")
+    conn = sqlite3.connect(store.DB_PATH)
+    conn.execute(
+        "INSERT INTO scheduled_tasks (skill_name, interval_h, next_run_at, created_at) VALUES (?,?,?,?)",
+        (HYPOTHESIS_SCAN_TASK, 24, past, past),
+    )
+    conn.commit()
+    conn.close()
+
+    results = run_due_tasks({}, db_path=store.DB_PATH)
+
+    assert len(results) == 1
+    task, tr = results[0]
+    assert task["skill_name"] == HYPOTHESIS_SCAN_TASK
+    assert tr is not None
+    assert tr.ok
+    assert tr.meta["dueCount"] == 1
+    assert "到期假设" in tr.content_preview
+    assert get_due_tasks(db_path=store.DB_PATH) == []

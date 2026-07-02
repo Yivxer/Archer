@@ -6,6 +6,23 @@ function event(id: string, type: AgentEvent['type']): AgentEvent {
   if (type === 'text.delta') {
     return { type, id, sessionId: 's1', createdAt: id, text: id }
   }
+  if (type === 'tool.request') {
+    return {
+      type,
+      id,
+      sessionId: 's1',
+      createdAt: id,
+      toolName: 'obsidian_read',
+      displayName: 'Obsidian Read',
+      risk: 'low',
+      status: 'complete',
+      args: {},
+      summary: id,
+      detail: id,
+      requiresApproval: false,
+      blocked: false,
+    }
+  }
   return {
     type: 'runtime.error',
     id,
@@ -42,17 +59,29 @@ describe('event log', () => {
   it('persists events to storage and reloads them', () => {
     const storage = memoryStorage()
     const log = createPersistentEventLog(storage, 'events')
-    log.append(event('1', 'text.delta'))
+    log.append(event('1', 'tool.request'))
 
     const reloaded = createPersistentEventLog(storage, 'events')
 
     expect(reloaded.all().map((item) => item.id)).toEqual(['1'])
   })
 
+  it('does not persist text stream events', () => {
+    const storage = memoryStorage()
+    const log = createPersistentEventLog(storage, 'events')
+
+    log.append(event('1', 'text.delta'))
+    log.append(event('2', 'tool.request'))
+
+    expect(JSON.parse(storage.getItem('events') || '[]').map((item: AgentEvent) => item.id)).toEqual(['2'])
+    expect(createPersistentEventLog(storage, 'events').all().map((item) => item.id)).toEqual(['2'])
+  })
+
   it('ignores malformed persisted events', () => {
     const storage = memoryStorage()
     storage.setItem('events', JSON.stringify([
-      event('1', 'text.delta'),
+      event('1', 'tool.request'),
+      event('text', 'text.delta'),
       { type: 'unknown', id: 'bad' },
     ]))
 
@@ -61,10 +90,24 @@ describe('event log', () => {
     expect(log.all().map((item) => item.id)).toEqual(['1'])
   })
 
+  it('keeps only the latest 200 persisted events', () => {
+    const storage = memoryStorage()
+    const log = createPersistentEventLog(storage, 'events')
+
+    for (let index = 0; index < 205; index += 1) {
+      log.append(event(String(index), 'tool.request'))
+    }
+
+    const persisted = JSON.parse(storage.getItem('events') || '[]') as AgentEvent[]
+    expect(persisted).toHaveLength(200)
+    expect(persisted[0].id).toBe('5')
+    expect(persisted[199].id).toBe('204')
+  })
+
   it('clears persisted events', () => {
     const storage = memoryStorage()
     const log = createPersistentEventLog(storage, 'events')
-    log.append(event('1', 'text.delta'))
+    log.append(event('1', 'tool.request'))
     log.clear()
 
     expect(storage.getItem('events')).toBeNull()

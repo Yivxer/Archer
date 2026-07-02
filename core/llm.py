@@ -1,10 +1,11 @@
 import os
 import tomllib
 from pathlib import Path
-from openai import APIConnectionError, APITimeoutError, OpenAI
+from openai import APIConnectionError, APIStatusError, APITimeoutError, OpenAI
 from openai.types.chat import ChatCompletionMessage
 from typing import Generator
 
+from core.model_profiles import cfg_with_active_api
 from core.observability import trace_span
 from core.token_usage import get_last_call_usage, get_session_usage, record_call_usage, reset_session_usage
 
@@ -69,7 +70,7 @@ def _load_config() -> dict:
         return _cfg
     if _cfg is None or mtime > _config_mtime:
         with open(_CONFIG_PATH, "rb") as f:
-            _cfg = _apply_env_overrides(tomllib.load(f))
+            _cfg = cfg_with_active_api(_apply_env_overrides(tomllib.load(f)))
         _config_reloaded = (_config_mtime > 0)  # 初次加载不算"重载"
         _config_mtime = mtime
         if _config_reloaded:
@@ -93,6 +94,17 @@ def _get_client() -> tuple[OpenAI, dict]:
     cfg = _load_config()
     api_key = cfg["api"]["api_key"]
     base_url = cfg["api"]["base_url"]
+    # 配置缺失时抛明确错误，避免 OpenAI SDK 报模糊的 api_key required
+    if not api_key:
+        profile_id = cfg["api"].get("active_profile", "unknown")
+        raise ValueError(
+            f"模型配置 '{profile_id}' 缺少 api_key，请在设置页填写 API Key 后重试"
+        )
+    if not cfg["api"].get("model"):
+        profile_id = cfg["api"].get("active_profile", "unknown")
+        raise ValueError(
+            f"模型配置 '{profile_id}' 缺少 model，请在设置页选择模型后重试"
+        )
     key = (api_key, base_url)
     if _client is None or _client_key != key:
         _client = OpenAI(
@@ -115,6 +127,21 @@ def _connection_hint(base_url: str, err: Exception) -> RuntimeError:
     )
 
 
+def _status_hint(base_url: str, err: APIStatusError) -> RuntimeError:
+    status_code = getattr(err, "status_code", None)
+    if status_code in (401, 403):
+        return RuntimeError(
+            "模型 API 鉴权失败：当前模型档位的 API key 缺失、无效或无权限。"
+            f"base_url={base_url}。请到设置页更新该档位的 API key，并点击模型连通测试。"
+        )
+    if status_code == 429:
+        return RuntimeError(
+            "模型 API 额度或频率受限：当前请求被服务商限流。"
+            f"base_url={base_url}。请稍后重试，或切换其他可用模型档位。"
+        )
+    return RuntimeError(f"模型 API 请求失败：HTTP {status_code or 'unknown'}；base_url={base_url}。")
+
+
 def stream_chat(
     messages: list[dict],
     model: str = "",
@@ -126,14 +153,16 @@ def stream_chat(
     m = model or cfg["api"]["model"]
     base_url = cfg["api"]["base_url"]
 
+    # DeepSeek reasoner 模型不支持 stream_options，且对部分参数有限制
+    # 检测 reasoner 模型时跳过 stream_options，避免 API 返回 400
+    _is_reasoner = "reasoner" in m.lower()
+
     with trace_span("llm.stream_chat", model=m, op="stream") as span:
         try:
-            response = client.chat.completions.create(
-                model=m,
-                messages=messages,
-                stream=True,
-                stream_options={"include_usage": True},
-            )
+            kwargs: dict = {"model": m, "messages": messages, "stream": True}
+            if not _is_reasoner:
+                kwargs["stream_options"] = {"include_usage": True}
+            response = client.chat.completions.create(**kwargs)
         except TypeError:
             # 部分旧版 SDK 或 provider 不支持 stream_options
             response = client.chat.completions.create(
@@ -143,25 +172,29 @@ def stream_chat(
             )
         except (APIConnectionError, APITimeoutError) as e:
             raise _connection_hint(base_url, e) from e
+        except APIStatusError as e:
+            raise _status_hint(base_url, e) from e
 
         call_usage: dict[str, int] | None = None
 
-        for chunk in response:
-            # usage 只在最后一个 chunk 里出现（OpenAI stream_options 规范）
-            if hasattr(chunk, "usage") and chunk.usage and chunk.usage.total_tokens:
-                call_usage = {
-                    "prompt_tokens":     chunk.usage.prompt_tokens or 0,
-                    "completion_tokens": chunk.usage.completion_tokens or 0,
-                    "total_tokens":      chunk.usage.total_tokens or 0,
-                }
+        try:
+            for chunk in response:
+                # usage 只在最后一个 chunk 里出现（OpenAI stream_options 规范）
+                if hasattr(chunk, "usage") and chunk.usage and chunk.usage.total_tokens:
+                    call_usage = {
+                        "prompt_tokens":     chunk.usage.prompt_tokens or 0,
+                        "completion_tokens": chunk.usage.completion_tokens or 0,
+                        "total_tokens":      chunk.usage.total_tokens or 0,
+                    }
 
-            if chunk.choices and chunk.choices[0].delta.content:
-                yield chunk.choices[0].delta.content
-
-        # generator 耗尽后才更新全局，避免多 chunk 重复累加
-        if track_usage and call_usage:
-            record_call_usage(**call_usage)
-            span.update(call_usage)
+                if chunk.choices and chunk.choices[0].delta.content:
+                    yield chunk.choices[0].delta.content
+        finally:
+            # generator 耗尽或被提前关闭（GeneratorExit/close）都记录 usage
+            # 避免客户端断开时 usage 丢失
+            if track_usage and call_usage:
+                record_call_usage(**call_usage)
+                span.update(call_usage)
 
 
 def get_last_usage() -> dict[str, int]:

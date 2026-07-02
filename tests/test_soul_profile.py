@@ -32,6 +32,10 @@ def test_soul_profile_has_required_fields():
         "language_style",
         "important_questions",
         "current_life_stage",
+        "rhythm",
+        "narrative",
+        "tensions",
+        "patterns",
     ]:
         assert hasattr(profile, field), f"SoulProfile 缺少字段：{field}"
 
@@ -82,6 +86,25 @@ def test_prompt_is_capped_at_seven_items():
 
 def test_empty_profile_returns_empty_string():
     assert format_soul_profile_for_prompt(SoulProfile(), intent="chat", user_input="你好") == ""
+
+
+def test_part8_profile_fields_load_and_format():
+    profile = SoulProfile.from_dict(
+        {
+            "rhythm": "夜晚更适合深度对话",
+            "narrative": ["正在把 Archer 从工具推进到伴生体"],
+            "tensions": ["想要主动性，但不能被打扰"],
+            "patterns": ["先搭结构，再小步验证"],
+        }
+    )
+
+    text = format_soul_profile_for_prompt(profile, intent="reflection", user_input="复盘 rhythm 和 tensions")
+
+    assert profile.rhythm == ["夜晚更适合深度对话"]
+    assert "时间节律：夜晚更适合深度对话" in text
+    assert "自我叙事：正在把 Archer 从工具推进到伴生体" in text
+    assert "张力：想要主动性，但不能被打扰" in text
+    assert "行为模式：先搭结构，再小步验证" in text
 
 
 def test_build_system_prompt_injects_compact_soul_profile(tmp_path):

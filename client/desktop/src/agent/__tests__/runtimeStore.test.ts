@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { AgentEvent } from '../contracts'
-import { createInitialRuntimeState, reduceRuntimeEvent } from '../runtimeStore'
+import { createInitialRuntimeState, reduceRuntimeEvent, restoreRuntimeStateFromEvents } from '../runtimeStore'
 
 describe('runtime store reducer', () => {
   it('appends assistant text deltas', () => {
@@ -142,5 +142,124 @@ describe('runtime store reducer', () => {
 
     expect(next.status).toBe('idle')
     expect(next.orchestrations['orch-1']?.labels).toContain('项目规划')
+  })
+
+  it('tracks runtime context and failure hints without changing active status', () => {
+    const withContext = reduceRuntimeEvent(createInitialRuntimeState('session-1'), {
+      type: 'runtime.context',
+      id: 'ctx-1',
+      sessionId: 'session-1',
+      createdAt: '2026-06-28T10:00:00.000Z',
+      task: 'blog_publish',
+      phase: 'execute',
+      userIntent: 'deploy_existing_post',
+      lastResult: 'hugo_file_created',
+      expectedNext: 'build_and_deploy',
+    })
+
+    const withFailure = reduceRuntimeEvent(withContext, {
+      type: 'failure.hint',
+      id: 'failure-1',
+      sessionId: 'session-1',
+      createdAt: '2026-06-28T10:00:01.000Z',
+      keyword: 'command_timeout',
+      stage: 'deploy',
+      recoverable: true,
+      detail: 'deploy timed out',
+    })
+
+    expect(withContext.status).toBe('idle')
+    expect(withContext.runtimeContext?.task).toBe('blog_publish')
+    expect(withFailure.status).toBe('idle')
+    expect(withFailure.failureHints['failure-1']?.keyword).toBe('command_timeout')
+  })
+
+  it('restores state from event replay for one session only', () => {
+    const events: AgentEvent[] = [
+      {
+        type: 'job.event',
+        id: 'job-other',
+        sessionId: 'other-session',
+        createdAt: '2026-06-02T10:00:00.000Z',
+        jobId: 'job-other',
+        title: '其他任务',
+        status: 'running',
+        detail: 'ignore',
+      },
+      {
+        type: 'job.event',
+        id: 'job-1-running',
+        sessionId: 'session-1',
+        createdAt: '2026-06-02T10:01:00.000Z',
+        jobId: 'job-1',
+        title: '后台分析',
+        status: 'running',
+        detail: '后台执行中',
+      },
+      {
+        type: 'plan.event',
+        id: 'plan-1',
+        sessionId: 'session-1',
+        createdAt: '2026-06-02T10:02:00.000Z',
+        title: '执行计划',
+        status: 'proposed',
+        detail: '由事件恢复',
+        steps: [],
+      },
+    ]
+
+    const restored = restoreRuntimeStateFromEvents('session-1', events, {
+      now: Date.parse('2026-06-02T10:05:00.000Z'),
+    })
+
+    expect(restored.status).toBe('running_job')
+    expect(Object.keys(restored.jobs)).toEqual(['job-1'])
+    expect(restored.plans['plan-1']?.detail).toBe('由事件恢复')
+    expect(restored.events.map((event) => event.id)).toEqual(['job-1-running', 'plan-1'])
+  })
+
+  it('marks old active jobs stale during crash recovery restore', () => {
+    const restored = restoreRuntimeStateFromEvents('session-1', [
+      {
+        type: 'job.event',
+        id: 'job-old-running',
+        sessionId: 'session-1',
+        createdAt: '2026-06-02T10:00:00.000Z',
+        jobId: 'job-old',
+        title: '重启前任务',
+        status: 'running',
+        detail: '模型流处理中',
+      },
+    ], {
+      now: Date.parse('2026-06-02T10:20:00.000Z'),
+      activeJobStaleMs: 15 * 60 * 1000,
+    })
+
+    expect(restored.status).toBe('idle')
+    expect(restored.jobs['job-old']?.status).toBe('cancelled')
+    expect(restored.jobs['job-old']?.stale).toBe(true)
+    expect(restored.jobs['job-old']?.detail).toContain('重启后检测到任务长时间无进展')
+  })
+
+  it('keeps recent active jobs running during restore', () => {
+    const restored = restoreRuntimeStateFromEvents('session-1', [
+      {
+        type: 'job.event',
+        id: 'job-recent-running',
+        sessionId: 'session-1',
+        createdAt: '2026-06-02T10:10:00.000Z',
+        jobId: 'job-recent',
+        title: '刚开始的任务',
+        status: 'running',
+        detail: '执行中',
+      },
+    ], {
+      now: Date.parse('2026-06-02T10:20:00.000Z'),
+      activeJobStaleMs: 15 * 60 * 1000,
+    })
+
+    expect(restored.status).toBe('running_job')
+    expect(restored.jobs['job-recent']?.status).toBe('running')
+    expect(restored.jobs['job-recent']?.stale).toBeUndefined()
   })
 })

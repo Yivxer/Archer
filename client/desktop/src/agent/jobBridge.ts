@@ -8,6 +8,7 @@ export type RuntimeJobSnapshot = {
   createdAt: string
   updatedAt: string
   error?: string
+  stale?: boolean
 }
 
 const JOB_STATUS_DETAIL: Record<JobStatus, string> = {
@@ -25,11 +26,14 @@ function sanitizeEventPart(value: string): string {
 
 export function jobSnapshotToAgentEvent(sessionId: string, job: RuntimeJobSnapshot): JobEvent {
   const timestamp = job.updatedAt || job.createdAt
-  const detail = job.status === 'complete'
+  const staleDetail = job.stale
+    ? `任务长时间没有进展，已自动取消。${job.error ? job.error : ''}`.trim()
+    : ''
+  const detail = staleDetail || (job.status === 'complete'
     ? job.result
     : job.status === 'failed'
       ? job.error || job.result || JOB_STATUS_DETAIL.failed
-      : JOB_STATUS_DETAIL[job.status]
+      : JOB_STATUS_DETAIL[job.status])
 
   return {
     type: 'job.event',
@@ -40,5 +44,6 @@ export function jobSnapshotToAgentEvent(sessionId: string, job: RuntimeJobSnapsh
     title: job.title,
     status: job.status,
     detail,
+    stale: job.stale || undefined,
   }
 }

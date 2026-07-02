@@ -65,20 +65,23 @@ def test_session_save_persists_token_usage(tmp_path, monkeypatch):
 
 
 def test_session_store_reads_legacy_list_and_new_object():
-    messages, usage = load_session_payload(
+    messages, usage, meta = load_session_payload(
         [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "hey"}]
     )
     assert len(messages) == 2
     assert usage is None
+    assert meta is None
 
-    wrapped, wrapped_usage = load_session_payload(
+    wrapped, wrapped_usage, wrapped_meta = load_session_payload(
         {
             "messages": messages,
             "tokenUsage": {"totalTokens": 12, "promptTokens": 8, "completionTokens": 4, "callCount": 1},
+            "meta": {"expertId": "developer", "expertLabel": "开发工程师"},
         }
     )
     assert len(wrapped) == 2
     assert wrapped_usage["totalTokens"] == 12
+    assert wrapped_meta["expertId"] == "developer"
 
 
 def test_status_route_includes_token_usage(monkeypatch):
@@ -112,7 +115,7 @@ def test_save_session_api_writes_token_usage(tmp_path, monkeypatch):
     )
 
     path = tmp_path / f"{result['id']}.json"
-    messages, usage = read_session_file(path)
+    messages, usage, _meta = read_session_file(path)
     assert len(messages) == 2
     assert usage["totalTokens"] == 20
 

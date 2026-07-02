@@ -307,29 +307,35 @@
 }
 
 .sidebar-footer {
-  padding: 10px;
+  padding: 10px 14px 14px;
   flex-direction: column;
   align-items: stretch;
 }
 
 .profile-footer {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   min-width: 0;
   width: 100%;
   border: 0;
   border-radius: var(--radius);
-  padding: 6px;
-  background: transparent;
+  padding: 9px 10px;
+  background: color-mix(in srgb, var(--ink) 4%, transparent);
   color: var(--text);
   text-align: left;
 }
 
 .profile-footer:hover {
-  background: var(--soft-hover);
+  background: color-mix(in srgb, var(--ink) 7%, transparent);
   color: var(--ink);
+}
+
+.profile-footer .archer-ring {
+  width: 26px;
+  height: 26px;
+  filter: none;
 }
 
 .profile-footer span {
@@ -346,15 +352,35 @@
 
 .profile-footer strong {
   color: var(--ink);
-  font-size: 12px;
-  font-weight: 600;
+  font-size: 13.5px;
+  font-weight: 650;
 }
 
 .profile-footer em {
   margin-top: 2px;
   color: var(--muted);
-  font-size: 10px;
+  font-size: 11.5px;
   font-style: normal;
+}
+
+.sidebar-status-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.sidebar-status-meta .expert-avatar {
+  box-shadow: none;
+}
+
+.sidebar-status-dot {
+  opacity: 0.45;
+}
+
+.profile-expert-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .sidebar-mini-tools {
@@ -368,15 +394,21 @@
 .sidebar {
   display: flex;
   flex-direction: column;
-  width: 228px;
+  width: var(--sidebar-width);
+  min-width: var(--sidebar-width);
   border-right: 1px solid var(--line);
   background: #ffffff;
-  transition: width 220ms ease, border-color 180ms ease, opacity 160ms ease;
+  transition:
+    width 220ms ease,
+    min-width 220ms ease,
+    border-color 180ms ease,
+    opacity 160ms ease;
   overflow: hidden;
 }
 
 .sidebar.closed {
   width: 0;
+  min-width: 0;
   border-right-color: transparent;
   opacity: 0;
   pointer-events: none;
@@ -387,25 +419,25 @@
 }
 
 .sidebar-head {
-  gap: 12px;
-  padding: 82px 12px 12px;
+  gap: 8px;
+  padding: 72px 18px 16px;
   border-bottom: 0;
   -webkit-app-region: no-drag;
 }
 
 .sidebar-brand {
-  display: grid;
+  display: flex;
   align-items: center;
-  justify-items: center;
-  gap: 4px;
+  justify-content: flex-start;
+  gap: 14px;
   width: 100%;
-  min-height: 132px;
+  min-height: 68px;
   border: 0;
-  border-radius: 16px;
-  padding: 10px 8px 12px;
+  border-radius: 8px;
+  padding: 10px 9px;
   color: var(--ink);
   background: transparent;
-  text-align: center;
+  text-align: left;
   cursor: pointer;
   -webkit-app-region: no-drag;
 }
@@ -416,33 +448,40 @@
 
 .sidebar-brand .archer-ring {
   display: block;
-  width: 82px;
-  height: 82px;
-  margin: 0 auto 8px;
+  width: 42px;
+  height: 42px;
+  margin: 0;
+  opacity: 1;
+  visibility: visible;
+  border: 0;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at center, var(--panel-solid) 0 43%, transparent 44%),
+    conic-gradient(from 195deg, #5ee8e0, #1e7be8, #f5c842, #f5612a, #e8212a, #5ee8e0);
+  box-shadow:
+    inset 0 0 0 5px color-mix(in srgb, var(--panel-solid) 90%, transparent);
 }
 
 .sidebar-brand .archer-ring.living {
-  filter:
-    drop-shadow(0 -6px 16px rgba(77, 217, 212, 0.26))
-    drop-shadow(0 14px 24px rgba(245, 97, 42, 0.14));
+  filter: none;
 }
 
 .sidebar-brand-wordmark {
   display: inline-flex;
   align-items: baseline;
   gap: 0.018em;
-  margin-top: 6px;
+  margin-top: 0;
   font-family: var(--brand-font);
-  font-size: 26px;
+  font-size: 25px;
   font-weight: 400;
   line-height: 1;
-  opacity: 0.88;
+  opacity: 0.9;
   white-space: nowrap;
 }
 
 .sidebar-brand-wordmark span {
   display: inline-block;
-  animation: wordmark-flow 5.6s ease-in-out infinite;
+  animation: none;
 }
 
 .sidebar-brand-wordmark span:nth-child(1) {
@@ -482,11 +521,60 @@
 .sidebar-body {
   display: grid;
   align-content: start;
-  gap: 5px;
-  padding: 10px 14px;
+  gap: 16px;
+  padding: 6px 14px 10px;
   overflow-y: auto;
   flex: 1 1 0;
   min-height: 0;
+}
+
+.sidebar-main-nav,
+.sidebar-task-list,
+.sidebar-project-list,
+.sidebar-rows {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.sidebar-task-list .sidebar-rows {
+  max-height: min(390px, 42vh);
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.sidebar-list-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  min-height: 30px;
+  padding: 0 8px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.sidebar-list-head button {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: var(--muted);
+  background: transparent;
+}
+
+.sidebar-list-head button:hover {
+  color: var(--ink);
+  background: color-mix(in srgb, var(--ink) 5%, transparent);
+}
+
+.sidebar-list-head small {
+  min-width: 20px;
+  color: color-mix(in srgb, var(--muted) 76%, transparent);
+  font-size: 11px;
+  text-align: right;
 }
 
 .sidebar-nav-item {
@@ -494,11 +582,11 @@
   display: grid;
   grid-template-columns: 30px minmax(0, 1fr);
   justify-content: flex-start;
-  gap: 10px;
-  min-height: 52px;
-  padding: 0 11px 0 9px;
+  gap: 9px;
+  min-height: 38px;
+  padding: 0 12px 0 9px;
   border: 1px solid transparent;
-  border-radius: 13px;
+  border-radius: 8px;
   color: var(--muted);
   background: transparent;
   font-size: 13px;
@@ -515,7 +603,7 @@
 
 .sidebar-nav-item > span {
   display: grid;
-  gap: 1px;
+  gap: 0;
   min-width: 0;
 }
 
@@ -552,6 +640,7 @@
 }
 
 .sidebar-nav-item em {
+  display: none;
   color: var(--muted);
   font-size: 11px;
   font-style: normal;
@@ -562,17 +651,17 @@
   content: "";
   position: absolute;
   left: 0;
-  top: 12px;
-  bottom: 12px;
-  width: 3px;
+  top: 10px;
+  bottom: 10px;
+  width: 2px;
   border-radius: 999px;
-  background: linear-gradient(180deg, var(--cyan), var(--orange));
+  background: var(--ink);
 }
 
 .sidebar-nav-item.active {
   color: var(--ink);
-  border-color: color-mix(in srgb, var(--cyan) 14%, transparent);
-  background: color-mix(in srgb, var(--cyan) 7%, var(--field));
+  border-color: transparent;
+  background: color-mix(in srgb, var(--ink) 5%, transparent);
 }
 
 .sidebar-nav-item:hover {
@@ -581,9 +670,71 @@
 }
 
 .sidebar-footer {
+  position: relative;
   margin-top: auto;
   border-top: 0;
-  padding: 12px 14px 16px;
+  padding: 10px 14px 14px;
+}
+
+.sidebar-session-row,
+.sidebar-project-row,
+.sidebar-project-empty {
+  display: grid;
+  align-items: center;
+  width: 100%;
+  min-height: 34px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  padding: 0 9px;
+  color: var(--text);
+  background: transparent;
+  font-size: 12px;
+  text-align: left;
+}
+
+.sidebar-session-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+}
+
+.sidebar-project-row,
+.sidebar-project-empty {
+  grid-template-columns: 24px minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+.sidebar-session-row span,
+.sidebar-project-row span,
+.sidebar-project-empty span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-session-row em,
+.sidebar-project-row em {
+  color: var(--muted);
+  font-size: 10px;
+  font-style: normal;
+}
+
+.sidebar-project-row svg,
+.sidebar-project-empty svg {
+  justify-self: center;
+  color: var(--muted);
+}
+
+.sidebar-session-row:hover,
+.sidebar-session-row.active,
+.sidebar-project-row:hover,
+.sidebar-project-row.active,
+.sidebar-project-empty:hover {
+  color: var(--ink);
+  background: color-mix(in srgb, var(--ink) 5%, transparent);
+}
+
+.sidebar-project-row.active svg {
+  color: var(--cyan);
 }
 
 .sidebar-mini-tools {
@@ -602,11 +753,13 @@
 /* ── responsive ──────────────────────────────────────────────────────── */
 @media (max-width: 820px) {
   .sidebar {
-    width: 208px;
+    width: 236px;
+    min-width: 236px;
   }
 
   .sidebar.closed {
     width: 0;
+    min-width: 0;
     opacity: 0;
     pointer-events: none;
   }
@@ -614,6 +767,8 @@
 
 @media (max-width: 720px) {
   .sidebar:not(.closed) {
+    width: min(82vw, 272px);
+    min-width: min(82vw, 272px);
     position: fixed;
     top: 0;
     bottom: 0;
@@ -627,15 +782,15 @@
   }
 
   .sidebar-brand {
-    min-height: 108px;
+    min-height: 58px;
   }
 
   .sidebar-brand .archer-ring {
-    width: 64px;
-    height: 64px;
+    width: 36px;
+    height: 36px;
   }
 
   .sidebar-nav-item {
-    min-height: 46px;
+    min-height: 36px;
   }
 }

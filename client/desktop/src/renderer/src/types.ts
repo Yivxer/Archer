@@ -1,4 +1,4 @@
-export type Route = 'Chat' | 'Sessions' | 'Tasks' | 'Memory' | 'Soul' | 'Skills' | 'Settings'
+export type Route = 'Chat' | 'Today' | 'Sessions' | 'Tasks' | 'Memory' | 'Soul' | 'Skills' | 'Projects' | 'Settings'
 export type Theme = 'light' | 'dark'
 export type MemoryContextMode = 'off' | 'conservative' | 'full'
 export type ObsidianContextMode = 'off' | 'summary' | 'full'
@@ -6,6 +6,24 @@ export type ConversationMode = string
 export type ApiConnectionState = 'idle' | 'loading' | 'connected' | 'api_offline' | 'missing_token' | 'bad_token' | 'error'
 export type MemoryStatus = 'confirmed' | 'pending' | 'rejected'
 export type RiskLevel = 'low' | 'medium' | 'high' | 'critical'
+
+export type WorkIntent = {
+  workflowName?: string
+  action?: string
+  targets?: Array<{ label?: string; path?: string; url?: string }>
+  steps?: string[]
+  verifyPlan?: string
+  rollbackPlan?: string
+}
+
+export type WorkReceipt = {
+  done: string
+  source: string
+  target: string
+  verification: string
+  rollback: string
+  traceId?: string
+}
 
 export type TokenUsageStatus = {
   sessionTotal: number
@@ -22,6 +40,9 @@ export type TokenUsageStatus = {
 export type ArcherStatus = {
   adapter: 'mock' | 'local'
   model: string
+  modelProfile?: 'lite' | 'pro' | 'max'
+  expertId?: string
+  expertLabel?: string
   mode: string
   memoryCount: number
   pendingMemoryCount?: number
@@ -36,6 +57,10 @@ export type ChatMessage = {
   id: number
   role: 'assistant' | 'user' | 'system'
   text: string
+  detail?: string
+  fileRefs?: FileRef[]
+  /** 等待首 token 时的短暂承接语，不写入会话存档 */
+  mutter?: string
 }
 
 export type ChatRequestMessage = {
@@ -50,6 +75,9 @@ export type FileRef = {
   previewDataUrl?: string
   attachStatus?: 'ready' | 'reading' | 'ok' | 'failed'
   attachDetail?: string
+  content?: string
+  contentChars?: number
+  truncated?: boolean
 }
 
 export type ToolProgress = {
@@ -86,7 +114,16 @@ export type ToolEvent = {
     size?: number
     injectedChars?: number
     truncated?: boolean
+    // obsidian_write diff preview
+    beforeText?: string
+    afterText?: string
+    previewMode?: string
+    previewExists?: boolean
+    workIntent?: WorkIntent
+    sourcePath?: string
+    targetUrl?: string
   }
+  receipt?: WorkReceipt
 }
 
 export type SessionItem = {
@@ -96,10 +133,18 @@ export type SessionItem = {
   turns: number
   tone: string
   preview?: string
+  threadId?: string
+  expertId?: string
+  expertLabel?: string
 }
 
 export type SessionDetail = SessionItem & {
   messages: ChatMessage[]
+}
+
+export type SessionSearchResult = SessionItem & {
+  snippet: string
+  matchRole: string
 }
 
 export type SavedSession = {
@@ -107,6 +152,18 @@ export type SavedSession = {
   path: string
   messages: number
   appended?: number
+  threadId?: string
+}
+
+export type ConversationThread = {
+  id: string
+  title: string
+  summary: string
+  createdAt: string
+  updatedAt: string
+  sessionIds: string[]
+  projectId?: string
+  archived?: boolean
 }
 
 export type MemoryResolveResult = {
@@ -133,6 +190,8 @@ export type ToolApprovalResult = {
   validatedPath?: string
   output?: string
   draft?: ToolEvent['draft']
+  receipt?: WorkReceipt
+  workReceipt?: WorkReceipt
 }
 
 export type BackgroundJobStatus = 'queued' | 'running' | 'waiting_approval' | 'complete' | 'failed' | 'cancelled'
@@ -148,6 +207,7 @@ export type BackgroundJob = {
   updatedAt: string
   timeoutSeconds?: number
   error?: string
+  stale?: boolean
   /** Isolated subagent context (P5.4) */
   isolated?: boolean
   /** Pending tool approval context when status is 'waiting_approval' */
@@ -208,6 +268,7 @@ export type MemoryItem = {
   content: string
   confidence: string
   source: string
+  sessionId?: string
   suggestReason?: string
   sessionSummary?: string
   depth?: number
@@ -234,11 +295,44 @@ export type MemoryGroup = {
   memories: MemoryItem[]
 }
 
+export type HypothesisEvidence = {
+  content: string
+  source: string
+  createdAt: string
+}
+
+export type HypothesisStatus = 'active' | 'verified' | 'rejected' | 'dismissed'
+
+export type HypothesisItem = {
+  id: number
+  title: string
+  statement: string
+  status: HypothesisStatus
+  source: string
+  triggerType: string
+  confidence: number
+  evidence: HypothesisEvidence[]
+  validateAfter: string
+  createdAt: string
+  updatedAt: string
+  lastReviewedAt?: string
+  verifiedAt?: string
+  sessionId?: string
+  verificationNote?: string
+  mutedUntil?: string
+}
+
+export type HypothesisListResult = {
+  ok: boolean
+  hypotheses: HypothesisItem[]
+}
+
 export type SkillItem = {
   name: string
   description: string
   risk: RiskLevel
   enabled: boolean
+  permissionLevel?: 'read-only' | 'write-local' | 'write-vault' | 'deploy-remote' | 'unknown'
 }
 
 export type ModeItem = {
@@ -261,6 +355,38 @@ export type ModeSwitchResult = {
   modes: ModeItem[]
 }
 
+export type ExpertStarter = {
+  label: string
+  prompt: string
+}
+
+export type ExpertItem = {
+  id: string
+  label: string
+  note: string
+  modelProfile: 'lite' | 'pro' | 'max'
+  skillCount: number
+  configured: boolean
+  modelConfigured?: boolean
+  starters?: ExpertStarter[]
+  source?: string
+  custom?: boolean
+}
+
+export type ExpertSettings = {
+  current: string
+  experts: ExpertItem[]
+}
+
+export type ExpertSwitchResult = {
+  ok: boolean
+  current: string
+  label: string
+  modelProfile: 'lite' | 'pro' | 'max'
+  previous?: string
+  error?: string
+}
+
 export type ProactiveTouchItem = {
   id: string
   kind: string
@@ -276,6 +402,101 @@ export type ProactiveTouch = {
   items: ProactiveTouchItem[]
 }
 
+export type InitiativeShadowItem = {
+  id: number
+  eventType: string
+  kind: string
+  title: string
+  message: string
+  delivered: boolean
+  decisionTrace: Record<string, unknown>
+  createdAt: string
+  feedback: string
+  archivedAt: string | null
+}
+
+export type InitiativeShadowReview = {
+  ok: boolean
+  shadow: boolean
+  delivered: boolean
+  limit: number
+  globalThrottleActive: boolean
+  presenceState: 'engaged' | 'idle' | 'muted'
+  items: InitiativeShadowItem[]
+  report: InitiativeShadowReport
+  longTermReport: InitiativeShadowLongTermReport
+  deliveryGate: InitiativeShadowDeliveryGate
+  optIn: InitiativeShadowOptIn
+  reviewPacket: InitiativeShadowReviewPacket
+}
+
+export type InitiativeShadowReport = {
+  observationDays: number
+  totalCandidates: number
+  dailyAverage: number
+  feedbackCount: number
+  recognitionRate: number
+  readyForManualReview: boolean
+  reasons: string[]
+  thresholds: {
+    requiredDays: number
+    maxDailyAverage: number
+    minFeedback: number
+    minRecognitionRate: number
+  }
+}
+
+export type InitiativeShadowLongTermReport = {
+  observedDays: number
+  candidateCount: number
+  readyForDeliveryReview: boolean
+  reasons: string[]
+  metrics: {
+    frequency: {
+      dailyAverage: number
+      maxDailyCount: number
+    }
+    relevance: {
+      feedbackCount: number
+      recognitionRate: number
+      tooFrequentRate: number
+    }
+    continuity: {
+      threadResumeCount: number
+    }
+  }
+}
+
+export type InitiativeShadowDeliveryGate = {
+  canEnableDelivery: boolean
+  shadowOnly: boolean
+  reasons: string[]
+  requirements: {
+    requiredObservationDays: number
+    explicitOptIn: boolean
+    manualReview: boolean
+  }
+  timeline: {
+    firstObservedAt: string | null
+    earliestReviewAt: string | null
+    remainingObservationDays: number
+  }
+}
+
+export type InitiativeShadowOptIn = {
+  enabled: boolean
+  updatedAt: string | null
+  reason: string
+}
+
+export type InitiativeShadowReviewPacket = {
+  recommendedAction: string
+  optIn: InitiativeShadowOptIn
+  manualReport: InitiativeShadowReport
+  longTermReport: InitiativeShadowLongTermReport
+  deliveryGate: InitiativeShadowDeliveryGate
+}
+
 export type SoulFileName = 'SOUL.md' | 'MEMORY.md' | 'COVENANT.md' | 'PRESENCE.md'
 export type SoulFiles = Record<SoulFileName, string>
 
@@ -288,6 +509,34 @@ export type SoulProfileSection = {
 export type SoulProfileSummary = {
   empty: boolean
   sections: SoulProfileSection[]
+}
+
+export type VaultReflection = {
+  id: number
+  note_path: string
+  note_title: string
+  reflected_at: string
+  insights_count: number
+  pending_ids: number[]
+  soul_proposal_id: number | null
+  confidence: number
+  summary: string
+}
+
+export type VaultReflectionResult = {
+  ok: boolean
+  note_path?: string
+  note_title?: string
+  pending_ids?: number[]
+  soul_proposal_id?: number | null
+  confidence?: number
+  summary?: string
+  reflected?: VaultReflectionResult[]
+  skipped?: { note_path: string; reason: string }[]
+  total?: number
+  reason?: string
+  skipped_flag?: boolean
+  error?: string
 }
 
 export type ReviewPeriod = 'weekly' | 'monthly' | 'life_stage'
@@ -336,9 +585,22 @@ export type JournalReview = {
 }
 
 export type SettingsDraft = {
+  activeProfile: 'lite' | 'pro' | 'max'
+  activeExpert?: string
+  experts?: ExpertItem[]
+  modelProfiles?: Array<{
+    id: 'lite' | 'pro' | 'max'
+    label: string
+    provider: string
+    baseUrl?: string
+    model?: string
+    apiKeyPreview?: string
+    configured: boolean
+  }>
   provider: string
   baseUrl: string
   model: string
+  apiKey?: string
   apiKeyPreview: string
   configPath: string
   memoryDbPath: string
@@ -361,6 +623,18 @@ export type SettingsSaveResult = {
   restartRequired: boolean
   errors?: string[]
   message: string
+}
+
+export type ModelProfileTestResult = {
+  ok: boolean
+  profile: string
+  provider: string
+  model: string
+  baseUrl: string
+  latencyMs: number
+  message: string
+  sample?: string
+  errors: string[]
 }
 
 export type ScheduledTask = {
@@ -392,6 +666,45 @@ export type ScheduleMutationResult = {
   error?: string
 }
 
+export type ConfigDoctorResult = {
+  ok: boolean
+  checkedAt: string
+  configPath: string
+  summary: {
+    error: number
+    warn: number
+    info: number
+  }
+  issues: Array<{
+    code: string
+    level: 'ok' | 'info' | 'warn' | 'error'
+    message: string
+    nextAction: string
+  }>
+  nextActions: string[]
+}
+
+export type ToolApprovalAuditRecord = {
+  timestamp: number
+  eventId: string
+  decision: string
+  skillName: string
+  risk: string
+  permissionLevel?: 'read-only' | 'write-local' | 'write-vault' | 'deploy-remote'
+  policyDecision: string
+  policyReason: string
+  executed: boolean
+  message: string
+  reused: boolean
+}
+
+export type ToolApprovalAuditResult = {
+  ok: boolean
+  path: string
+  limit: number
+  items: ToolApprovalAuditRecord[]
+}
+
 export type ArcherAdapter = {
   status: ArcherStatus
   chat: {
@@ -401,13 +714,19 @@ export type ArcherAdapter = {
     mockReply: string
   }
   sessions: SessionItem[]
+  threads: ConversationThread[]
   memory: MemoryItem[]
+  hypotheses: HypothesisItem[]
   skills: SkillItem[]
   modes: ModeSettings
+  experts: ExpertSettings
   proactive: ProactiveTouch
+  initiativeShadow: InitiativeShadowReview
   soulProfile: SoulProfileSummary
   soulFiles: SoulFiles
   periodReviews: Record<ReviewPeriod, PeriodReview>
   journalReview: JournalReview
   settings: SettingsDraft
+  configDoctor: ConfigDoctorResult
+  toolApprovalAudit: ToolApprovalAuditResult
 }

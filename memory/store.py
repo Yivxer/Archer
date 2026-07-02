@@ -264,6 +264,16 @@ def init_db():
     init_crystal_table()
     from memory.feedback import init_table as init_feedback_table
     init_feedback_table()
+    from memory.hypothesis_tracker import init_hypotheses_table
+    init_hypotheses_table()
+    from core.initiative_shadow import init_table as init_initiative_shadow_table
+    init_initiative_shadow_table(DB_PATH)
+    from core.part8_threads import init_table as init_part8_threads_table
+    init_part8_threads_table(DB_PATH)
+    from core.monologue import init_table as init_monologue_table
+    init_monologue_table(DB_PATH)
+    from core.presence import init_table as init_presence_table
+    init_presence_table(DB_PATH)
     # v1.4: Work item 任务追踪表
     from memory.work import init_work_table
     init_work_table()
@@ -382,17 +392,19 @@ def _row_to_dict(r, has_date: bool = False, has_block: bool = False) -> dict:
         d["block_type"] = r[idx] if r[idx] else infer_block_type(d["type"])
         idx += 1
         d["label"] = r[idx] if idx < len(r) and r[idx] else ""
+        idx += 1
     else:
         d["block_type"] = infer_block_type(d["type"])
         d["label"] = ""
+    d["session_id"] = r[idx] if idx < len(r) and r[idx] else ""
     return d
 
 
 _MEM_SELECT = (
-    "id, content, tags, type, importance, depth, created_at, confidence, valid_until, block_type, label"
+    "id, content, tags, type, importance, depth, created_at, confidence, valid_until, block_type, label, session_id"
 )
 _MEM_SELECT_NO_DATE = (
-    "id, content, tags, type, importance, depth, confidence, valid_until, block_type, label"
+    "id, content, tags, type, importance, depth, confidence, valid_until, block_type, label, session_id"
 )
 
 def list_by_type(memory_type: str, min_importance: int = 1, limit: int = 20) -> list[dict]:

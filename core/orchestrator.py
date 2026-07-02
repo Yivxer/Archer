@@ -55,6 +55,7 @@ class OrchestrationResult:
     memory_scope: list[str] = field(default_factory=list)
     matched_skills: list[str] = field(default_factory=list)
     side_effect_level: SideEffectLevel = "none"
+    soul_insight: dict = field(default_factory=dict)
     reasons: list[str] = field(default_factory=list)
     source: str = "rules"
 
@@ -109,6 +110,8 @@ _WRITING_KEYWORDS = (
     "AI味",
     "语气",
     "结构",
+    "大纲",
+    "写作",
 )
 _CODE_KEYWORDS = (
     "代码",
@@ -211,10 +214,12 @@ def _unique(items: list[str]) -> list[str]:
 def _sub_intent(text: str, base_intent: str) -> SubIntent:
     if base_intent == "emotional":
         return "emotional_reflection"
-    if _contains_any(text, _KNOWLEDGE_KEYWORDS):
+    if _contains_any(text, _KNOWLEDGE_KEYWORDS) and has_actionable_side_effect(text):
         return "knowledge_summary"
     if _contains_any(text, _WRITING_KEYWORDS):
         return "writing_assistance"
+    if _contains_any(text, _KNOWLEDGE_KEYWORDS):
+        return "knowledge_summary"
     if base_intent == "project" or _contains_any(text, _PROJECT_KEYWORDS):
         return "project_planning"
     if base_intent == "decision":
@@ -237,10 +242,10 @@ def _auto_mode(sub_intent: SubIntent, text: str) -> Mode:
         if "失控" in text or "没意义" in text or "崩溃" in text:
             return "therapist"
         return "listener"
-    if "哲学" in text or "意义" in text or "存在" in text:
-        return "philosopher"
     if sub_intent == "writing_assistance":
         return "writer"
+    if "哲学" in text or "意义" in text or "存在" in text:
+        return "philosopher"
     if sub_intent in {"project_planning", "code_task"}:
         if _contains_any(text, _SIDE_EFFECT_KEYWORDS) and has_actionable_side_effect(text):
             return "operator"
@@ -310,11 +315,49 @@ def _needs_job(text: str, sub_intent: SubIntent, side_effect: bool) -> bool:
     return False
 
 
+def _clean_soul_insight(payload: dict | None) -> dict:
+    if not isinstance(payload, dict):
+        return {}
+    due = payload.get("due_hypotheses")
+    if not isinstance(due, list):
+        return {}
+    items = []
+    for item in due[:5]:
+        if not isinstance(item, dict):
+            continue
+        try:
+            hid = int(item.get("id", 0))
+        except Exception:
+            hid = 0
+        title = str(item.get("title", "") or "").strip()
+        statement = str(item.get("statement", "") or "").strip()
+        if not hid or not statement:
+            continue
+        items.append({
+            "id": hid,
+            "title": title[:80] or statement[:32],
+            "statement": statement[:240],
+        })
+    return {"due_hypotheses": items} if items else {}
+
+
+def collect_soul_insight_context(*, limit: int = 3) -> dict:
+    """Collect small, read-only Soul Insight signals for routing."""
+    try:
+        from memory.hypothesis_tracker import list_due_hypotheses
+
+        due = list_due_hypotheses(limit=limit)
+    except Exception:
+        return {}
+    return _clean_soul_insight({"due_hypotheses": due})
+
+
 def orchestrate_user_input(
     user_input: str,
     manual_mode: str | None = None,
     active_project_id: str | None = None,
     history: list[dict] | None = None,
+    soul_insight: dict | None = None,
 ) -> OrchestrationResult:
     """Return a stable per-turn orchestration snapshot.
 
@@ -341,7 +384,7 @@ def orchestrate_user_input(
         "knowledge_summary",
         "tool_task",
     } or side_effect
-    if sub_intent == "emotional_reflection":
+    if sub_intent in {"emotional_reflection", "writing_assistance"} and not side_effect:
         needs_tools = False
 
     needs_project_context = bool(intent_info.get("needs_project")) or sub_intent in {
@@ -349,6 +392,10 @@ def orchestrate_user_input(
         "code_task",
     } or bool(active_project_id)
     scopes = _memory_scope(sub_intent, bool(intent_info.get("needs_memory")))
+    soul_insight_payload = _clean_soul_insight(soul_insight)
+    due_hypotheses = soul_insight_payload.get("due_hypotheses", [])
+    if due_hypotheses:
+        scopes = _unique([*scopes, "soul", "hypothesis"])
     needs_memory = bool(scopes) or bool(intent_info.get("needs_memory"))
 
     matched_skills: list[str] = []
@@ -370,6 +417,8 @@ def orchestrate_user_input(
         reasons.append("needs_job:multi_step_or_execution")
     if side_effect:
         reasons.append("side_effect:approval_required")
+    if due_hypotheses:
+        reasons.append(f"soul_insight:due_hypotheses:{len(due_hypotheses)}")
 
     return OrchestrationResult(
         intent=intent,  # type: ignore[arg-type]
@@ -383,6 +432,7 @@ def orchestrate_user_input(
         memory_scope=scopes,
         matched_skills=matched_skills,
         side_effect_level=side_effect_level,
+        soul_insight=soul_insight_payload,
         reasons=reasons,
         source=str(intent_info.get("source", "rules")),
     )
@@ -399,6 +449,44 @@ def _task_title(user_input: str, orchestration: OrchestrationResult) -> str:
     return text[:32] or "任务计划"
 
 
+_HUGO_PLAN_TARGET_TERMS = (
+    "博客",
+    "博文",
+    "枫弋札记",
+    "枫弋博客",
+    "札记",
+    "hugo",
+    "yivxer-blog",
+    "iver.yivxer.com",
+)
+_HUGO_PLAN_ACTION_TERMS = (
+    "部署",
+    "上线",
+    "发布",
+    "上传",
+    "推送",
+    "同步到服务器",
+    "发到",
+    "投稿",
+    "deploy",
+    "publish",
+    "upload",
+    "rsync",
+)
+
+
+def _is_hugo_publish_turn(user_input: str) -> bool:
+    """Keep blog publishing out of the generic Obsidian write planner."""
+    lowered = user_input.lower()
+    has_target = any(term in lowered for term in _HUGO_PLAN_TARGET_TERMS)
+    has_action = any(term in lowered for term in _HUGO_PLAN_ACTION_TERMS)
+    if has_target and has_action:
+        return True
+    if "/users/" in lowered and ".md" in lowered and has_action and ("文章" in lowered or "笔记" in lowered):
+        return True
+    return False
+
+
 def build_task_plan(
     user_input: str,
     orchestration: OrchestrationResult,
@@ -412,6 +500,9 @@ def build_task_plan(
         return None
 
     text = user_input.strip()
+    if _is_hugo_publish_turn(text):
+        return None
+
     if "Obsidian" in text or "obsidian" in text:
         return TaskPlan(
             task_title=_task_title(text, orchestration),
@@ -545,6 +636,8 @@ def orchestration_status_labels(orchestration: OrchestrationResult) -> list[str]
         labels.append("生成计划")
     if orchestration.side_effect_level == "approval_required":
         labels.append("等待确认")
+    if orchestration.soul_insight.get("due_hypotheses"):
+        labels.append("验证假设")
     return labels
 
 
@@ -552,6 +645,7 @@ def orchestration_to_event_dict(orchestration: OrchestrationResult) -> dict:
     """Serialize orchestration snapshot for Desktop runtime events."""
     from uuid import uuid4
 
+    due_hypotheses = orchestration.soul_insight.get("due_hypotheses", [])
     return {
         "id": f"orch-{uuid4().hex[:8]}",
         "intent": orchestration.intent,
@@ -562,6 +656,9 @@ def orchestration_to_event_dict(orchestration: OrchestrationResult) -> dict:
         "needsMemory": orchestration.needs_memory,
         "needsJob": orchestration.needs_job,
         "matchedSkills": list(orchestration.matched_skills),
+        "soulInsight": {
+            "dueHypotheses": list(due_hypotheses),
+        },
     }
 
 

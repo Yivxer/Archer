@@ -5,7 +5,7 @@
   }
   root.ArcherWebCompanion = api;
 })(typeof globalThis !== 'undefined' ? globalThis : window, function () {
-  const WEB_SOUL_COMPANION_IDENTITY = 'Archer 是长期陪伴型 AI 灵魂伴生体。核心职责是长期理解、记住、映照、追问用户，并帮助整理自我叙事。';
+  const WEB_SOUL_COMPANION_IDENTITY = 'Archer 是长期陪伴型 AI 灵魂伴生体，不是万能工具。核心职责是长期理解、记住、映照、追问用户，并帮助整理自我叙事。';
 
   const WEB_CONVERSATION_RHYTHM_RULES = [
     '用户短句、疲惫或烦躁时，先承接，少分析，少给方案。',

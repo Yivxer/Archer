@@ -4,6 +4,9 @@ export const mockArcher: ArcherAdapter = {
   status: {
     adapter: 'mock',
     model: 'deepseek-chat',
+    modelProfile: 'lite',
+    expertId: 'default',
+    expertLabel: '基础 Archer',
     mode: 'operator',
     memoryCount: 128,
     skillCount: 18,
@@ -74,10 +77,44 @@ export const mockArcher: ArcherAdapter = {
     ].join('\n')
   },
   sessions: [
-    { id: 's1', title: '桌面端产品范围确认', date: '今天', turns: 18, tone: 'operator' },
-    { id: 's2', title: 'Soul 深度问答输入体验', date: '昨天', turns: 31, tone: 'critic' },
-    { id: 's3', title: '记忆质量与 pending 审阅', date: '本周', turns: 14, tone: 'coach' },
-    { id: 's4', title: 'Archer v1.2 稳定在场版', date: '本周', turns: 27, tone: 'mirror' }
+    { id: 's1', threadId: 'thread-mock-product', title: '桌面端产品范围确认', date: '今天', turns: 18, tone: 'operator' },
+    { id: 's2', threadId: 'thread-mock-soul', title: 'Soul 深度问答输入体验', date: '昨天', turns: 31, tone: 'critic' },
+    { id: 's3', threadId: 'thread-mock-memory', title: '记忆质量与 pending 审阅', date: '本周', turns: 14, tone: 'coach' },
+    { id: 's4', threadId: 'thread-mock-stable', title: 'Archer v1.2 稳定在场版', date: '本周', turns: 27, tone: 'mirror' }
+  ],
+  threads: [
+    {
+      id: 'thread-mock-product',
+      title: '桌面端产品范围确认',
+      summary: '围绕桌面端范围和第一版工作台体验持续讨论。',
+      createdAt: '',
+      updatedAt: '',
+      sessionIds: ['s1'],
+    },
+    {
+      id: 'thread-mock-soul',
+      title: 'Soul 深度问答输入体验',
+      summary: '优化 Soul 页面输入与人格档案交互。',
+      createdAt: '',
+      updatedAt: '',
+      sessionIds: ['s2'],
+    },
+    {
+      id: 'thread-mock-memory',
+      title: '记忆质量与 pending 审阅',
+      summary: '梳理记忆审阅和长期记忆质量。',
+      createdAt: '',
+      updatedAt: '',
+      sessionIds: ['s3'],
+    },
+    {
+      id: 'thread-mock-stable',
+      title: 'Archer v1.2 稳定在场版',
+      summary: '推进 Archer 稳定性和在场感。',
+      createdAt: '',
+      updatedAt: '',
+      sessionIds: ['s4'],
+    },
   ],
   memory: [
     {
@@ -117,6 +154,49 @@ export const mockArcher: ArcherAdapter = {
       depth: 5
     }
   ],
+  hypotheses: [
+    {
+      id: 1,
+      title: '运动后情绪更稳定',
+      statement: '连续三天力量训练后，晚间焦虑会下降。',
+      status: 'active',
+      source: 'mock',
+      triggerType: 'journal_explicit',
+      confidence: 0.82,
+      evidence: [
+        {
+          content: '日记 2026-06-20：训练后状态更稳。',
+          source: 'mock',
+          createdAt: '2026-06-20T22:00:00'
+        }
+      ],
+      validateAfter: '2026-06-21T22:00:00',
+      createdAt: '2026-06-20T22:00:00',
+      updatedAt: '2026-06-20T22:00:00',
+      verificationNote: ''
+    },
+    {
+      id: 2,
+      title: '睡眠影响表达',
+      statement: '睡眠不足会让表达更急。',
+      status: 'verified',
+      source: 'mock',
+      triggerType: 'manual',
+      confidence: 0.74,
+      evidence: [
+        {
+          content: '连续两天睡少后，回复明显更短。',
+          source: 'mock',
+          createdAt: '2026-06-18T09:00:00'
+        }
+      ],
+      validateAfter: '2026-06-19T09:00:00',
+      createdAt: '2026-06-17T09:00:00',
+      updatedAt: '2026-06-19T09:00:00',
+      verifiedAt: '2026-06-19T09:00:00',
+      verificationNote: '基本成立，但和任务压力也有关。'
+    }
+  ],
   skills: [
     { name: 'obsidian_search', description: '搜索 Obsidian vault 笔记', risk: 'low', enabled: true },
     { name: 'file_ops', description: '读取和写入本地文件，需要明确路径边界', risk: 'medium', enabled: true },
@@ -136,6 +216,17 @@ export const mockArcher: ArcherAdapter = {
       { id: 'witness', label: '见证者', source: 'file', active: false },
     ]
   },
+  experts: {
+    current: 'default',
+    experts: [
+      { id: 'default', label: '基础 Archer', note: '灵魂陪伴，不担任特定工作角色', modelProfile: 'lite', skillCount: 0, configured: true, starters: [{ label: '先听我说', prompt: '我先说一段，你不用急着给方案。' }] },
+      { id: 'developer', label: '开发工程师', note: '查代码、排错、看结构、委派实现', modelProfile: 'pro', skillCount: 6, configured: false, starters: [{ label: '看这段代码', prompt: '帮我看看这段代码有什么问题。' }] },
+      { id: 'video-coach', label: '短视频教练', note: '脚本、口播、选题与表达节奏', modelProfile: 'pro', skillCount: 3, configured: false, starters: [{ label: '打磨脚本', prompt: '帮我把这段口播改得更顺口。' }] },
+      { id: 'content-creator', label: '内容创作者', note: '文章、博客、长文与发布链路', modelProfile: 'lite', skillCount: 4, configured: true, starters: [{ label: '写开头', prompt: '帮我想一个清楚有力的文章开头。' }] },
+      { id: 'counselor', label: '心理咨询师', note: '情绪、关系与自我理解', modelProfile: 'pro', skillCount: 3, configured: false, starters: [{ label: '先听我说', prompt: '我先说一段，你不用急着给方案。' }] },
+      { id: 'parent-educator', label: '亲子教育家', note: '育儿沟通与教育理念', modelProfile: 'lite', skillCount: 3, configured: true, starters: [{ label: '育儿对话', prompt: '今晚和孩子沟通有点难，帮我想想怎么开口。' }] },
+    ],
+  },
   proactive: {
     enabled: true,
     items: [
@@ -149,6 +240,119 @@ export const mockArcher: ArcherAdapter = {
         target: 'Memory'
       }
     ]
+  },
+  initiativeShadow: {
+    ok: true,
+    shadow: true,
+    delivered: false,
+    limit: 5,
+    globalThrottleActive: false,
+    presenceState: 'idle',
+    items: [],
+    report: {
+      observationDays: 3,
+      totalCandidates: 5,
+      dailyAverage: 1.7,
+      feedbackCount: 1,
+      recognitionRate: 0.6,
+      readyForManualReview: false,
+      reasons: ['insufficient_observation_days', 'insufficient_feedback'],
+      thresholds: {
+        requiredDays: 7,
+        maxDailyAverage: 3,
+        minFeedback: 3,
+        minRecognitionRate: 0.7,
+      },
+    },
+    longTermReport: {
+      observedDays: 3,
+      candidateCount: 5,
+      readyForDeliveryReview: false,
+      reasons: ['continue_shadow_observation'],
+      metrics: {
+        frequency: {
+          dailyAverage: 1.7,
+          maxDailyCount: 2,
+        },
+        relevance: {
+          feedbackCount: 1,
+          recognitionRate: 0.6,
+          tooFrequentRate: 0,
+        },
+        continuity: {
+          threadResumeCount: 2,
+        },
+      },
+    },
+    deliveryGate: {
+      canEnableDelivery: false,
+      shadowOnly: true,
+      reasons: ['manual_review_not_ready', 'insufficient_long_term_observation', 'explicit_opt_in_required'],
+      requirements: {
+        requiredObservationDays: 14,
+        explicitOptIn: true,
+        manualReview: true,
+      },
+      timeline: {
+        firstObservedAt: null,
+        earliestReviewAt: null,
+        remainingObservationDays: 14,
+      },
+    },
+    optIn: {
+      enabled: false,
+      updatedAt: null,
+      reason: 'not_set',
+    },
+    reviewPacket: {
+      recommendedAction: 'keep_shadow',
+      optIn: {
+        enabled: false,
+        updatedAt: null,
+        reason: 'not_set',
+      },
+      manualReport: {
+        observationDays: 3,
+        totalCandidates: 5,
+        dailyAverage: 1.7,
+        feedbackCount: 1,
+        recognitionRate: 0.6,
+        readyForManualReview: false,
+        reasons: ['insufficient_observation_days', 'insufficient_feedback'],
+        thresholds: {
+          requiredDays: 7,
+          maxDailyAverage: 3,
+          minFeedback: 3,
+          minRecognitionRate: 0.7,
+        },
+      },
+      longTermReport: {
+        observedDays: 3,
+        candidateCount: 5,
+        readyForDeliveryReview: false,
+        reasons: ['continue_shadow_observation'],
+        metrics: {
+          frequency: { dailyAverage: 1.7, maxDailyCount: 2 },
+          relevance: { feedbackCount: 1, recognitionRate: 0.6, tooFrequentRate: 0 },
+          continuity: { threadResumeCount: 2 },
+        },
+      },
+      deliveryGate: {
+        canEnableDelivery: false,
+        shadowOnly: true,
+        reasons: ['manual_review_not_ready', 'insufficient_long_term_observation', 'explicit_opt_in_required'],
+        requirements: {
+          requiredObservationDays: 14,
+          explicitOptIn: true,
+          manualReview: true,
+        },
+        timeline: {
+          firstObservedAt: null,
+          earliestReviewAt: null,
+          remainingObservationDays: 14,
+        },
+      },
+    },
   },
   soulProfile: {
     empty: false,
@@ -218,6 +422,21 @@ export const mockArcher: ArcherAdapter = {
     markdown: '# Obsidian 日记回顾\n\n## 日记信号\n\n- 2026-05-24 · 2026-05-24.md：今天把 Archer 的 Soul 页面往前推了一步，焦虑下降，专注变清楚。\n\n## 情绪关键词\n\n- 焦虑 × 3\n- 专注 × 6\n'
   },
   settings: {
+    activeProfile: 'lite',
+    activeExpert: 'default',
+    experts: [
+      { id: 'default', label: '基础 Archer', note: '灵魂陪伴，不担任特定工作角色', modelProfile: 'lite', skillCount: 0, configured: true },
+      { id: 'developer', label: '开发工程师', note: '查代码、排错、看结构、委派实现', modelProfile: 'pro', skillCount: 6, configured: false },
+      { id: 'video-coach', label: '短视频教练', note: '脚本、口播、选题与表达节奏', modelProfile: 'pro', skillCount: 3, configured: false },
+      { id: 'content-creator', label: '内容创作者', note: '文章、博客、长文与发布链路', modelProfile: 'lite', skillCount: 4, configured: true },
+      { id: 'counselor', label: '心理咨询师', note: '情绪、关系与自我理解', modelProfile: 'pro', skillCount: 3, configured: false },
+      { id: 'parent-educator', label: '亲子教育家', note: '育儿沟通与教育理念', modelProfile: 'lite', skillCount: 3, configured: true },
+    ],
+    modelProfiles: [
+      { id: 'lite', label: 'DSK', provider: 'DeepSeek', baseUrl: 'https://api.deepseek.com/v1', model: 'deepseek-chat', apiKeyPreview: 'sk-••••••••••••••••', configured: true },
+      { id: 'pro', label: 'KIM', provider: 'Kimi', baseUrl: '', model: '', apiKeyPreview: '', configured: false },
+      { id: 'max', label: 'GLM', provider: 'GLM', baseUrl: '', model: '', apiKeyPreview: '', configured: false },
+    ],
     provider: 'OpenAI-compatible',
     baseUrl: 'https://api.deepseek.com/v1',
     model: 'deepseek-chat',
@@ -225,5 +444,19 @@ export const mockArcher: ArcherAdapter = {
     configPath: '~/.archer/archer.toml',
     memoryDbPath: '~/.archer/archer.db',
     sessionsPath: '~/.archer/sessions'
+  },
+  configDoctor: {
+    ok: true,
+    checkedAt: '2026-06-28T00:00:00',
+    configPath: '~/.archer/archer.toml',
+    summary: { error: 0, warn: 0, info: 0 },
+    issues: [],
+    nextActions: []
+  },
+  toolApprovalAudit: {
+    ok: true,
+    path: '~/.archer/tool-approval-audit.jsonl',
+    limit: 10,
+    items: []
   }
 }

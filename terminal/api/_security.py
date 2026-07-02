@@ -74,5 +74,28 @@ def error_response(status: int, error_code: str, message: str = "") -> tuple[int
     return status, {
         "error": error_code,
         "message": message or error_code,
+        "detail": message or error_code,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
+
+
+def normalize_error_payload(status: int, payload: dict | list) -> dict | list:
+    """Ensure API error responses expose error/message/detail consistently."""
+    if status < 400 or not isinstance(payload, dict):
+        return payload
+    if "error" not in payload:
+        return payload
+
+    normalized = dict(payload)
+    error = str(normalized.get("error") or "error")
+    message = str(normalized.get("message") or error)
+    detail = str(
+        normalized.get("detail")
+        or normalized.get("path")
+        or normalized.get("id")
+        or message
+    )
+    normalized["error"] = error
+    normalized["message"] = message
+    normalized["detail"] = detail
+    return normalized

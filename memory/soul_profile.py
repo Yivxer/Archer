@@ -10,9 +10,11 @@ A5 目标：
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
+
+from core.rhythm import HOURS_PER_DAY, HOURS_PER_WEEK, RhythmProfile
 
 
 _PROFILE_FIELDS = (
@@ -27,6 +29,10 @@ _PROFILE_FIELDS = (
     "language_style",
     "important_questions",
     "current_life_stage",
+    "rhythm",
+    "narrative",
+    "tensions",
+    "patterns",
 )
 
 _FIELD_LABELS = {
@@ -41,6 +47,10 @@ _FIELD_LABELS = {
     "language_style": "语言风格",
     "important_questions": "重要问题",
     "current_life_stage": "当前阶段",
+    "rhythm": "时间节律",
+    "narrative": "自我叙事",
+    "tensions": "张力",
+    "patterns": "行为模式",
 }
 
 _INTENT_PRIORITY = {
@@ -52,10 +62,15 @@ _INTENT_PRIORITY = {
         "relationship_patterns",
         "core_values",
         "important_questions",
+        "rhythm",
+        "narrative",
+        "tensions",
+        "patterns",
     ),
     "decision": (
         "core_values",
         "current_life_stage",
+        "tensions",
         "recurring_fears",
         "life_themes",
         "important_questions",
@@ -64,6 +79,10 @@ _INTENT_PRIORITY = {
     ),
     "reflection": (
         "life_themes",
+        "narrative",
+        "tensions",
+        "patterns",
+        "rhythm",
         "emotional_patterns",
         "relationship_patterns",
         "core_values",
@@ -74,6 +93,8 @@ _INTENT_PRIORITY = {
     "project": (
         "project_mythology",
         "creative_identity",
+        "patterns",
+        "narrative",
         "core_values",
         "current_life_stage",
         "life_themes",
@@ -82,6 +103,7 @@ _INTENT_PRIORITY = {
     ),
     "task": (
         "project_mythology",
+        "patterns",
         "language_style",
         "aesthetic_preferences",
         "core_values",
@@ -89,6 +111,7 @@ _INTENT_PRIORITY = {
     ),
     "chat": (
         "current_life_stage",
+        "rhythm",
         "language_style",
     ),
 }
@@ -109,6 +132,10 @@ class SoulProfile:
     language_style: list[str] = field(default_factory=list)
     important_questions: list[str] = field(default_factory=list)
     current_life_stage: list[str] = field(default_factory=list)
+    rhythm: list[str] = field(default_factory=list)
+    narrative: list[str] = field(default_factory=list)
+    tensions: list[str] = field(default_factory=list)
+    patterns: list[str] = field(default_factory=list)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any] | None) -> "SoulProfile":
@@ -128,6 +155,112 @@ class SoulProfile:
 
     def is_empty(self) -> bool:
         return not any(getattr(self, field_name) for field_name in _PROFILE_FIELDS)
+
+
+def backfill_rhythm(
+    profile: SoulProfile,
+    rhythm: RhythmProfile,
+    *,
+    max_peaks: int = 3,
+) -> SoulProfile:
+    """Return a profile with a derived rhythm summary when enough history exists."""
+    if rhythm.status != "modeled" or len(rhythm.hourly_weights) != HOURS_PER_WEEK:
+        return profile
+    manual_items = [item for item in profile.rhythm if not item.startswith("[模型]")]
+    peaks = _format_rhythm_peaks(rhythm.hourly_weights, max_peaks=max_peaks)
+    summary = f"[模型] 置信度 {rhythm.confidence:.2f}；活动高峰：{peaks}"
+    return replace(profile, rhythm=[*manual_items, summary])
+
+
+def backfill_narrative(
+    profile: SoulProfile,
+    memories: list[dict[str, Any]],
+    *,
+    limit: int = 3,
+) -> SoulProfile:
+    """Return a profile enriched from explicit, high-importance narrative memories."""
+    allowed_types = {"life_theme", "self_narrative", "project_mythology", "reflection_anchor"}
+    manual_items = [item for item in profile.narrative if not item.startswith("[模型]")]
+    model_items: list[str] = []
+    seen: set[str] = set()
+    for memory in memories:
+        if not isinstance(memory, dict) or str(memory.get("type") or "") not in allowed_types:
+            continue
+        if _memory_importance(memory) < 4:
+            continue
+        content = str(memory.get("content") or "").strip()
+        if content and content not in seen:
+            seen.add(content)
+            model_items.append(f"[模型] {content}")
+        if len(model_items) >= max(1, int(limit)):
+            break
+    return replace(profile, narrative=[*manual_items, *model_items])
+
+
+def backfill_tensions(
+    profile: SoulProfile,
+    memories: list[dict[str, Any]],
+    *,
+    limit: int = 3,
+) -> SoulProfile:
+    """Return explicit, high-confidence tension statements from deep memories."""
+    allowed_types = {"life_theme", "self_narrative", "emotion_pattern", "relationship_pattern", "value", "reflection_anchor"}
+    manual_items = [item for item in profile.tensions if not item.startswith("[模型]")]
+    model_items: list[str] = []
+    seen: set[str] = set()
+    for memory in memories:
+        if not isinstance(memory, dict) or str(memory.get("type") or "") not in allowed_types:
+            continue
+        if _memory_importance(memory) < 4:
+            continue
+        content = str(memory.get("content") or "").strip()
+        if content and _has_explicit_tension(content) and content not in seen:
+            seen.add(content)
+            model_items.append(f"[模型] {content}")
+        if len(model_items) >= max(1, int(limit)):
+            break
+    return replace(profile, tensions=[*manual_items, *model_items])
+
+
+def backfill_patterns(
+    profile: SoulProfile,
+    themes: list[dict[str, Any]],
+    *,
+    limit: int = 3,
+) -> SoulProfile:
+    """Return behavior-oriented Soul Profile items from evidence-gated themes."""
+    allowed_categories = {"behavior", "struggle", "growth"}
+    manual_items = [item for item in profile.patterns if not item.startswith("[模型]")]
+    model_items: list[str] = []
+    seen: set[str] = set()
+    for theme in themes:
+        if not isinstance(theme, dict) or str(theme.get("category") or "") not in allowed_categories:
+            continue
+        item = str(theme.get("description") or theme.get("name") or "").strip()
+        if item and item not in seen:
+            seen.add(item)
+            model_items.append(f"[模型] {item}")
+        if len(model_items) >= max(1, int(limit)):
+            break
+    return replace(profile, patterns=[*manual_items, *model_items])
+
+
+def _format_rhythm_peaks(weights: list[float], *, max_peaks: int) -> str:
+    day_names = ("周一", "周二", "周三", "周四", "周五", "周六", "周日")
+    count = max(1, min(int(max_peaks), HOURS_PER_WEEK))
+    slots = sorted(range(HOURS_PER_WEEK), key=lambda slot: (-weights[slot], slot))[:count]
+    return "、".join(f"{day_names[slot // HOURS_PER_DAY]} {slot % HOURS_PER_DAY:02d}:00" for slot in slots)
+
+
+def _memory_importance(memory: dict[str, Any]) -> int:
+    try:
+        return int(memory.get("importance", 3))
+    except (TypeError, ValueError):
+        return 3
+
+
+def _has_explicit_tension(content: str) -> bool:
+    return any(marker in content for marker in ("但", "却", "一方面", "另一方面"))
 
 
 def load_soul_profile(path_str: str | None) -> SoulProfile:
@@ -251,7 +384,7 @@ def build_evolution_check_prompt(
     """
     parts = [
         "[Soul Profile 进化检测]\n",
-        "你正在帮用户维护一个 11 维度的结构化 Soul Profile。\n",
+        "你正在帮用户维护一个 15 维度的结构化 Soul Profile。\n",
     ]
 
     full = format_full_profile(profile)

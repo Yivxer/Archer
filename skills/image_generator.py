@@ -54,9 +54,11 @@ def _load_cfg() -> dict:
 
 def _get_client():
     from openai import OpenAI
+    from core.model_profiles import active_api_config
     cfg = _load_cfg()
-    api_key  = cfg["api"]["api_key"]
-    base_url = cfg["api"].get("base_url", "https://api.openai.com/v1")
+    api = active_api_config(cfg)
+    api_key  = api["api_key"]
+    base_url = api.get("base_url", "https://api.openai.com/v1")
     return OpenAI(api_key=api_key, base_url=base_url), cfg
 
 

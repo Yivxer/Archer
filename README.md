@@ -175,10 +175,19 @@ python terminal/archer.py
 
 ```toml
 [api]
+active_profile = "lite"
 base_url = "https://api.deepseek.com/v1"
 api_key  = "sk-..."
 model    = "deepseek-chat"
 ```
+
+Archer 也支持三档模型配置：
+
+- `lite`：默认 DeepSeek，沿用当前配置。
+- `pro`：预留给 Kimi API。
+- `max`：预留给 GLM API。
+
+在 `archer.toml` 中通过 `[api].active_profile` 切换，具体 endpoint、key、model 放在 `[model_profiles.lite/pro/max]`。
 
 支持：
 - **DeepSeek**：`https://api.deepseek.com/v1`

@@ -269,6 +269,7 @@ def build_system_prompt(
     task_plan_block: str = "",
     mode_constraint_block: str = "",
     matched_skills_block: str = "",
+    expert_block: str = "",
     needs_project_context: bool | None = None,
     context_limits: ContextLimits | None = None,
 ) -> str:
@@ -448,6 +449,9 @@ def build_system_prompt(
         if mode_constraint_block:
             parts.append(tag_context_block("orchestration.mode", mode_constraint_block))
 
+        if expert_block:
+            parts.append(tag_context_block("expert", expert_block))
+
         if task_plan_block:
             parts.append(tag_context_block("orchestration.plan", task_plan_block))
 
@@ -504,6 +508,7 @@ def build_messages(
     task_plan_block: str = "",
     mode_constraint_block: str = "",
     matched_skills_block: str = "",
+    expert_block: str = "",
     needs_project_context: bool | None = None,
     context_limits: ContextLimits | None = None,
 ) -> list[dict]:
@@ -525,6 +530,8 @@ def build_messages(
         memory_scope=memory_scope,
         task_plan_block=task_plan_block,
         mode_constraint_block=mode_constraint_block,
+        matched_skills_block=matched_skills_block,
+        expert_block=expert_block,
         needs_project_context=needs_project_context,
         context_limits=context_limits,
     )

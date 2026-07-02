@@ -3,27 +3,97 @@ import { join } from 'node:path'
 import { env as processEnv } from 'node:process'
 import { spawn } from 'node:child_process'
 import type { ChildProcess } from 'node:child_process'
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { randomBytes } from 'node:crypto'
 import { execFile } from 'node:child_process'
-import { probeExistingApi, verifyApiToken, waitForHealthyApi } from './apiProcess'
+import { apiRetryDelayMs, brainStatusReason, probeExistingApi, probeReadyApi, reclaimApiPort, resolveApiLaunchPaths, verifyApiToken, waitForReadyApi } from './apiProcess'
 import { listLocalSkills, tryExecuteLocalSkill } from '../agent/skills/localSkillBridge'
 
 const isDev = !app.isPackaged
 
-// Archer project root — where archer_api.py lives
-const ARCHER_ROOT = '/Users/Yivxer/Projects/Archer'
-const PYTHON_BIN = join(ARCHER_ROOT, '.venv', 'bin', 'python3')
-const API_SCRIPT = join(ARCHER_ROOT, 'archer_api.py')
+let desktopLogPath = ''
+const originalConsole = {
+  log: console.log.bind(console),
+  warn: console.warn.bind(console),
+  error: console.error.bind(console),
+}
+
+function desktopLogFilePath(): string {
+  if (!desktopLogPath) {
+    const logDir = join(app.getPath('userData'), 'logs')
+    mkdirSync(logDir, { recursive: true })
+    desktopLogPath = join(logDir, 'desktop-main.log')
+  }
+  return desktopLogPath
+}
+
+function formatLogValue(value: unknown): string {
+  if (value instanceof Error) return value.stack || value.message
+  if (typeof value === 'string') return value
+  try {
+    return JSON.stringify(value)
+  } catch {
+    return String(value)
+  }
+}
+
+function appendDesktopLog(level: string, values: unknown[]): void {
+  try {
+    const line = values.map(formatLogValue).join(' ')
+    appendFileSync(desktopLogFilePath(), `[${new Date().toISOString()}] [${level}] ${line}\n`, 'utf8')
+  } catch {
+    // Logging must never become the reason Archer fails to start.
+  }
+}
+
+function installDesktopFileLogging(): void {
+  console.log = (...values: unknown[]) => {
+    appendDesktopLog('info', values)
+    originalConsole.log(...values)
+  }
+  console.warn = (...values: unknown[]) => {
+    appendDesktopLog('warn', values)
+    originalConsole.warn(...values)
+  }
+  console.error = (...values: unknown[]) => {
+    appendDesktopLog('error', values)
+    originalConsole.error(...values)
+  }
+}
+
+installDesktopFileLogging()
+
+// Prevent main process crash on unhandled promise rejections or exceptions.
+process.on('unhandledRejection', (reason) => {
+  console.error('[archer_main] Unhandled rejection:', reason)
+})
+process.on('uncaughtException', (err) => {
+  console.error('[archer_main] Uncaught exception:', err)
+})
+
+process.on('warning', (warning) => {
+  console.warn('[archer_main] Process warning:', warning)
+})
+
+// Archer project root — can be overridden for local development or packaging smoke.
+const API_PATHS = resolveApiLaunchPaths(processEnv)
+const ARCHER_ROOT = API_PATHS.archerRoot
+const PYTHON_BIN = API_PATHS.pythonBin
+const API_SCRIPT = API_PATHS.apiScript
 
 let apiProcess: ChildProcess | null = null
 let desktopApiToken = ''
 let ensureApiPromise: Promise<{ ok: boolean; reason: string }> | null = null
 let apiWatchTimer: ReturnType<typeof setInterval> | null = null
+let apiRestartTimer: ReturnType<typeof setTimeout> | null = null
+let apiRestartAttempt = 0
 
 type ApiEnsureResult = { ok: boolean; reason: string }
+const API_WATCHDOG_INTERVAL_MS = 5_000
 
 const PREVIEWABLE_IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp', '.tiff', '.tif', '.heic'])
+const READABLE_TEXT_EXTENSIONS = new Set(['.md', '.txt', '.json', '.toml', '.yaml', '.yml', '.py', '.ts', '.tsx', '.js', '.jsx', '.css', '.html', '.csv', '.log'])
+const FILE_REFERENCE_LIMIT = 6000
 
 function screenshotFilePath(prefix: string): string {
   const screenshotDir = join(app.getPath('userData'), 'screenshots')
@@ -60,6 +130,45 @@ function fileRefFromPath(path: string) {
   }
 }
 
+function readableFileReference(ref: { path?: unknown; name?: unknown; size?: unknown }) {
+  const path = String(ref.path || '').trim()
+  if (!path) return null
+  const name = String(ref.name || '').trim() || path.split(/[\\/]/).pop() || path
+  const suffix = path.slice(path.lastIndexOf('.')).toLowerCase()
+  try {
+    const stat = statSync(path)
+    const size = stat.size
+    if (!stat.isFile()) {
+      return { path, name, size, ok: false, error: '不是可读取文件' }
+    }
+    if (suffix && !READABLE_TEXT_EXTENSIONS.has(suffix)) {
+      return { path, name, size, ok: false, error: '暂不支持预读非文本附件' }
+    }
+    const raw = readFileSync(path, 'utf8')
+    if (raw.slice(0, 2048).includes('\x00')) {
+      return { path, name, size, ok: false, error: '疑似二进制文件' }
+    }
+    const content = raw.slice(0, FILE_REFERENCE_LIMIT)
+    return {
+      path,
+      name,
+      size,
+      ok: true,
+      content,
+      contentChars: content.length,
+      truncated: raw.length > content.length
+    }
+  } catch (error) {
+    return {
+      path,
+      name,
+      size: typeof ref.size === 'number' ? ref.size : 0,
+      ok: false,
+      error: error instanceof Error ? error.message : '读取失败'
+    }
+  }
+}
+
 function getOrCreateDesktopApiToken(): string {
   const tokenDir = join(app.getPath('userData'), 'security')
   const tokenPath = join(tokenDir, 'desktop-api-token')
@@ -79,18 +188,57 @@ function getOrCreateDesktopApiToken(): string {
 }
 
 function attachApiProcessHandlers(child: ChildProcess) {
-  child.on('exit', (code) => {
-    console.log(`[archer_api] Process exited with code ${code}`)
+  child.stdout?.on('data', (chunk: Buffer) => {
+    console.log('[archer_api:stdout]', chunk.toString('utf8').trimEnd().slice(0, 4000))
+  })
+
+  child.stderr?.on('data', (chunk: Buffer) => {
+    console.error('[archer_api:stderr]', chunk.toString('utf8').trimEnd().slice(0, 4000))
+  })
+
+  child.on('exit', (code, signal) => {
+    console.log(`[archer_api] Process exited with code ${code ?? 'null'} signal ${signal ?? 'null'}`)
     if (apiProcess === child) apiProcess = null
-    setTimeout(() => {
-      void ensureApiProcess()
-    }, 1500)
+    scheduleApiEnsure('process_exit')
   })
 
   child.on('error', (err) => {
     console.error('[archer_api] Failed to start:', err.message)
     if (apiProcess === child) apiProcess = null
+    // spawn 失败也要调度重启，否则 API 永远不会恢复
+    scheduleApiEnsure('process_error')
   })
+}
+
+function clearScheduledApiRestart() {
+  if (apiRestartTimer) {
+    clearTimeout(apiRestartTimer)
+    apiRestartTimer = null
+  }
+}
+
+function shouldRetryApiEnsure(reason: string): boolean {
+  return reason !== 'missing_python' && reason !== 'missing_script'
+}
+
+function scheduleApiEnsure(reason: string) {
+  if (apiRestartTimer) return
+  const delayMs = apiRetryDelayMs(apiRestartAttempt)
+  console.log(`[archer_api] Scheduling API ensure in ${delayMs}ms (${reason})`)
+  apiRestartTimer = setTimeout(() => {
+    apiRestartTimer = null
+    void ensureApiProcess().then((result) => {
+      if (result.ok) {
+        apiRestartAttempt = 0
+        return
+      }
+      if (!shouldRetryApiEnsure(result.reason)) return
+      apiRestartAttempt += 1
+      scheduleApiEnsure(result.reason)
+    }).catch((err) => {
+      console.error('[archer_api] ensureApiProcess rejected:', err)
+    })
+  }, delayMs)
 }
 
 function apiChildEnv(): NodeJS.ProcessEnv {
@@ -109,10 +257,10 @@ function apiChildEnv(): NodeJS.ProcessEnv {
 
 function spawnApiProcess(): ChildProcess | null {
   desktopApiToken = desktopApiToken || getOrCreateDesktopApiToken()
-  const child = spawn(PYTHON_BIN, [API_SCRIPT, '--token', desktopApiToken], {
+  const child = spawn(PYTHON_BIN, [API_SCRIPT, '--port', '8765', '--token', desktopApiToken], {
     cwd: ARCHER_ROOT,
     env: apiChildEnv(),
-    stdio: 'ignore',
+    stdio: ['ignore', 'pipe', 'pipe'],
     detached: false,
   })
   attachApiProcessHandlers(child)
@@ -124,9 +272,13 @@ async function ensureApiProcess(): Promise<ApiEnsureResult> {
   if (ensureApiPromise) return ensureApiPromise
 
   ensureApiPromise = (async () => {
-    if (!existsSync(PYTHON_BIN) || !existsSync(API_SCRIPT)) {
-      console.log('[archer_api] Python or script not found, cannot auto-start')
+    if (!existsSync(PYTHON_BIN)) {
+      console.log('[archer_api] Python not found, cannot auto-start')
       return { ok: false, reason: 'missing_python' }
+    }
+    if (!existsSync(API_SCRIPT)) {
+      console.log('[archer_api] API script not found, cannot auto-start')
+      return { ok: false, reason: 'missing_script' }
     }
 
     desktopApiToken = desktopApiToken || getOrCreateDesktopApiToken()
@@ -142,8 +294,12 @@ async function ensureApiProcess(): Promise<ApiEnsureResult> {
         console.log('[archer_api] Reusing healthy API on 127.0.0.1:8765')
         return { ok: true, reason: 'reused' }
       }
-      console.warn('[archer_api] Port 8765 is up but token mismatch; starting a fresh API is not attempted while port is busy')
-      return { ok: false, reason: 'token_mismatch' }
+      console.warn('[archer_api] Port 8765 token mismatch — reclaiming port and restarting')
+      if (apiProcess && apiProcess.pid && !apiProcess.killed) {
+        apiProcess.kill('SIGTERM')
+        apiProcess = null
+      }
+      await reclaimApiPort(8765)
     }
 
     apiProcess = spawnApiProcess()
@@ -151,9 +307,9 @@ async function ensureApiProcess(): Promise<ApiEnsureResult> {
       return { ok: false, reason: 'spawn_failed' }
     }
 
-    const healthy = await waitForHealthyApi(fetch)
-    if (!healthy) {
-      console.error('[archer_api] API did not become healthy in time')
+    const ready = await waitForReadyApi(fetch, 'http://127.0.0.1:8765', 15000, 300)
+    if (!ready) {
+      console.error('[archer_api] API did not become ready in time')
       return { ok: false, reason: 'spawn_failed' }
     }
 
@@ -165,7 +321,12 @@ async function ensureApiProcess(): Promise<ApiEnsureResult> {
   })()
 
   try {
-    return await ensureApiPromise
+    const result = await ensureApiPromise
+    if (result.ok) {
+      apiRestartAttempt = 0
+      clearScheduledApiRestart()
+    }
+    return result
   } finally {
     ensureApiPromise = null
   }
@@ -174,8 +335,14 @@ async function ensureApiProcess(): Promise<ApiEnsureResult> {
 function startApiWatchdog() {
   if (apiWatchTimer) return
   apiWatchTimer = setInterval(() => {
-    void ensureApiProcess()
-  }, 45_000)
+    void probeReadyApi(fetch, 'http://127.0.0.1:8765', 800).then((ready) => {
+      if (ready) {
+        apiRestartAttempt = 0
+        return
+      }
+      scheduleApiEnsure('heartbeat_not_ready')
+    })
+  }, API_WATCHDOG_INTERVAL_MS)
 }
 
 function stopApiProcess() {
@@ -183,6 +350,14 @@ function stopApiProcess() {
     apiProcess.kill()
     apiProcess = null
   }
+}
+
+async function restartApiProcess(): Promise<ApiEnsureResult> {
+  clearScheduledApiRestart()
+  apiRestartAttempt = 0
+  stopApiProcess()
+  await reclaimApiPort(8765)
+  return ensureApiProcess()
 }
 
 function isAllowedExternalUrl(rawUrl: string): boolean {
@@ -229,6 +404,7 @@ function createWindow(options: WindowOptions = {}): BrowserWindow {
       sandbox: true
     }
   })
+  let reloadedAfterRendererGone = false
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (isAllowedExternalUrl(url)) shell.openExternal(url)
@@ -241,6 +417,33 @@ function createWindow(options: WindowOptions = {}): BrowserWindow {
       event.preventDefault()
       if (isAllowedExternalUrl(url)) shell.openExternal(url)
     }
+  })
+
+  mainWindow.webContents.on('render-process-gone', (_event, details) => {
+    console.error('[archer_renderer] render-process-gone:', details)
+    if (mainWindow.isDestroyed() || reloadedAfterRendererGone) return
+    reloadedAfterRendererGone = true
+    setTimeout(() => {
+      if (!mainWindow.isDestroyed()) mainWindow.reload()
+    }, 500)
+  })
+
+  mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
+    console.error('[archer_renderer] did-fail-load:', { errorCode, errorDescription, validatedURL })
+  })
+
+  mainWindow.webContents.on('console-message', (_event, level, message, line, sourceId) => {
+    if (level >= 2) {
+      console.warn('[archer_renderer:console]', { level, message, line, sourceId })
+    }
+  })
+
+  mainWindow.on('unresponsive', () => {
+    console.error('[archer_window] unresponsive')
+  })
+
+  mainWindow.on('responsive', () => {
+    console.log('[archer_window] responsive')
   })
 
   if (isDev && process.env.ELECTRON_RENDERER_URL) {
@@ -354,6 +557,11 @@ ipcMain.handle('archer:pick-files', async () => {
   })
 })
 
+ipcMain.handle('archer:read-file-references', async (_event, refs: Array<{ path?: unknown; name?: unknown; size?: unknown }>) => {
+  if (!Array.isArray(refs)) return []
+  return refs.slice(0, 5).map((ref) => readableFileReference(ref)).filter(Boolean)
+})
+
 ipcMain.handle('archer:capture-screenshot', async () => {
   const screenshotPath = screenshotFilePath('archer-screenshot')
 
@@ -432,6 +640,20 @@ ipcMain.handle('archer:get-api-token', async () => {
 
 ipcMain.handle('archer:ensure-api', async () => ensureApiProcess())
 
+ipcMain.handle('archer:restart-api', async () => restartApiProcess())
+
+ipcMain.handle('archer:get-brain-status', async () => {
+  desktopApiToken = desktopApiToken || getOrCreateDesktopApiToken()
+  const pythonOk = existsSync(PYTHON_BIN)
+  const scriptOk = existsSync(API_SCRIPT)
+  const portOk = await probeExistingApi()
+  const readyOk = portOk ? await probeReadyApi(fetch) : false
+  const tokenOk = portOk && readyOk ? await verifyApiToken(fetch, desktopApiToken) : false
+  const owned = Boolean(apiProcess && apiProcess.pid && !apiProcess.killed)
+  const reason = brainStatusReason({ pythonOk, scriptOk, portOk, readyOk, tokenOk, owned })
+  return { pythonOk, scriptOk, portOk, readyOk, tokenOk, owned, reason }
+})
+
 ipcMain.handle('archer:execute-local-skill', async (_event, name: string, args: Record<string, unknown> = {}) => {
   if (!name || typeof name !== 'string') {
     return { handled: false, result: null }
@@ -441,6 +663,21 @@ ipcMain.handle('archer:execute-local-skill', async (_event, name: string, args: 
 })
 
 ipcMain.handle('archer:list-local-skills', async () => listLocalSkills())
+
+// Single instance lock — prevents two Desktop instances from fighting over the Python API port.
+// When a new instance launches (e.g. after DMG update), it focuses the existing window and quits itself.
+const gotLock = app.requestSingleInstanceLock()
+if (!gotLock) {
+  app.quit()
+} else {
+  app.on('second-instance', () => {
+    const windows = BrowserWindow.getAllWindows()
+    if (windows.length > 0) {
+      const win = windows[0]
+      if (win.isMinimized()) win.restore()
+      win.focus()
+    }
+  })
 
 app.whenReady().then(async () => {
   app.setName('Archer Desktop')
@@ -463,3 +700,4 @@ app.on('before-quit', () => {
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
 })
+}

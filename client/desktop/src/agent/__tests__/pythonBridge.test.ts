@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { pythonApprovalToAgentEvent, pythonOrchestrationToAgentEvent, pythonPlanToAgentEvent, pythonToolEventToAgentEvent } from '../pythonBridge'
+import { pythonApprovalToAgentEvent, pythonOrchestrationToAgentEvent, pythonPlanToAgentEvent, pythonStreamPayloadToAgentEvents, pythonToolEventToAgentEvent } from '../pythonBridge'
 
 describe('python bridge', () => {
   it('converts Python toolEvent to a tool.request event', () => {
@@ -8,6 +8,7 @@ describe('python bridge', () => {
       name: 'hugo_blog',
       status: 'waiting',
       risk: 'low',
+      permissionLevel: 'deploy-remote',
       summary: '确认部署枫弋札记',
       detail: 'action: deploy',
       requiresApproval: true,
@@ -22,6 +23,7 @@ describe('python bridge', () => {
     if (event.type === 'tool.request') {
       expect(event.status).toBe('waiting_approval')
       expect(event.args).toEqual({ action: 'deploy' })
+      expect(event.permissionLevel).toBe('deploy-remote')
     }
   })
 
@@ -29,14 +31,27 @@ describe('python bridge', () => {
     const event = pythonApprovalToAgentEvent('session-1', {
       ok: true,
       eventId: 'hugo-blog-1',
+      traceId: 'trace-approval-1',
       decision: 'approved',
       executed: true,
       output: '部署成功',
       message: 'hugo deploy 已自动执行',
+      permissionLevel: 'deploy-remote',
+      workReceipt: {
+        done: '已发布《Test》到枫弋札记',
+        source: '/tmp/source.md',
+        target: 'https://iver.yivxer.com/posts/test/',
+        verification: 'HTTP 200',
+        rollback: 'content/posts/test.md',
+        traceId: 'trace-approval-1',
+      },
     })
     expect(event.type).toBe('approval.result')
     if (event.type === 'approval.result') {
       expect(event.executed).toBe(true)
+      expect(event.traceId).toBe('trace-approval-1')
+      expect(event.permissionLevel).toBe('deploy-remote')
+      expect(event.receipt?.target).toBe('https://iver.yivxer.com/posts/test/')
     }
   })
 
@@ -74,5 +89,102 @@ describe('python bridge', () => {
     if (event.type === 'orchestration.event') {
       expect(event.labels).toContain('项目规划')
     }
+  })
+
+  it('converts a Python stream payload to ordered agent events', () => {
+    const events = pythonStreamPayloadToAgentEvents('session-1', {
+      runtimeContextEvent: {
+        id: 'ctx-1',
+        traceId: 'trace-1',
+        task: 'blog_publish',
+        phase: 'execute',
+        userIntent: 'deploy_existing_post',
+        lastResult: 'hugo_file_created',
+        expectedNext: 'build_and_deploy',
+      },
+      toolEvent: {
+        id: 'tool-1',
+        traceId: 'trace-1',
+        name: 'obsidian_read',
+        status: 'complete',
+        risk: 'low',
+        summary: '读取完成',
+        detail: 'ok',
+      },
+      orchestrationEvent: {
+        id: 'orch-1',
+        traceId: 'trace-1',
+        intent: 'project',
+        subIntent: 'project_planning',
+        mode: 'builder',
+        depth: 'deep',
+        labels: ['项目规划'],
+        needsMemory: true,
+        needsJob: false,
+      },
+      statusEvent: {
+        traceId: 'trace-1',
+        intentType: 'project',
+        intentLabel: '项目规划',
+        matchedSkills: ['obsidian_read'],
+        isBackground: false,
+        memoryScope: ['project'],
+      },
+      planEvent: {
+        id: 'plan-1',
+        traceId: 'trace-1',
+        title: '继续执行',
+        status: 'proposed',
+        detail: 'next',
+        steps: [],
+      },
+      initiativeEvent: {
+        id: 'initiative-1',
+        kind: 'thread_resume',
+        title: '拾起未闭合话题',
+        message: '上次还留着一个话题。',
+        shadow: true,
+        delivered: false,
+        decisionTrace: { reason: 'stale_open_thread' },
+      },
+      failureHintEvent: {
+        id: 'failure-1',
+        traceId: 'trace-1',
+        keyword: 'command_timeout',
+        stage: 'deploy',
+        recoverable: true,
+        detail: 'deploy timed out',
+      },
+    })
+
+    expect(events.map((event) => event.type)).toEqual([
+      'runtime.context',
+      'tool.request',
+      'orchestration.event',
+      'status.event',
+      'plan.event',
+      'initiative.event',
+      'failure.hint',
+    ])
+    expect(events[0]).toMatchObject({
+      type: 'runtime.context',
+      traceId: 'trace-1',
+      task: 'blog_publish',
+      phase: 'execute',
+      expectedNext: 'build_and_deploy',
+    })
+    expect(events[5]).toMatchObject({
+      type: 'initiative.event',
+      id: 'initiative-1',
+      kind: 'thread_resume',
+      shadow: true,
+      delivered: false,
+    })
+    expect(events[6]).toMatchObject({
+      type: 'failure.hint',
+      keyword: 'command_timeout',
+      stage: 'deploy',
+      recoverable: true,
+    })
   })
 })

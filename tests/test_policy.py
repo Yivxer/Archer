@@ -189,10 +189,10 @@ def test_github_ops_run_strong_confirm():
     assert result.risk == "high"
 
 
-# ── installer 由技能内部处理 ────────────────────────────────────────────────────
+# ── installer 自主执行（agent 模式，不弹卡片）────────────────────────────────────
 
 def test_installer_policy_allow():
-    """installer 在 policy 层返回 ALLOW（技能自己管确认）。"""
+    """installer 直接 ALLOW，由技能内部自主完成下载→扫描→安装。"""
     skills = {"installer": _make_skill("installer", risk="critical")}
     result = check("installer", {"action": "install", "source": "https://x.com/s.py"}, skills)
     assert result.decision == Decision.ALLOW

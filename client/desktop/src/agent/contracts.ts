@@ -1,12 +1,23 @@
 export type RiskLevel = 'low' | 'medium' | 'high' | 'critical'
+export type PermissionLevel = 'read-only' | 'write-local' | 'write-vault' | 'deploy-remote'
 export type ToolStatus = 'running' | 'waiting_approval' | 'complete' | 'blocked' | 'denied'
 export type ApprovalDecision = 'approved' | 'denied'
 export type JobStatus = 'queued' | 'running' | 'waiting_approval' | 'complete' | 'failed' | 'cancelled'
+
+export type WorkReceipt = {
+  done: string
+  source: string
+  target: string
+  verification: string
+  rollback: string
+  traceId?: string
+}
 
 export type AgentEventBase = {
   id: string
   sessionId: string
   createdAt: string
+  traceId?: string
 }
 
 export type TextDeltaEvent = AgentEventBase & {
@@ -24,6 +35,7 @@ export type ToolRequestEvent = AgentEventBase & {
   toolName: string
   displayName: string
   risk: RiskLevel
+  permissionLevel?: PermissionLevel
   status: ToolStatus
   args: Record<string, unknown>
   summary: string
@@ -42,16 +54,20 @@ export type ToolResultEvent = AgentEventBase & {
   ok: boolean
   output: string
   message: string
+  permissionLevel?: PermissionLevel
+  receipt?: WorkReceipt
 }
 
 export type ApprovalResultEvent = AgentEventBase & {
   type: 'approval.result'
   requestId: string
   decision: ApprovalDecision
+  permissionLevel?: PermissionLevel
   executed: boolean
   ok: boolean
   output: string
   message: string
+  receipt?: WorkReceipt
 }
 
 export type JobEvent = AgentEventBase & {
@@ -60,6 +76,7 @@ export type JobEvent = AgentEventBase & {
   title: string
   status: JobStatus
   detail: string
+  stale?: boolean
   progress?: {
     done: number
     total: number
@@ -105,6 +122,34 @@ export type StatusEvent = AgentEventBase & {
   memoryScope: string[]
 }
 
+export type InitiativeEvent = AgentEventBase & {
+  type: 'initiative.event'
+  kind: string
+  title: string
+  message: string
+  shadow: boolean
+  delivered: boolean
+  decisionTrace: Record<string, unknown>
+}
+
+export type RuntimeContextEvent = AgentEventBase & {
+  type: 'runtime.context'
+  task: string
+  phase: string
+  userIntent: string
+  lastResult: string
+  expectedNext: string
+  matchedSkills?: string[]
+}
+
+export type FailureHintEvent = AgentEventBase & {
+  type: 'failure.hint'
+  keyword: string
+  stage: string
+  recoverable: boolean
+  detail: string
+}
+
 export type ErrorEvent = AgentEventBase & {
   type: 'runtime.error'
   scope: 'stream' | 'approval' | 'job' | 'adapter'
@@ -122,6 +167,9 @@ export type AgentEvent =
   | PlanEvent
   | OrchestrationEvent
   | StatusEvent
+  | InitiativeEvent
+  | RuntimeContextEvent
+  | FailureHintEvent
   | ErrorEvent
 
 export type RuntimeMessage = {

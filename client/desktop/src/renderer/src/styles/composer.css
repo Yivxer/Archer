@@ -43,37 +43,37 @@
 .file-ref-row {
   display: flex;
   flex-wrap: wrap;
-  gap: 7px;
-  padding: 10px 12px 0;
+  gap: 6px;
+  padding: 6px 10px 0;
 }
 
 .file-ref-chip {
   display: inline-flex;
   align-items: center;
-  max-width: min(100%, 340px);
-  gap: 6px;
+  max-width: min(100%, 240px);
+  gap: 5px;
   border: 1px solid color-mix(in srgb, var(--cyan) 18%, var(--line));
   border-radius: 999px;
-  padding: 5px 6px 5px 9px;
+  padding: 3px 5px 3px 7px;
   background: color-mix(in srgb, var(--cyan) 7%, transparent);
   color: var(--muted);
-  font-size: 12px;
+  font-size: 11.5px;
 }
 
 .file-ref-chip.has-preview {
   display: grid;
-  grid-template-columns: 72px minmax(0, 1fr) 22px;
+  grid-template-columns: 32px minmax(0, 1fr) 18px;
   align-items: center;
-  min-height: 58px;
-  max-width: min(100%, 320px);
-  border-radius: 10px;
-  padding: 6px;
+  min-height: 36px;
+  max-width: min(100%, 240px);
+  border-radius: 8px;
+  padding: 4px;
 }
 
 .file-ref-chip img {
-  width: 72px;
-  height: 46px;
-  border-radius: 7px;
+  width: 32px;
+  height: 24px;
+  border-radius: 4px;
   object-fit: cover;
   background: color-mix(in srgb, var(--ink) 6%, transparent);
 }
@@ -353,59 +353,6 @@
   line-height: 1.55;
 }
 
-.composer textarea.is-collapsed {
-  min-height: 48px;
-  color: var(--muted);
-  cursor: default;
-}
-
-.draft-collapse-card-placeholder {
-  min-height: 0;
-  overflow: hidden;
-  transition: min-height 200ms ease;
-}
-
-.draft-collapse-card-placeholder.visible {
-  min-height: 48px;
-}
-
-.draft-collapse-card {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 12px 96px 0 14px;
-  border: 1px solid color-mix(in srgb, var(--cyan) 18%, var(--line));
-  border-radius: 999px;
-  padding: 7px 8px 7px 12px;
-  color: var(--muted);
-  background: color-mix(in srgb, var(--cyan) 6%, var(--field));
-  font-size: 12px;
-}
-
-.draft-collapse-card span {
-  min-width: 0;
-  flex: 1 1 auto;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--ink);
-}
-
-.draft-collapse-card button {
-  flex: 0 0 auto;
-  border: 0;
-  border-radius: 999px;
-  padding: 3px 8px;
-  color: var(--muted);
-  background: transparent;
-  font-size: 12px;
-}
-
-.draft-collapse-card button:hover {
-  color: var(--ink);
-  background: color-mix(in srgb, var(--ink) 6%, transparent);
-}
-
 .composer textarea::placeholder {
   color: #9ca3af;
 }
@@ -486,6 +433,37 @@
   background: transparent;
 }
 
+.composer-tool-btn.composer-expert-btn {
+  width: 36px;
+  padding: 0;
+  background: transparent;
+}
+
+.expert-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+}
+
+.composer-popover.persona-menu button {
+  grid-template-columns: 30px minmax(0, 1fr) auto;
+}
+
+.composer-tool-btn.composer-model-btn.has-label {
+  width: auto;
+  min-width: 30px;
+  padding: 0 9px;
+}
+
+.composer-model-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1;
+  white-space: nowrap;
+}
+
 .composer-popover {
   position: absolute;
   bottom: calc(100% + 8px);
@@ -555,8 +533,41 @@
 
 .persona-menu {
   min-width: 238px;
-  max-height: min(420px, 58vh);
+  max-height: min(320px, 48vh);
   overflow-y: auto;
+}
+
+.composer-menu-footer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  width: 100%;
+  margin-top: 4px;
+  padding: 10px 10px 8px;
+  border: 0;
+  border-top: 1px solid var(--line);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.composer-menu-footer strong {
+  display: block;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.composer-menu-footer em {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 11.5px;
+  font-style: normal;
+  line-height: 1.45;
+}
+
+.composer-menu-footer:hover strong {
+  color: var(--cyan);
 }
 
 .composer-menu-section-label {
@@ -696,11 +707,6 @@
 
 :root[data-theme="dark"] .composer-toolbar {
   border-top-color: var(--line);
-}
-
-:root[data-theme="dark"] .draft-collapse-card {
-  background: color-mix(in srgb, var(--cyan) 7%, var(--panel-solid));
-  border-color: color-mix(in srgb, var(--cyan) 20%, var(--line));
 }
 
 :root[data-theme="dark"] .file-ref-chip {

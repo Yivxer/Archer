@@ -21,7 +21,15 @@ const groupIcons: Record<string, React.ElementType> = {
   heart: Heart, settings: Settings, waves: Waves, compass: Compass, trending_up: TrendingUp,
 }
 
-export function MemoryPage({ data, onRefresh }: { data: ArcherAdapter; onRefresh: () => Promise<void> }) {
+export function MemoryPage({
+  data,
+  onRefresh,
+  onMemoryItemsChange,
+}: {
+  data: ArcherAdapter
+  onRefresh: () => Promise<void>
+  onMemoryItemsChange?: (items: MemoryItem[]) => void
+}) {
   const [viewMode, setViewMode] = React.useState<ViewMode>('pending')
   const [items, setItems] = React.useState(data.memory)
   const [busyId, setBusyId] = React.useState<number | null>(null)
@@ -57,24 +65,15 @@ export function MemoryPage({ data, onRefresh }: { data: ArcherAdapter; onRefresh
     try {
       const result = await resolvePendingMemory(id, accepted)
       if (!result.ok) { setMemoryMessage('无待处理记忆被更新'); return }
-      setMemoryMessage(accepted ? '已确认，写入长期记忆' : '已放弃')
-      await onRefresh()
+      setItems((current) => {
+        const nextItems = updateResolvedMemoryItems(current, id)
+        onMemoryItemsChange?.(nextItems)
+        return nextItems
+      })
+      setMemoryMessage(accepted ? '已确认，已写入长期记忆' : '已放弃')
     } catch (error) {
       setMemoryMessage(error instanceof Error ? error.message : '记忆更新失败')
     } finally { setBusyId(null) }
-  }
-
-  function resolveMemory(id: number, accepted: boolean) {
-    if (accepted) { setConfirmState({
-      title: '确认这条记忆？', message: '写入长期记忆。',
-      confirmLabel: '确认', tone: 'default',
-      onConfirm: () => { setConfirmState(null); void performResolveMemory(id, true) }
-    }); return }
-    setConfirmState({
-      title: '放弃这条记忆？', message: '不会进入长期记忆。',
-      confirmLabel: '放弃', tone: 'danger',
-      onConfirm: () => { setConfirmState(null); void performResolveMemory(id, false) }
-    })
   }
 
   async function performBatchResolve(accepted: boolean) {
@@ -82,8 +81,13 @@ export function MemoryPage({ data, onRefresh }: { data: ArcherAdapter; onRefresh
     setBatchBusy(true)
     try {
       const result = await batchResolvePendingMemory(accepted)
+      const resolvedIds = new Set(items.filter((item) => item.status === 'pending').map((item) => item.id))
+      setItems((current) => {
+        const nextItems = current.filter((item) => !resolvedIds.has(item.id))
+        onMemoryItemsChange?.(nextItems)
+        return nextItems
+      })
       setMemoryMessage(accepted ? `已全部确认，写入 ${result.count ?? 0} 条` : `已全部放弃，共 ${result.deleted ?? 0} 条`)
-      await onRefresh()
     } catch (error) {
       setMemoryMessage(error instanceof Error ? error.message : '批量操作失败')
     } finally { setBatchBusy(false) }
@@ -205,7 +209,7 @@ export function MemoryPage({ data, onRefresh }: { data: ArcherAdapter; onRefresh
               {pending.filter(matchesFilters).length ? (
                 pending.filter(matchesFilters).map((item) => (
                   <MemoryCard key={`pending-${item.id}`} item={item} busy={busyId === item.id || batchBusy}
-                    onResolve={canResolveMemory ? resolveMemory : undefined} compact />
+                    onResolve={canResolveMemory ? performResolveMemory : undefined} compact />
                 ))
               ) : (
                 <div className="empty-inline">{cleanQuery ? '无匹配记忆' : '暂无待确认记忆，继续对话后会自动提炼'}</div>
@@ -325,10 +329,15 @@ function MemoryCard({
   )
 }
 
+function updateResolvedMemoryItems(items: MemoryItem[], id: number): MemoryItem[] {
+  return items.filter((item) => item.id !== id)
+}
+
 function memorySourceLabel(item: MemoryItem): string {
   if (item.source === 'soul-import') return 'Soul 导入'
   if (item.source === 'desktop') return 'Desktop 对话'
   if (item.source === 'auto') return '自动提取'
+  if (item.source === 'vault_reflection') return 'Vault 结晶'
   return item.source || ''
 }
 

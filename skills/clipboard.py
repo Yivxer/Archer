@@ -40,7 +40,7 @@ def schema() -> dict:
     }
 
 
-def run(action: str, text: str = "") -> str:
+def _run_impl(action: str, text: str = "") -> str:
     if action == "read":
         result = subprocess.run(["pbpaste"], capture_output=True, text=True)
         content = result.stdout
@@ -57,3 +57,10 @@ def run(action: str, text: str = "") -> str:
         return f"已写入剪贴板（{len(text)} 字符）"
 
     return f"未知 action：{action}（支持 read / write）"
+
+
+def run(action: str, text: str = "") -> str:
+    try:
+        return _run_impl(action, text)
+    except Exception as e:
+        return f"剪贴板操作失败：{type(e).__name__}: {e}"

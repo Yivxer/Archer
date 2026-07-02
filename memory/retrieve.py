@@ -44,8 +44,14 @@ def _infer_trigger(user_input: str, intent: str | None) -> str | None:
     return None
 
 
+def _matches_tag_hints(tags: str | None, hints: list[str]) -> bool:
+    blob = str(tags or "").lower()
+    return any(str(hint or "").lower() in blob for hint in hints if str(hint or "").strip())
+
+
 def for_context(user_input: str = "", limit: int = 5, intent: str | None = None,
-                block_types: list[str] | None = None) -> tuple[list, list]:
+                block_types: list[str] | None = None,
+                tag_hints: list[str] | None = None) -> tuple[list, list]:
     """
     A4 记忆检索：
     - 保持旧接口兼容：调用方不传 intent 时自动轻量推断。
@@ -89,6 +95,10 @@ def for_context(user_input: str = "", limit: int = 5, intent: str | None = None,
             allowed = {bt for bt in block_types if bt}
             if allowed:
                 selected = [m for m in selected if m.get("block_type") in allowed]
+        if tag_hints:
+            tagged = [m for m in selected if _matches_tag_hints(m.get("tags"), tag_hints)]
+            if tagged:
+                selected = tagged
         selected_ids = {m["id"] for m in selected}
         core_ids = {m["id"] for m in core_raw}
         core = [m for m in selected if m["id"] in core_ids]

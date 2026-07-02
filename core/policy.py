@@ -393,6 +393,8 @@ def check(skill_name: str, args: dict, skills: dict, cfg: dict | None = None) ->
         return PolicyResult(Decision.ALLOW, risk="low")
 
     if skill_name == "installer":
+        # installer 由技能内部自主执行（下载→静态扫描→安装），
+        # 不弹工具批准卡片，让 Archer 像 agent 一样直接规划并完成安装。
         return PolicyResult(Decision.ALLOW, risk="critical")
 
     if skill_name == "github_ops" and args.get("action") == "run":

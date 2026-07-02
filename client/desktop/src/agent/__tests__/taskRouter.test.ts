@@ -9,38 +9,48 @@ describe('task router', () => {
     expect(route.reason).toBe('short conversational request')
   })
 
-  it('routes large requests to background jobs', () => {
+  it('keeps large requests in foreground so Python orchestrator owns routing', () => {
     const route = routeTaskForRuntime({
       text: Array.from({ length: 15 }, (_, index) => `第 ${index + 1} 步：继续优化 runtime`).join('\n'),
     })
 
-    expect(route.mode).toBe('background')
-    expect(route.reason).toBe('large request')
-    expect(route.timeoutSeconds).toBe(600)
+    expect(route.mode).toBe('foreground')
+    expect(route.reason).toBe('python orchestrator owns routing')
+    expect(route.timeoutSeconds).toBe(300)
   })
 
-  it('routes implementation-style requests with paths to background jobs', () => {
+  it('keeps implementation-style requests with paths in foreground for Python orchestration', () => {
     const route = routeTaskForRuntime({
       text: '继续优化昨天的内容，修改 client/desktop/src/renderer/src/pages/ChatPage.tsx 并跑测试',
     })
 
-    expect(route.mode).toBe('background')
-    expect(route.reason).toBe('implementation-style request')
+    expect(route.mode).toBe('foreground')
+    expect(route.reason).toBe('python orchestrator owns routing')
   })
 
-  it('routes attached-file implementation requests to background jobs', () => {
+  it('keeps attached-file implementation requests in foreground for Python orchestration', () => {
     const route = routeTaskForRuntime({
       text: '按照计划继续实现这部分能力',
       fileCount: 1,
     })
 
-    expect(route.mode).toBe('background')
+    expect(route.mode).toBe('foreground')
+    expect(route.reason).toBe('python orchestrator owns routing')
   })
 
   it('keeps hugo blog publish with attachment in the foreground', () => {
     const route = routeTaskForRuntime({
       text: '部署这篇文章到枫弋札记上',
       fileCount: 1,
+    })
+
+    expect(route.mode).toBe('foreground')
+    expect(route.reason).toBe('hugo blog publish uses attachments and tool stream')
+  })
+
+  it('keeps local markdown article publish requests in the foreground', () => {
+    const route = routeTaskForRuntime({
+      text: '/Users/Yivxer/Library/Mobile Documents/iCloud~md~obsidian/Documents/个人知识管理系统/当训练变成习惯以后，人会对疲劳变得迟钝.md部署这一篇文章',
     })
 
     expect(route.mode).toBe('foreground')

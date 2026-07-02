@@ -16,6 +16,7 @@ import urllib.request
 import urllib.parse
 import re
 import time
+from core.url_safety import open_public_http_url, validate_public_http_url
 
 SKILL = {
     "name": "web_search",
@@ -78,8 +79,8 @@ def _ddg_search(query: str, max_results: int = 6) -> list[dict]:
         "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
     }
 
-    req = urllib.request.Request(url, headers=headers)
-    with urllib.request.urlopen(req, timeout=15) as resp:
+    safe_url = validate_public_http_url(url)
+    with open_public_http_url(safe_url, headers=headers, timeout=15) as resp:
         html = resp.read().decode("utf-8", errors="ignore")
 
     results = []

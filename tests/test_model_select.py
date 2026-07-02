@@ -4,6 +4,7 @@ from __future__ import annotations
 import unittest
 
 from core.model_select import resolve_active_model, status_model_label
+from core.model_profiles import active_api_config, active_model_profile_id
 
 
 def cfg(models=None, *, model_auto=True, model="fast-model", vision="vision-model"):
@@ -62,6 +63,59 @@ class TestResolveActiveModel(unittest.TestCase):
             status_model_label(cfg(model_auto=False, model="heavy-model")),
             "heavy-model",
         )
+
+    def test_default_profile_keeps_lite_deepseek(self):
+        api = active_api_config({"api": {"api_key": "sk-test"}})
+        self.assertEqual(active_model_profile_id({"api": {}}), "lite")
+        self.assertEqual(api["base_url"], "https://api.deepseek.com/v1")
+        self.assertEqual(api["model"], "deepseek-chat")
+
+    def test_active_profile_uses_configured_profile(self):
+        api = active_api_config({
+            "api": {"active_profile": "pro"},
+            "model_profiles": {
+                "pro": {
+                    "provider": "Kimi",
+                    "base_url": "https://kimi.example/v1",
+                    "api_key": "kimi-key",
+                    "model": "kimi-model",
+                    "models": ["kimi-model"],
+                }
+            },
+        })
+        self.assertEqual(api["active_profile"], "pro")
+        self.assertEqual(api["base_url"], "https://kimi.example/v1")
+        self.assertEqual(api["api_key"], "kimi-key")
+        self.assertEqual(api["model"], "kimi-model")
+
+    def test_top_level_kimi_does_not_leak_into_lite_profile(self):
+        api = active_api_config({
+            "api": {
+                "active_profile": "lite",
+                "base_url": "https://api.moonshot.cn/v1",
+                "model": "kimi-k2.6",
+                "api_key": "kimi-key",
+            },
+            "model_profiles": {
+                "lite": {
+                    "provider": "DeepSeek",
+                    "base_url": "https://api.deepseek.com/v1",
+                    "model": "deepseek-chat",
+                    "models": ["deepseek-chat", "deepseek-reasoner"],
+                },
+                "pro": {
+                    "provider": "Kimi",
+                    "base_url": "https://api.moonshot.cn/v1",
+                    "api_key": "kimi-key",
+                    "model": "kimi-k2.6",
+                },
+            },
+        })
+
+        self.assertEqual(api["active_profile"], "lite")
+        self.assertEqual(api["provider"], "DeepSeek")
+        self.assertEqual(api["base_url"], "https://api.deepseek.com/v1")
+        self.assertEqual(api["model"], "deepseek-chat")
 
 
 if __name__ == "__main__":

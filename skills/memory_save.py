@@ -75,6 +75,15 @@ def run(args: dict) -> str:
     importance = max(1, min(5, importance))
 
     try:
+        from core.context import load_config
+        from core.experts import active_expert, merge_expert_tags
+
+        cfg = load_config()
+        tags = merge_expert_tags(tags, active_expert(cfg))
+    except Exception:
+        pass
+
+    try:
         from memory.store import save
         mid = save(content, tags=tags, type=mtype, importance=importance)
         type_label = "心迹" if mtype == "insight" else "记忆"

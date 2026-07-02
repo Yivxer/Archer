@@ -104,15 +104,81 @@ def test_high_recent_anxiety_creates_touch_item():
         assert any(item["kind"] == "anxiety_checkin" for item in items)
 
 
+def test_due_hypothesis_creates_review_touch_item():
+    from core.proactive import scan_proactive_touch
+    from memory.hypothesis_tracker import create_hypothesis
+
+    with tempfile.TemporaryDirectory() as tmp:
+        db_path = _setup_db(tmp)
+        create_hypothesis(
+            "运动后情绪更稳定",
+            "连续三天力量训练后，晚间焦虑会下降。",
+            validate_after_days=1,
+            now=datetime(2026, 5, 20, 12, 0, 0),
+        )
+
+        items = scan_proactive_touch(
+            db_path=db_path,
+            sessions_dir=Path(tmp) / "sessions",
+            now=datetime(2026, 5, 25, 12, 0, 0),
+            cfg={"proactive": {"hypothesis_due": True}},
+        )
+
+        item = next(item for item in items if item["kind"] == "hypothesis_review")
+        assert item["severity"] == "medium"
+        assert item["action"] == "验证假设"
+        assert item["target"] == "Memory"
+
+
+def test_muted_due_hypothesis_does_not_create_touch_item():
+    from core.proactive import scan_proactive_touch
+    from memory.hypothesis_tracker import create_hypothesis
+
+    with tempfile.TemporaryDirectory() as tmp:
+        db_path = _setup_db(tmp)
+        hid = create_hypothesis(
+            "睡眠影响表达",
+            "睡眠不足会让表达更急。",
+            validate_after_days=1,
+            now=datetime(2026, 5, 20, 12, 0, 0),
+        )
+        conn = sqlite3.connect(db_path)
+        conn.execute(
+            "UPDATE hypotheses SET muted_until=? WHERE id=?",
+            ("2026-05-26T12:00:00", hid),
+        )
+        conn.commit()
+        conn.close()
+
+        items = scan_proactive_touch(
+            db_path=db_path,
+            sessions_dir=Path(tmp) / "sessions",
+            now=datetime(2026, 5, 25, 12, 0, 0),
+            cfg={"proactive": {"hypothesis_due": True}},
+        )
+
+        assert not any(item["kind"] == "hypothesis_review" for item in items)
+
+
 def test_proactive_touch_api_route(monkeypatch, tmp_path):
     from terminal.api import _routes as routes
+    from memory.hypothesis_tracker import create_hypothesis
 
     monkeypatch.setattr("memory.store.DB_PATH", tmp_path / "archer.db")
     monkeypatch.setattr("core.session.SESSIONS_DIR", tmp_path / "sessions")
-    monkeypatch.setattr(routes, "_load_config", lambda: {"proactive": {"enabled": True}})
+    monkeypatch.setattr(routes, "_load_config", lambda: {"proactive": {"enabled": True, "hypothesis_due": True}})
+    import memory.store as store
+    store.init_db()
+    create_hypothesis(
+        "到期假设",
+        "这条应该进入主动触达。",
+        validate_after_days=1,
+        now=datetime.now() - timedelta(days=3),
+    )
 
     status, payload = routes.payload_get("/proactive-touch")
 
     assert status == 200
     assert payload["enabled"] is True
     assert isinstance(payload["items"], list)
+    assert any(item["kind"] == "hypothesis_review" for item in payload["items"])

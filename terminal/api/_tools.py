@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import json
 import logging
+import queue
 import re
 import subprocess
 import threading
+import time
 from pathlib import Path
 from uuid import uuid4
 
@@ -21,6 +23,207 @@ from terminal.api._config import (
 )
 
 logger = logging.getLogger("archer_api")
+MODEL_STREAM_HEARTBEAT_SECONDS = 8.0
+MODEL_STREAM_TOTAL_TIMEOUT_SECONDS = 180.0
+HUGO_WORKFLOW_HEARTBEAT_SECONDS = 8.0
+HUGO_WORKFLOW_TOTAL_TIMEOUT_SECONDS = 300.0
+
+# DeepSeek 伪 XML / DSML 残留检测（移植自 terminal/archer.py:228-235）
+_DSML_MARKER = "｜｜DSML｜｜"
+_FAKE_XML_RE = re.compile(
+    r"<(读取文件|写入文件|搜索文件|文件查找|参数|tool_call|invoke|function_call|execute)[^>]{0,60}>",
+    re.IGNORECASE,
+)
+
+
+def _has_fake_xml(text: str) -> bool:
+    """检测 DeepSeek 输出的伪 XML 假标签或 DSML 残留。"""
+    return bool(_FAKE_XML_RE.search(text)) or _DSML_MARKER in text
+
+
+def _split_safe_model_chunk(buffer: str, chunk: str) -> tuple[str, str, bool]:
+    """Return stream-safe text before fake tool markup and whether markup appeared."""
+    combined = buffer + chunk
+    if _has_fake_xml(combined):
+        earliest = len(combined)
+        marker_index = combined.find(_DSML_MARKER)
+        if marker_index >= 0:
+            earliest = min(earliest, marker_index)
+        match = _FAKE_XML_RE.search(combined)
+        if match:
+            earliest = min(earliest, match.start())
+        safe_combined = combined[:earliest]
+        safe_text = safe_combined[len(buffer):] if len(safe_combined) > len(buffer) else ""
+        return safe_combined, safe_text, True
+    return combined, chunk, False
+
+
+def _initiative_event_from_log(log: dict) -> dict:
+    trace = log.get("decision_trace") if isinstance(log.get("decision_trace"), dict) else {}
+    return {
+        "id": f"initiative-{log.get('id')}",
+        "kind": str(log.get("kind") or ""),
+        "title": str(log.get("title") or ""),
+        "message": str(log.get("message") or ""),
+        "shadow": True,
+        "delivered": bool(log.get("delivered", False)),
+        "decisionTrace": trace,
+        "createdAt": str(log.get("created_at") or ""),
+    }
+
+
+def _yield_shadow_initiative_events():
+    """Emit Part 8 initiative contract events without delivering them to UI."""
+    try:
+        import memory.store as store
+        from core.part8_threads import scan_thread_resume_candidates
+
+        for log in scan_thread_resume_candidates(db_path=store.DB_PATH):
+            yield {
+                "type": "initiativeEvent",
+                "initiativeEvent": _initiative_event_from_log(log),
+            }
+    except Exception:
+        return
+
+
+def _record_part8_shadow_material(messages: list[dict]) -> None:
+    """Record Part 8.2 shadow-only monologue and continuity clues."""
+    try:
+        import memory.store as store
+        from core.monologue import generate_monologue
+        from core.part8_clues import record_thread_clues_from_messages
+
+        generate_monologue(db_path=store.DB_PATH, messages=messages)
+        record_thread_clues_from_messages(db_path=store.DB_PATH, messages=messages)
+    except Exception:
+        return
+
+
+def _runtime_context_event(
+    *,
+    query: str,
+    intent_info: dict,
+    orchestration,
+    file_refs: list[dict] | None = None,
+    trace_id: str = "",
+) -> dict:
+    matched_skills = list(getattr(orchestration, "matched_skills", []) or [])
+    wants_blog = _wants_hugo_publish(query, file_refs or []) or "hugo_blog" in matched_skills
+    task = "blog_publish" if wants_blog else str(getattr(orchestration, "sub_intent", "") or intent_info.get("intent", "chat"))
+    return {
+        "id": f"runtime-context-{uuid4().hex[:8]}",
+        "traceId": trace_id,
+        "task": task,
+        "phase": "route",
+        "userIntent": str(getattr(orchestration, "sub_intent", "") or intent_info.get("intent", "chat")),
+        "lastResult": "",
+        "expectedNext": "select_workflow_or_model",
+        "matchedSkills": matched_skills,
+    }
+
+
+def _failure_hint_event(exc: Exception, *, stage: str, trace_id: str = "") -> dict:
+    detail = str(exc)[:300] or type(exc).__name__
+    lowered = detail.lower()
+    if "timeout" in lowered or "connect" in lowered:
+        keyword = "command_timeout"
+        recoverable = True
+    elif "permission" in lowered or "denied" in lowered:
+        keyword = "write_permission"
+        recoverable = False
+    elif "not found" in lowered or "no such file" in lowered or "missing" in lowered:
+        keyword = "dependency_missing"
+        recoverable = True
+    elif "syntax" in lowered or "parse" in lowered or "json" in lowered:
+        keyword = "syntax_mismatch"
+        recoverable = True
+    else:
+        keyword = "runtime_failure"
+        recoverable = True
+    return {
+        "id": f"failure-hint-{uuid4().hex[:8]}",
+        "traceId": trace_id,
+        "keyword": keyword,
+        "stage": stage,
+        "recoverable": recoverable,
+        "detail": detail,
+    }
+
+
+def _with_trace_id(event: dict, trace_id: str) -> dict:
+    if not trace_id or not isinstance(event, dict):
+        return event
+    event_type = event.get("type")
+    payload_keys = {
+        "tool_event": "toolEvent",
+        "orchestrationEvent": "orchestrationEvent",
+        "planEvent": "planEvent",
+        "runtimeContextEvent": "runtimeContextEvent",
+        "statusEvent": "statusEvent",
+        "initiativeEvent": "initiativeEvent",
+        "failureHintEvent": "failureHintEvent",
+    }
+    payload_key = payload_keys.get(str(event_type))
+    payload = event.get(payload_key) if payload_key else None
+    if isinstance(payload, dict):
+        payload.setdefault("traceId", trace_id)
+        if payload_key == "toolEvent" and isinstance(payload.get("draft"), dict):
+            payload["draft"].setdefault("traceId", trace_id)
+    return event
+
+
+def _trim_model_messages_for_context(
+    messages: list[dict], *, keep_recent: int = 20, threshold: int = 36,
+) -> list[dict]:
+    if len(messages) <= threshold:
+        return messages
+    if keep_recent <= 0:
+        return messages
+    system_prefix: list[dict] = []
+    rest = list(messages)
+    while rest and rest[0].get("role") == "system":
+        system_prefix.append(rest.pop(0))
+    if len(rest) <= keep_recent:
+        return [*system_prefix, *rest]
+    omitted = len(rest) - keep_recent
+    summary = {
+        "role": "system",
+        "content": f"[长上下文保护] 旧对话已省略 {omitted} 条，仅保留最近 {keep_recent} 条消息。",
+    }
+    return [*system_prefix, summary, *rest[-keep_recent:]]
+
+
+def _iter_model_stream_with_heartbeat(messages: list[dict], **kwargs):
+    """Run blocking model streaming in a worker so SSE can emit keepalive events."""
+    output: queue.Queue[tuple[str, object]] = queue.Queue()
+
+    def worker() -> None:
+        try:
+            from core.llm import stream_chat as model_stream_chat
+            for chunk in model_stream_chat(messages, **kwargs):
+                output.put(("chunk", chunk))
+            output.put(("done", None))
+        except Exception as exc:
+            output.put(("error", exc))
+
+    thread = threading.Thread(target=worker, daemon=True)
+    thread.start()
+    started = time.monotonic()
+    while True:
+        if time.monotonic() - started > MODEL_STREAM_TOTAL_TIMEOUT_SECONDS:
+            raise TimeoutError("model stream total timeout")
+        try:
+            kind, value = output.get(timeout=MODEL_STREAM_HEARTBEAT_SECONDS)
+        except queue.Empty:
+            yield {"type": "heartbeat"}
+            continue
+        if kind == "chunk":
+            yield {"type": "chunk", "text": value}
+        elif kind == "error":
+            raise value
+        elif kind == "done":
+            break
 
 # ---------------------------------------------------------------------------
 # Intent detection helpers（委托 core/desktop_tool_router，保留旧函数名兼容测试）
@@ -29,9 +232,9 @@ logger = logging.getLogger("archer_api")
 from core.desktop_tool_router import (
     extract_github_args as _extract_github_args,
     extract_obsidian_target_path as _extract_obsidian_target_path,
-    extract_obsidian_write_content as _extract_obsidian_write_content,
     extract_shell_command as _extract_shell_command,
     filter_skills_for_intent as _filter_skills_for_intent,
+    parse_obsidian_write_request as _parse_obsidian_write_request,
     plan_desktop_turn as _plan_desktop_turn,
     plan_desktop_tools as _plan_desktop_tools,
     should_draft_obsidian_write as _should_draft_obsidian_write,
@@ -88,20 +291,36 @@ def _tool_event(
     }
     if draft:
         tool_event["draft"] = draft
+        if draft.get("permissionLevel"):
+            tool_event["permissionLevel"] = draft.get("permissionLevel")
     return {"type": "tool_event", "toolEvent": tool_event}
 
 
 def _obsidian_write_draft(query: str) -> dict:
-    body = _extract_obsidian_write_content(query)
-    content = (
+    parsed = _parse_obsidian_write_request(query)
+    content = parsed.body if parsed.mode == "overwrite" else (
         "\n<!-- Archer Desktop 自动写入 -->\n"
-        f"{body}\n"
+        f"{parsed.body}\n"
     )
+    path = parsed.path
+    # 计算 before/after 预览，供确认卡展示 diff
+    try:
+        from skills.obsidian_write import compute_preview
+        preview = compute_preview({"path": path, "content": content, "mode": parsed.mode})
+    except Exception:
+        preview = None
     return {
-        "path": _extract_obsidian_target_path(query),
-        "mode": "append",
+        "path": path,
+        "mode": parsed.mode,
         "contentPreview": content[:500],
         "content": content,
+        "beforeText": preview["before"] if preview else "",
+        "afterText": preview["after"] if preview else content[:2000],
+        "previewMode": parsed.mode,
+        "previewExists": preview["exists"] if preview else False,
+        "expectedMtime": preview["mtime"] if preview else None,
+        "expectedSize": preview["size"] if preview else None,
+        "expectedFingerprint": preview["fingerprint"] if preview else None,
     }
 
 
@@ -118,7 +337,29 @@ def _make_api_tool_request(
     )
 
 
+def _obsidian_work_intent(path: str, mode: str, *, before_text: str = "") -> dict:
+    original_lines = len(before_text.splitlines()) if before_text else 0
+    return {
+        "workflowName": "Obsidian 写入",
+        "action": mode,
+        "targets": [{"label": "目标笔记", "path": path}],
+        "steps": ["读取当前文件状态", "校验文件指纹", "写入内容", "返回写入回执"],
+        "verifyPlan": f"确认目标文件存在，原文件约 {original_lines} 行",
+        "rollbackPlan": "写入前校验 expected_fingerprint；如文件已变化则拒绝写入",
+    }
+
+
+def _expert_scoped_skills(cfg: dict | None = None) -> dict:
+    from core.experts import active_expert, filter_skills_for_expert
+    from skills.loader import load_skills
+
+    resolved = cfg or _load_config()
+    return filter_skills_for_expert(load_skills(), active_expert(resolved))
+
+
 def _select_api_skills(query: str, all_skills: dict | None = None) -> dict:
+    if all_skills is None:
+        all_skills = _expert_scoped_skills()
     return _plan_desktop_turn(
         query, all_skills, llm_fallback=False,
     ).raw_selected
@@ -158,6 +399,7 @@ def _tool_event_from_request(
 
 def _tool_event_from_result(
     event_id: str, name: str, result: dict, *, summary: str,
+    draft: dict | None = None,
 ) -> dict:
     policy = result.get("policy", {})
     risk = policy.get("risk", "low")
@@ -166,7 +408,7 @@ def _tool_event_from_result(
     return _tool_event(
         event_id, name, status, risk,
         summary if result.get("ok") else f"{summary}失败",
-        detail, False,
+        detail, False, draft,
     )
 
 
@@ -204,12 +446,12 @@ _AUTO_EXEC_SKILLS = {
 
 
 def _extract_md_path_from_query(query: str) -> str:
-    match = re.search(r"(/Users/[^\s`']+\.md)", query)
+    match = re.search(r"(/Users/[^\n\r`'\"]+?\.md)", query)
     return match.group(1) if match else ""
 
 
 def _extract_md_paths_from_text(text: str) -> list[str]:
-    return list(dict.fromkeys(re.findall(r"(/Users/[^\s`'\"]+\.md)", text)))
+    return list(dict.fromkeys(re.findall(r"(/Users/[^\n\r`'\"]+?\.md)", text)))
 
 
 def _read_md_source(path_value: str) -> tuple[str, str] | None:
@@ -299,12 +541,12 @@ def _format_hugo_chat_summary(
         if stripped.startswith("线上地址："):
             lines.append(stripped)
             url_match = None
-        elif stripped.startswith("验证："):
+        elif stripped.startswith("验证：") or stripped.startswith("单页验证成功"):
             lines.append(stripped)
     if url_match and not any(line.startswith("线上地址：") for line in lines):
         lines.append(f"线上地址：{url_match.group(0)}")
     if deploy_ok:
-        if not any(line.startswith("验证：") for line in lines):
+        if not any(line.startswith("验证：") or line.startswith("单页验证成功") for line in lines):
             verify_match = re.search(r"验证：.+", deploy_text)
             if verify_match:
                 lines.append(verify_match.group(0))
@@ -312,6 +554,108 @@ def _format_hugo_chat_summary(
     elif deploy_text and not deploy_ok:
         lines.append(deploy_text)
     return "\n".join(lines)
+
+
+def _hugo_workflow_event(
+    *,
+    workflow_id: str,
+    step: str,
+    event_id: str,
+    args: dict,
+    result: str,
+    summary: str,
+) -> dict:
+    ok = "错误" not in str(result) and ("失败" not in str(result) or "部署成功" in str(result))
+    summary = summary or {
+        "create": "创建博客文章",
+        "delete": "删除博客文章",
+        "deploy": "部署枫弋札记",
+    }.get(step, f"hugo_blog · {step}")
+    return _tool_event_from_result(
+        event_id,
+        "hugo_blog",
+        {
+            "ok": ok,
+            "executed": ok,
+            "output": result,
+            "summary": summary,
+            "policy": {"risk": "low"},
+        },
+        summary=summary,
+        draft={
+            "workflow": "hugo_publish",
+            "workflowId": workflow_id,
+            "workflowStep": step,
+            "workflowArgs": args,
+        },
+    )
+
+
+def _run_hugo_publish_workflow(
+    *,
+    title: str,
+    actions: list[tuple[str, dict]],
+    summary_prefix: str | None = None,
+) -> tuple[list[dict], str]:
+    """Run the authoritative Hugo publish workflow and emit traceable events."""
+    from core.tool_runtime import invoke as runtime_invoke
+    from skills import hugo_blog as hugo_blog_module
+
+    workflow_id = f"hugo-publish-{uuid4().hex[:8]}"
+    tool_events: list[dict] = []
+    deploy_result = ""
+    deploy_ok = False
+    last_result = ""
+    skills = {"hugo_blog": hugo_blog_module}
+
+    for step, args in actions:
+        event_id = f"{workflow_id}-{step}"
+        step_summary = {
+            "create": "创建博客文章",
+            "delete": "删除博客文章",
+            "deploy": "部署枫弋札记",
+        }.get(step, f"hugo_blog · {step}")
+        tr = runtime_invoke("hugo_blog", args, skills)
+        if tr.ok:
+            result = tr.content_preview or tr.summary
+        else:
+            err = tr.error or {}
+            result = (
+                f"枫弋札记工作流失败（{step}）："
+                f"{err.get('type', 'Error')}: {err.get('message') or tr.summary}"
+            )
+            tool_events.append(_hugo_workflow_event(
+                workflow_id=workflow_id,
+                step=step,
+                event_id=event_id,
+                args=args,
+                result=result,
+                summary=step_summary,
+            ))
+            return tool_events, result
+        last_result = result
+        if step == "deploy":
+            deploy_result = result
+            deploy_ok = "部署成功" in result
+        tool_events.append(_hugo_workflow_event(
+            workflow_id=workflow_id,
+            step=step,
+            event_id=event_id,
+            args=args,
+            result=result,
+            summary=step_summary,
+        ))
+        if step != "deploy" and result.startswith("错误"):
+            return tool_events, result
+
+    if not deploy_result:
+        return tool_events, last_result
+    return tool_events, _format_hugo_chat_summary(
+        title,
+        deploy_result,
+        deploy_ok=deploy_ok,
+        prefix=summary_prefix,
+    )
 
 
 def _try_direct_hugo_deploy_existing(
@@ -331,7 +675,7 @@ def _try_direct_hugo_deploy_existing(
     if not slug and not title:
         return None
 
-    from skills.hugo_blog import POSTS_DIR, run as hugo_run, _safe_slug, _slug_from_post
+    from skills.hugo_blog import POSTS_DIR, _safe_slug, _slug_from_post
 
     target: Path | None = None
     if slug:
@@ -347,35 +691,83 @@ def _try_direct_hugo_deploy_existing(
 
     if target is None and title:
         for path in POSTS_DIR.glob("*.md"):
-            text = path.read_text(encoding="utf-8", errors="ignore")[:2000]
-            if f'title: "{title}"' in text or f"title: {title}" in text:
+            # 用 frontmatter 解析替代字符串拼接匹配，避免引号格式差异导致漏匹配
+            hints = _extract_frontmatter_hints(path.read_text(encoding="utf-8", errors="ignore")[:2000])
+            if hints.get("title", "") == title:
                 target = path
                 break
 
     if target is None:
         return None
 
-    deploy_event_id = f"hugo-direct-deploy-{uuid4().hex[:8]}"
-    deploy_result = hugo_run({"action": "deploy", "filename": target.name})
-    deploy_ok = "部署成功" in str(deploy_result)
-    event = _tool_event_from_result(
-        deploy_event_id,
-        "hugo_blog",
-        {
-            "ok": deploy_ok,
-            "executed": deploy_ok,
-            "output": deploy_result,
-            "summary": "部署枫弋札记",
-            "policy": {"risk": "low"},
-        },
-        summary="部署枫弋札记",
+    deploy_title = title or target.stem
+    args = {"action": "deploy", "filename": target.name}
+    return _hugo_confirmation_result(
+        action="deploy",
+        title=deploy_title,
+        args=args,
+        source=str(target),
+        target_url=f"https://iver.yivxer.com/posts/{_safe_slug(target.stem)}/",
+        steps=["构建 Hugo 站点", "同步到远端", "验证线上 URL"],
+        verify_plan="部署后验证文章 URL 返回 HTTP 200",
+        rollback_plan="不修改源文件；如部署失败保留当前 content/posts 文件",
     )
-    summary = _format_hugo_chat_summary(
-        title or target.stem,
-        deploy_result,
-        deploy_ok=deploy_ok,
+
+
+def _wants_hugo_delete(query: str) -> bool:
+    lowered = query.lower()
+    delete_terms = ("删除", "删掉", "移除", "下架", "撤下", "隐藏", "remove", "delete")
+    return any(term in lowered for term in delete_terms) and (
+        "枫弋札记" in query
+        or "博客" in query
+        or "网站" in query
+        or "站点" in query
+        or "content/posts" in lowered
+        or "iver.yivxer.com" in lowered
     )
-    return [event], summary
+
+
+def _try_direct_hugo_delete(query: str) -> tuple[list[dict], str] | None:
+    """明确删除文章 → 移出 content/posts 并全站部署，避免模型假删除。"""
+    if not _wants_hugo_delete(query):
+        return None
+
+    from skills.hugo_blog import POSTS_DIR, _post_frontmatter, _safe_slug
+
+    matches: list[Path] = []
+    lowered = query.lower()
+    for path in POSTS_DIR.glob("*.md"):
+        fm = _post_frontmatter(path)
+        title = str(fm.get("title") or "")
+        slug = _safe_slug(str(fm.get("slug") or path.stem))
+        if path.name in query or path.stem in lowered or slug in lowered:
+            matches.append(path)
+            continue
+        if title and title in query:
+            matches.append(path)
+            continue
+        title_parts = [part for part in re.split(r"[，,：:｜|《》\s]+", title) if len(part) >= 4]
+        if any(part in query for part in title_parts):
+            matches.append(path)
+
+    if not matches:
+        return None
+    if len(matches) > 1:
+        candidates = "\n".join(f"- {p.name} · {str(_post_frontmatter(p).get('title') or p.stem)}" for p in matches[:8])
+        return [], f"找到多篇可能要删除的文章，请先指定其中一篇：\n{candidates}"
+
+    target = matches[0]
+    title = str(_post_frontmatter(target).get("title") or target.stem)
+    return _hugo_confirmation_result(
+        action="delete_and_deploy",
+        title=title,
+        args={"action": "delete_and_deploy", "filename": target.name},
+        source=str(target),
+        target_url=f"https://iver.yivxer.com/posts/{_safe_slug(str(_post_frontmatter(target).get('slug') or target.stem))}/",
+        steps=["移出 content/posts 文件到 .archer-trash/posts", "重新部署站点", "验证原 URL 返回 HTTP 404"],
+        verify_plan="删除并部署后验证原文章 URL 返回 HTTP 404",
+        rollback_plan="从 .archer-trash/posts 恢复源文件后重新 deploy",
+    )
 
 
 def _parse_markdown_for_hugo(text: str, *, source_path: str = "") -> dict | None:
@@ -397,14 +789,19 @@ def _parse_markdown_for_hugo(text: str, *, source_path: str = "") -> dict | None
             body = parts[2].strip()
 
     title = fm.get("title", "").strip()
+    title_source = "frontmatter title" if title else ""
     if not title:
-        for pat in (r"^#\s+(.+)$", r"^##\s+(.+)$"):
-            match = re.search(pat, body, re.MULTILINE)
-            if match:
-                title = match.group(1).strip()
-                break
+        h1 = re.search(r"^#\s+(.+)$", body, re.MULTILINE)
+        if h1:
+            title = h1.group(1).strip()
+            title_source = "H1"
     if not title and source_path:
         title = Path(source_path).stem
+        title_source = "filename"
+    if not title:
+        h2 = re.search(r"^##\s+(.+)$", body, re.MULTILINE)
+        if h2:
+            title = h2.group(1).strip()
 
     category = "阅读" if "读书笔记" in source_path else "系统"
     cats_raw = fm.get("categories", fm.get("category", "")).strip().strip("[]")
@@ -434,10 +831,57 @@ def _parse_markdown_for_hugo(text: str, *, source_path: str = "") -> dict | None
 
     return {
         "title": title[:120],
+        "titleSource": title_source or "filename",
         "category": category,
         "description": description[:200],
         "body": clean_body.strip(),
     }
+
+
+def _hugo_confirmation_result(
+    *,
+    action: str,
+    title: str,
+    args: dict,
+    source: str,
+    target_url: str,
+    steps: list[str],
+    verify_plan: str,
+    rollback_plan: str,
+) -> tuple[list[dict], str]:
+    event_id = f"hugo-blog-{action}-{uuid4().hex[:8]}"
+    work_intent = {
+        "workflowName": "枫弋札记",
+        "action": action,
+        "targets": [
+            {"label": "源文件", "path": source},
+            {"label": "线上地址", "url": target_url},
+        ],
+        "steps": steps,
+        "verifyPlan": verify_plan,
+        "rollbackPlan": rollback_plan,
+    }
+    request = _make_api_tool_request(
+        "hugo_blog",
+        args,
+        event_id=event_id,
+        display_name="hugo_blog",
+        extra={
+            "title": title,
+            "sourcePath": source,
+            "targetUrl": target_url,
+            "workIntent": work_intent,
+        },
+        force_approval=True,
+    )
+    if not request.get("blocked"):
+        set_tool_draft(event_id, request)
+    event = _tool_event_from_request(
+        request,
+        summary=f"确认枫弋札记操作：{title}",
+        detail_prefix=f"action: {action}, target: {target_url}",
+    )
+    return [event], "已生成枫弋札记确认卡，请确认后再执行。"
 
 
 def _try_direct_hugo_publish(
@@ -450,8 +894,6 @@ def _try_direct_hugo_publish(
     sources = _collect_hugo_markdown_sources(messages or [], query, file_refs)
     if not sources:
         return None
-
-    from skills.hugo_blog import run as hugo_run
 
     label, text = sources[0]
     parsed = _parse_markdown_for_hugo(text, source_path=label)
@@ -482,65 +924,35 @@ def _try_direct_hugo_publish(
         elif not parsed.get("body"):
             return None
 
-    tool_events: list[dict] = []
     new_args = {
-        "action": "new",
+        "action": "publish",
         "title": parsed["title"],
         "category": parsed["category"],
         "description": parsed["description"],
         "body": parsed["body"],
+        "sourcePath": label,
+        "titleSource": parsed.get("titleSource") or "filename",
     }
     if parsed.get("slug"):
         new_args["slug"] = parsed["slug"]
-    new_event_id = f"hugo-direct-new-{uuid4().hex[:8]}"
-    new_result = hugo_run(new_args)
-    new_ok = not str(new_result).startswith("错误")
-    tool_events.append(_tool_event_from_result(
-        new_event_id,
-        "hugo_blog",
-        {
-            "ok": new_ok,
-            "executed": new_ok,
-            "output": new_result,
-            "summary": "创建博客文章",
-            "policy": {"risk": "low"},
-        },
-        summary="创建博客文章",
-    ))
-    if not new_ok:
-        return tool_events, new_result
 
-    filename = ""
-    created = re.search(r"文章已创建：(.+?\.md)", str(new_result))
-    if created:
-        filename = Path(created.group(1)).name
-
-    deploy_event_id = f"hugo-direct-deploy-{uuid4().hex[:8]}"
-    deploy_args: dict = {"action": "deploy"}
-    if filename:
-        deploy_args["filename"] = filename
-    deploy_result = hugo_run(deploy_args)
-    deploy_ok = "部署成功" in str(deploy_result)
-    tool_events.append(_tool_event_from_result(
-        deploy_event_id,
-        "hugo_blog",
-        {
-            "ok": deploy_ok,
-            "executed": deploy_ok,
-            "output": deploy_result,
-            "summary": "部署枫弋札记",
-            "policy": {"risk": "low"},
-        },
-        summary="部署枫弋札记",
-    ))
-
-    summary = _format_hugo_chat_summary(
-        parsed["title"],
-        deploy_result,
-        deploy_ok=deploy_ok,
-        prefix=f"已从《{parsed['title']}》发布到枫弋札记。",
+    from skills.hugo_blog import _safe_slug
+    slug = _safe_slug(str(new_args.get("slug") or parsed["title"]))
+    return _hugo_confirmation_result(
+        action="publish",
+        title=parsed["title"],
+        args=new_args,
+        source=label,
+        target_url=f"https://iver.yivxer.com/posts/{slug}/",
+        steps=[
+            f"读取源稿标题（来源：{new_args['titleSource']}）",
+            "写入或复用 content/posts 文章",
+            "构建并同步站点",
+            "验证线上 URL 返回 HTTP 200",
+        ],
+        verify_plan="发布后验证文章 URL 返回 HTTP 200",
+        rollback_plan=f"如需撤回，将 content/posts/{slug}.md 移入 .archer-trash/posts 后重新 deploy",
     )
-    return tool_events, summary
 
 
 _HUGO_AGENT_SYSTEM_PROMPT = """你是 Archer 的枫弋札记（博客）工作流执行器。
@@ -564,6 +976,11 @@ _HUGO_AGENT_SYSTEM_PROMPT = """你是 Archer 的枫弋札记（博客）工作�
 2. 若对话里已有正文或用户指定了文章，用 action=read 检查 frontmatter 与 Markdown 结构
 3. 结构不合规时用 action=edit 修正 title、description、category、body
 4. 最后用 action=deploy 构建并同步上线
+
+当用户要删除、下架、移除某篇文章时：
+1. 先用 action=list 或对话中的 title/slug/filename 找到目标文章
+2. 用 action=delete 移出 content/posts
+3. 再用 action=deploy 同步线上站点
 
 当用户要写新文章并发布时：
 1. 从对话整理 title、category、description、body（Markdown 正文）
@@ -806,7 +1223,7 @@ def _run_desktop_tool_loop(
                 tool_events.append(event)
                 messages.append({
                     "role": "tool", "tool_call_id": tc.id,
-                    "content": f"[等待确认] 工具 {fn_name} 已生成确认卡片，由用户决定是否执行。请告知用户此操作正在等待确认。",
+                    "content": f"[等待确认] 工具 {fn_name} 已生成确认卡片，由用户决定是否执行。请用一句话告诉用户你打算做什么，并提示在上方卡片确认。",
                 })
             except Exception:
                 messages.append({
@@ -868,6 +1285,9 @@ def _iter_obsidian_write_events(query: str, plan):
             "path": draft_fields["path"],
             "content": draft_fields["content"],
             "mode": draft_fields["mode"],
+            "expected_mtime": draft_fields.get("expectedMtime"),
+            "expected_size": draft_fields.get("expectedSize"),
+            "expected_fingerprint": draft_fields.get("expectedFingerprint"),
         },
         event_id=draft_event_id,
         display_name="obsidian_write",
@@ -875,6 +1295,15 @@ def _iter_obsidian_write_events(query: str, plan):
             "path": draft_fields["path"],
             "mode": draft_fields["mode"],
             "contentPreview": draft_fields["contentPreview"],
+            "beforeText": draft_fields.get("beforeText", ""),
+            "afterText": draft_fields.get("afterText", ""),
+            "previewMode": draft_fields.get("previewMode", draft_fields["mode"]),
+            "previewExists": draft_fields.get("previewExists", False),
+            "workIntent": _obsidian_work_intent(
+                draft_fields["path"],
+                draft_fields["mode"],
+                before_text=draft_fields.get("beforeText", ""),
+            ),
         },
         force_approval=False,
     )
@@ -1085,6 +1514,9 @@ def _generate_obsidian_draft_with_ai(query: str, messages: list[dict], ai_reply:
     system_prompt = (
         "你是 Archer 的 Obsidian 写作助手。"
         "请基于完整对话上下文，将需要记录的内容整理成结构化的 Markdown 笔记。\n\n"
+        "如果用户要求修改、调整、润色或重写某个已有 Markdown 文件，"
+        "请输出修改后的完整 Markdown 正文；保留原文中已有的 frontmatter、标题、链接和用户没有要求改动的主体结构。"
+        "不要输出解释、diff 或额外说明。\n\n"
         + ("\n\n".join(spec_blocks) if spec_blocks else "")
         + "\n\n只输出笔记正文，第一行直接开始正文。"
     )
@@ -1224,12 +1656,24 @@ def _clean_file_refs(raw: object) -> list[dict]:
             clean_size = int(size) if size is not None else 0
         except (TypeError, ValueError):
             clean_size = 0
-        refs.append({"path": path, "name": name[:180], "size": max(0, clean_size)})
+        clean_ref = {"path": path, "name": name[:180], "size": max(0, clean_size)}
+        content = item.get("content")
+        if isinstance(content, str) and content:
+            clean_ref["content"] = content[:12000]
+            clean_ref["contentChars"] = len(clean_ref["content"])
+            clean_ref["truncated"] = bool(item.get("truncated"))
+        refs.append(clean_ref)
     return refs
 
 
+MAX_FILE_REF_BYTES = 1_000_000
+
+
 def _file_reference_context(
-    file_refs: list[dict], per_file_limit: int = 6000, total_limit: int = 12000,
+    file_refs: list[dict],
+    per_file_limit: int = 6000,
+    total_limit: int = 12000,
+    max_file_bytes: int = MAX_FILE_REF_BYTES,
 ) -> tuple[str, list[dict]]:
     events: list[dict] = []
     sections: list[str] = []
@@ -1245,6 +1689,14 @@ def _file_reference_context(
             f"读取本地文件：{display_name}", path_value, draft=draft,
         ))
         try:
+            declared_size = int(ref.get("size") or 0)
+            if declared_size > max_file_bytes:
+                events.append(_tool_event(
+                    event_id, "file.reference", "blocked", "low",
+                    f"已跳过超大文件：{display_name}",
+                    f"file size limit exceeded: {declared_size} > {max_file_bytes}", draft=draft,
+                ))
+                continue
             path = Path(path_value).expanduser()
             suffix = path.suffix.lower()
             if suffix and suffix not in TEXT_FILE_EXTENSIONS:
@@ -1267,7 +1719,15 @@ def _file_reference_context(
                     "total file reference limit reached", draft=draft,
                 ))
                 continue
-            raw_text = path.read_text(encoding="utf-8", errors="ignore")
+            preloaded_text = ref.get("content")
+            if isinstance(preloaded_text, str) and preloaded_text:
+                raw_text = preloaded_text
+                source_detail = "preloaded"
+                preloaded_truncated = bool(ref.get("truncated"))
+            else:
+                raw_text = path.read_text(encoding="utf-8", errors="ignore")
+                source_detail = "disk"
+                preloaded_truncated = False
             if "\x00" in raw_text[:2048]:
                 events.append(_tool_event(
                     event_id, "file.reference", "blocked", "low",
@@ -1279,10 +1739,11 @@ def _file_reference_context(
             limit = min(per_file_limit, remaining)
             text = raw_text[:limit]
             used += len(text)
-            truncated = len(raw_text) > len(text)
+            truncated = preloaded_truncated or len(raw_text) > len(text)
             sections.append(
                 f"### {display_name}\n"
                 f"path: {path}\n"
+                f"source: {source_detail}\n"
                 f"truncated: {str(truncated).lower()}\n\n"
                 f"{text}"
             )
@@ -1348,6 +1809,7 @@ def _chat(payload: dict) -> dict:
 # ---------------------------------------------------------------------------
 
 _api_extract_thread: threading.Thread | None = None
+_api_extract_lock = threading.Lock()
 
 
 def _yield_memory_compaction_events():
@@ -1373,6 +1835,33 @@ def _yield_memory_compaction_events():
         logger.warning("[memory] compaction failed: %s", exc)
 
 
+def _should_auto_save_memory(memory: dict, sensitive: bool) -> bool:
+    if sensitive:
+        return False
+    mtype = str(memory.get("type", "insight") or "insight")
+    review_types = {
+        "emotion_pattern",
+        "value",
+        "value_conflict",
+        "life_theme",
+        "self_narrative",
+        "relationship_pattern",
+        "project_mythology",
+        "reflection_anchor",
+    }
+    if mtype in review_types:
+        return False
+    try:
+        confidence = float(memory.get("confidence", 0.7) or 0.7)
+    except Exception:
+        confidence = 0.0
+    try:
+        depth = int(memory.get("depth", 3) or 3)
+    except Exception:
+        depth = 3
+    return confidence >= 0.75 and depth <= 3
+
+
 def _do_extract_api(history: list[dict]) -> None:
     if len(history) < 2:
         return
@@ -1394,7 +1883,7 @@ def _do_extract_api(history: list[dict]) -> None:
                 return
             suggest_reason = format_memory_candidate_reason(policy, latest_user)
         from memory.extract import extract
-        from memory.store import add_pending, is_duplicate_pending, is_low_quality_memory
+        from memory.store import add_pending, is_duplicate_pending, is_low_quality_memory, save
         extract_kwargs = {}
         if policy:
             extract_kwargs = {
@@ -1403,6 +1892,7 @@ def _do_extract_api(history: list[dict]) -> None:
             }
         mems, _ = extract(history, **extract_kwargs)
         staged = 0
+        saved = 0
         skipped_dup = 0
         skipped_low = 0
         # Build session_summary: first user message, first 80 chars
@@ -1424,23 +1914,37 @@ def _do_extract_api(history: list[dict]) -> None:
             if is_duplicate_pending(content):
                 skipped_dup += 1
                 continue
-            add_pending(
-                content=content,
-                type=mtype,
-                importance=m.get("importance", 3),
-                tags=m.get("tags", ""),
-                source="desktop",
-                confidence=m.get("confidence", 0.7),
-                depth=m.get("depth", 3),
-                suggest_reason=suggest_reason,
-                block_type=m.get("block_type"),
-                label=m.get("label"),
-                session_summary=session_summary,
-            )
-            staged += 1
+            if _should_auto_save_memory(m, policy.sensitive if policy else False):
+                save(
+                    content=content,
+                    tags=m.get("tags", ""),
+                    type=mtype,
+                    importance=m.get("importance", 3),
+                    source="desktop",
+                    confidence=m.get("confidence", 0.7),
+                    depth=m.get("depth", 3),
+                    block_type=m.get("block_type"),
+                    label=m.get("label"),
+                )
+                saved += 1
+            else:
+                add_pending(
+                    content=content,
+                    type=mtype,
+                    importance=m.get("importance", 3),
+                    tags=m.get("tags", ""),
+                    source="desktop",
+                    confidence=m.get("confidence", 0.7),
+                    depth=m.get("depth", 3),
+                    suggest_reason=suggest_reason,
+                    block_type=m.get("block_type"),
+                    label=m.get("label"),
+                    session_summary=session_summary,
+                )
+                staged += 1
         logger.info(
-            "[memory] desktop extract: staged %d, skipped %d dup, %d low-quality",
-            staged, skipped_dup, skipped_low
+            "[memory] desktop extract: saved %d, staged %d, skipped %d dup, %d low-quality",
+            saved, staged, skipped_dup, skipped_low
         )
     except Exception as exc:
         logger.warning("[memory] desktop extract failed: %s", exc)
@@ -1448,12 +1952,23 @@ def _do_extract_api(history: list[dict]) -> None:
 
 def _bg_extract_api(history: list[dict]) -> None:
     global _api_extract_thread
-    if _api_extract_thread and _api_extract_thread.is_alive():
-        return
-    _api_extract_thread = threading.Thread(
-        target=_do_extract_api, args=(list(history),), daemon=True
-    )
-    _api_extract_thread.start()
+    # 加锁避免多请求并发时 TOCTOU 竞态导致重复启动提取线程
+    with _api_extract_lock:
+        if _api_extract_thread and _api_extract_thread.is_alive():
+            return
+        _api_extract_thread = threading.Thread(
+            target=_do_extract_api, args=(list(history),), daemon=True
+        )
+        _api_extract_thread.start()
+
+
+def _soul_insight_for_orchestration() -> dict:
+    try:
+        from core.orchestrator import collect_soul_insight_context
+
+        return collect_soul_insight_context(limit=3)
+    except Exception:
+        return {}
 
 
 # ---------------------------------------------------------------------------
@@ -1470,6 +1985,8 @@ def _iter_chat_chunks(
     from core.llm import stream_chat
 
     query = _latest_user_text(messages)
+    trace_id = f"trace-{uuid4().hex[:12]}"
+    _record_part8_shadow_material(messages)
     # 历史（不含当前这条用户消息），用于历史感知意图与检索改写
     prior_history = messages[:-1] if (messages and messages[-1].get("role") == "user") else messages
     intent_info = classify_query_intent(query, history=prior_history, llm_fallback=False)
@@ -1482,7 +1999,16 @@ def _iter_chat_chunks(
             orchestrate_user_input,
             orchestration_to_event_dict,
         )
-        orchestration = orchestrate_user_input(query, history=prior_history)
+        try:
+            orchestration = orchestrate_user_input(
+                query,
+                history=prior_history,
+                soul_insight=_soul_insight_for_orchestration(),
+            )
+        except TypeError as exc:
+            if "soul_insight" not in str(exc):
+                raise
+            orchestration = orchestrate_user_input(query, history=prior_history)
         memory_scope = orchestration.memory_scope
         task_plan = build_task_plan(query, orchestration)
         task_plan_block = format_task_plan_for_prompt(task_plan)
@@ -1499,15 +2025,24 @@ def _iter_chat_chunks(
         plan_event = None
         orchestration_event = None
     intent = intent_info["intent"]
-    needs_tools = bool(intent_info.get("needs_tools"))
+    classifier_needs_tools = bool(intent_info.get("needs_tools"))
+    needs_tools = bool(orchestration.needs_tools) if orchestration is not None else classifier_needs_tools
     from core.context import resolve_context_limits
     context_limits = resolve_context_limits(
         memory_scope,
         needs_memory=intent_info["needs_memory"],
         memory_mode=memory_mode,
     )
+    _cfg = _load_config()
+    from core.experts import active_expert, format_expert_block, active_expert_id
+    _expert = active_expert(_cfg)
+    _expert_block = format_expert_block(_expert)
+    _scoped_skills = _expert_scoped_skills(_cfg)
+    for event in _yield_shadow_initiative_events():
+        yield event
     _turn_plan = _plan_desktop_turn(
         query,
+        _scoped_skills,
         intent=intent,
         needs_tools=needs_tools,
         llm_fallback=needs_tools,
@@ -1519,7 +2054,6 @@ def _iter_chat_chunks(
     stance_prompt = ""
     try:
         from core.context import _get_mode_prompt
-        _cfg = _load_config()
         if not _cfg["persona"].get("mode_auto", True):
             active_stance = _cfg["persona"].get("current_mode") or active_stance
         if active_stance:
@@ -1536,21 +2070,70 @@ def _iter_chat_chunks(
             {"role": "system", "content": file_context},
             *enriched_messages,
         ]
+    if obsidian_mode != "off":
+        try:
+            from knowledge.vault_sensor import build_focus_context
+            vault_context, vault_source = build_focus_context()
+            if vault_context and vault_source:
+                enriched_messages = [
+                    {"role": "system", "content": vault_context},
+                    *enriched_messages,
+                ]
+                yield {
+                    "type": "vault_sources",
+                    "mode": obsidian_mode,
+                    "current_focus": {
+                        "title": vault_source.get("title", ""),
+                        "path": vault_source.get("path", ""),
+                    },
+                    "sources": [vault_source],
+                }
+                yield _with_trace_id(_tool_event(
+                    "vault-context", "vault.context", "complete", "low",
+                    "已注入当前 Obsidian 聚焦笔记",
+                    f"path: {vault_source.get('path', '')}, mode: {obsidian_mode}",
+                    draft={
+                        "path": vault_source.get("path", ""),
+                        "title": vault_source.get("title", ""),
+                    },
+                ), trace_id)
+        except Exception as exc:
+            yield _with_trace_id(_tool_event(
+                "vault-context", "vault.context", "blocked", "low",
+                "Obsidian 聚焦上下文注入失败，已跳过", str(exc)[:240],
+            ), trace_id)
     if orchestration_event:
-        yield {"type": "orchestrationEvent", "orchestrationEvent": orchestration_event}
+        yield _with_trace_id({"type": "orchestrationEvent", "orchestrationEvent": orchestration_event}, trace_id)
     if plan_event:
-        yield {"type": "planEvent", "planEvent": plan_event}
+        yield _with_trace_id({"type": "planEvent", "planEvent": plan_event}, trace_id)
     if orchestration is not None:
-        yield {
+        yield _with_trace_id({
+            "type": "runtimeContextEvent",
+            "runtimeContextEvent": _runtime_context_event(
+                query=query,
+                intent_info=intent_info,
+                orchestration=orchestration,
+                file_refs=file_refs,
+                trace_id=trace_id,
+            ),
+        }, trace_id)
+        _matched_for_status = list(orchestration.matched_skills)
+        from core.experts import expert_skill_allowlist
+        _allowlist = expert_skill_allowlist(_expert)
+        if _allowlist:
+            _matched_for_status = [name for name in _matched_for_status if name in _allowlist]
+        yield _with_trace_id({
             "type": "statusEvent",
             "statusEvent": {
                 "intentType": intent_info["intent"],
                 "intentLabel": intent_info.get("intent_label", intent_info["intent"]),
-                "matchedSkills": list(orchestration.matched_skills),
+                "matchedSkills": _matched_for_status,
                 "isBackground": orchestration.needs_job,
                 "memoryScope": list(orchestration.memory_scope),
+                "expertId": active_expert_id(_cfg),
+                "expertLabel": str(_expert.get("label", "")),
             },
-        }
+        }, trace_id)
     if memory_mode == "off":
         yield _tool_event(
             "memory-retrieve", "memory.retrieve", "complete", "low",
@@ -1570,10 +2153,26 @@ def _iter_chat_chunks(
             f"mode: {memory_mode}, scope: local memory, limit: {limit}",
         )
         try:
+            from core.experts import expert_memory_tags
             from memory.retrieve import for_context, format_for_prompt
-            core, related = for_context(
-                augment_retrieval_query(query, prior_history), limit=limit, intent=intent,
-            )
+            retrieval_kwargs = {
+                "limit": limit,
+                "intent": intent,
+                "tag_hints": expert_memory_tags(_expert) or None,
+            }
+            try:
+                core, related = for_context(
+                    augment_retrieval_query(query, prior_history),
+                    **retrieval_kwargs,
+                )
+            except TypeError as exc:
+                if "tag_hints" not in str(exc):
+                    raise
+                retrieval_kwargs.pop("tag_hints", None)
+                core, related = for_context(
+                    augment_retrieval_query(query, prior_history),
+                    **retrieval_kwargs,
+                )
             memory_context = format_for_prompt(core, related)
             if memory_context:
                 enriched_messages = [
@@ -1722,45 +2321,95 @@ def _iter_chat_chunks(
                 "搜索失败", str(exc)[:240],
             )
     if "web_fetch" in _pre_selected:
-        url_match = re.search(r'https?://[^\s）+）"]+', query)
+        url_match = re.search(r'https?://[^\s）)>"\'<\]]+', query)
         if url_match:
             target_url = url_match.group(0).rstrip('.。，,;；')
-            yield _tool_event(
+            yield _with_trace_id(_tool_event(
                 "web-fetch", "web_fetch", "running", "low",
                 "抓取网页", target_url[:100],
-            )
+            ), trace_id)
             try:
                 from skills.web_fetch import run as web_fetch_run
                 fetch_result = web_fetch_run({"url": target_url, "max_chars": 4000})
                 fetch_text = str(fetch_result)[:800]
-                yield _tool_event(
+                yield _with_trace_id(_tool_event(
                     "web-fetch", "web_fetch", "complete", "low",
                     "网页抓取完成", fetch_text,
-                )
+                ), trace_id)
                 if fetch_result:
                     enriched_messages = [
                         {"role": "system", "content": f"网页内容（{target_url}）：\n{fetch_result}"},
                         *enriched_messages,
                     ]
             except Exception as exc:
-                yield _tool_event(
+                yield _with_trace_id(_tool_event(
                     "web-fetch", "web_fetch", "blocked", "low",
                     "抓取失败", str(exc)[:240],
-                )
+                ), trace_id)
 
     # ── 枫弋札记：附件/路径直发 或 LLM 工具链，自动执行，不弹确认卡
     if _wants_hugo_publish(query, file_refs) and "hugo_blog" in _selected_tools:
-        direct = _try_direct_hugo_deploy_existing(enriched_messages, query)
-        if not direct:
-            direct = _try_direct_hugo_publish(query, file_refs, messages=enriched_messages)
-        if direct:
-            hugo_events, hugo_summary = direct
-        else:
-            _, hugo_events, hugo_summary = _run_hugo_agent_turn(
-                enriched_messages, query, file_refs=file_refs,
-            )
+        output: queue.Queue[tuple[str, object]] = queue.Queue()
+
+        def run_hugo_workflow() -> None:
+            try:
+                direct = _try_direct_hugo_delete(query)
+                if not direct:
+                    direct = _try_direct_hugo_deploy_existing(enriched_messages, query)
+                if not direct:
+                    direct = _try_direct_hugo_publish(query, file_refs, messages=enriched_messages)
+                if direct:
+                    output.put(("result", direct))
+                    return
+                _, agent_events, agent_summary = _run_hugo_agent_turn(
+                    enriched_messages, query, file_refs=file_refs,
+                )
+                output.put(("result", (agent_events, agent_summary)))
+            except Exception as exc:
+                output.put(("error", exc))
+
+        thread = threading.Thread(target=run_hugo_workflow, daemon=True)
+        thread.start()
+        started = time.monotonic()
+        while True:
+            if time.monotonic() - started > HUGO_WORKFLOW_TOTAL_TIMEOUT_SECONDS:
+                raise TimeoutError("hugo workflow total timeout")
+            try:
+                kind, value = output.get(timeout=HUGO_WORKFLOW_HEARTBEAT_SECONDS)
+            except queue.Empty:
+                yield {
+                    "type": "statusEvent",
+                    "statusEvent": {
+                        "id": f"hugo-wait-{uuid4().hex[:8]}",
+                        "intentType": intent,
+                        "intentLabel": "枫弋札记部署中",
+                        "matchedSkills": list(_selected_tools.keys()),
+                        "isBackground": False,
+                        "memoryScope": memory_scope,
+                        "traceId": trace_id,
+                    },
+                }
+                continue
+            if kind == "error":
+                raise value
+            hugo_events, hugo_summary = value  # type: ignore[misc]
+            break
+
         for event in hugo_events:
-            yield event
+            yield _with_trace_id(event, trace_id)
+        if any(
+            isinstance(event, dict)
+            and event.get("toolEvent", {}).get("status") == "blocked"
+            for event in hugo_events
+        ):
+            yield {
+                "type": "failureHintEvent",
+                "failureHintEvent": _failure_hint_event(
+                    RuntimeError(hugo_summary or "hugo workflow failed"),
+                    stage="hugo_workflow",
+                    trace_id=trace_id,
+                ),
+            }
         yield {"type": "ready", "ready": True}
         if hugo_summary:
             yield {"type": "token", "text": hugo_summary}
@@ -1776,15 +2425,18 @@ def _iter_chat_chunks(
 
     # ── Desktop Tool Loop：让 LLM 通过 function calling 自主调用未被专用 builder 覆盖的技能 ──
     _all_selected = _selected_tools
-    enriched_messages, tool_loop_events = _run_desktop_tool_loop(
-        enriched_messages, _all_selected, query,
-    )
+    if _all_selected:
+        enriched_messages, tool_loop_events = _run_desktop_tool_loop(
+            enriched_messages, _all_selected, query,
+        )
+    else:
+        tool_loop_events = []
     for event in tool_loop_events:
-        yield event
+        yield _with_trace_id(event, trace_id)
 
     # ── 预检工具事件（Shell / GitHub / Obsidian 搜索） ──
     for event in api_tool_events:
-        yield event
+        yield _with_trace_id(event, trace_id)
 
     direct_obsidian_writes: list[str] = []
     tool_notes: list[str] = []
@@ -1804,7 +2456,7 @@ def _iter_chat_chunks(
         elif name == "hugo_blog" and tool_event.get("status") in ("waiting", "ready"):
             tool_notes.append(
                 "hugo_blog 工具可用——可以在回复中自然撰写 Markdown 格式的博客文章。"
-                "客户端会在你回复完成后自动创建文章文件并提供部署确认卡片。"
+                "客户端会在你回复完成后自动创建文章并直接部署到枫弋札记（无需确认卡片）。"
                 "如需新建文章请给出标题（## 开头）、分类和正文；如需部署已有文章请说明文件名。"
             )
         elif tool_event.get("requiresApproval") and "obsidian" in name:
@@ -1850,7 +2502,7 @@ def _iter_chat_chunks(
 
     # ── 检测 Obsidian 写入意图（非预检，不在此阶段弹草稿卡） ──
     obsidian_write_intent = _tool_plan.obsidian_write
-    obsidian_target_path = _extract_obsidian_target_path(query) if obsidian_write_intent else None
+    obsidian_target_path = _parse_obsidian_write_request(query).path if obsidian_write_intent else None
 
     # ── 构建 AI 系统提示词 ──
     # 想法3：桌面端与终端共用完整灵魂分层（COVENANT/PRESENCE/SOUL/MEMORY/mode/对峙提醒），
@@ -1868,7 +2520,7 @@ def _iter_chat_chunks(
         emotion_hint = infer_turn_emotion_hint(query, prior_history)
         thread_hint = resolve_topic_thread(query, prior_history)
         core_persona = build_system_prompt(
-            _load_config(),
+            _cfg,
             db_memories="",
             heavy=intent_info["needs_memory"],
             intent=intent,
@@ -1881,6 +2533,7 @@ def _iter_chat_chunks(
             task_plan_block=task_plan_block,
             mode_constraint_block=mode_constraint_block,
             matched_skills_block=matched_skills_block,
+            expert_block=_expert_block,
             needs_project_context=(
                 orchestration.needs_project_context if orchestration else None
             ),
@@ -1905,6 +2558,21 @@ def _iter_chat_chunks(
             "并告知用户回复完成后客户端会自动生成写入草稿卡片，用户点击「写入」后才会真正执行。"
             f"当前识别到的目标路径：{obsidian_target_path or '（待确认）'}。"
         )
+    # 清洗工具循环残留：剥离 tool_calls / tool 角色消息，避免污染主回复上下文
+    # DeepSeek 在历史含 tool_calls 但当前请求不带 tools 时会 400 或输出异常
+    clean_messages: list[dict] = []
+    for m in enriched_messages:
+        role = m.get("role")
+        if role == "tool":
+            continue  # 工具结果消息直接丢弃
+        if role == "assistant" and m.get("tool_calls"):
+            # 保留 assistant 文本内容（如果有），剥离 tool_calls 字段
+            content = m.get("content")
+            if content:
+                clean_messages.append({"role": "assistant", "content": content})
+            continue
+        clean_messages.append(m)
+
     model_messages = [
         {
             "role": "system",
@@ -1920,8 +2588,9 @@ def _iter_chat_chunks(
                 + (obsidian_hint if obsidian_hint else "")
             ),
         },
-        *enriched_messages,
+        *clean_messages,
     ]
+    model_messages = _trim_model_messages_for_context(model_messages)
 
     # ── AI 主回复（收集完整回复用于后续草稿生成） ──
     from core.model_select import resolve_active_model
@@ -1934,11 +2603,34 @@ def _iter_chat_chunks(
         has_images=has_images,
     )
     ai_reply_parts: list[str] = []
+    streamed_safe_text = ""
+    fake_markup_detected = False
     try:
-        for chunk in stream_chat(model_messages, model=active_model):
+        for item in _iter_model_stream_with_heartbeat(model_messages, model=active_model):
+            if item.get("type") == "heartbeat":
+                yield {
+                    "type": "statusEvent",
+                    "statusEvent": {
+                        "id": f"model-wait-{uuid4().hex[:8]}",
+                        "intentType": intent,
+                        "intentLabel": "模型响应中",
+                        "matchedSkills": list(_selected_tools.keys()),
+                        "isBackground": False,
+                        "memoryScope": memory_scope,
+                        "traceId": trace_id,
+                    },
+                }
+                continue
+            chunk = str(item.get("text") or "")
             if chunk:
                 ai_reply_parts.append(chunk)
-                yield {"type": "token", "text": chunk}
+                if fake_markup_detected:
+                    continue
+                streamed_safe_text, safe_chunk, detected = _split_safe_model_chunk(streamed_safe_text, chunk)
+                if safe_chunk:
+                    yield {"type": "token", "text": safe_chunk}
+                if detected:
+                    fake_markup_detected = True
     except Exception as stream_exc:
         err_msg = str(stream_exc)[:300] or type(stream_exc).__name__
         if "rate" in err_msg.lower() or "limit" in err_msg.lower():
@@ -1947,34 +2639,115 @@ def _iter_chat_chunks(
             yield {"type": "token", "text": f"\n\n（连接超时，请检查本地 API 是否正常运行。）"}
         else:
             yield {"type": "token", "text": f"\n\n（回复生成中断：{err_msg}）"}
+        yield {"type": "failureHintEvent", "failureHintEvent": _failure_hint_event(stream_exc, stage="model_stream", trace_id=trace_id)}
         yield {"type": "error", "detail": err_msg}
         yield {"type": "done", "done": True}
         return
     ai_reply = "".join(ai_reply_parts)
 
+    # ── DSML / 伪 XML 救援：DeepSeek 在多轮上下文中容易输出伪标签 ──
+    # 移植自 terminal/archer.py:582-592，Desktop API 之前缺失此逻辑
+    if _has_fake_xml(ai_reply):
+        rescue_messages = list(model_messages) + [
+            {"role": "assistant", "content": ai_reply},
+            {"role": "user", "content": (
+                "你刚才输出了假标签（如 <读取文件>）或 DSML 标记，这些不会被执行。"
+                "请直接用自然语言重新回答刚才的问题，不要输出任何 XML、伪标签或 function call 语法。"
+            )},
+        ]
+        rescue_parts: list[str] = []
+        try:
+            for item in _iter_model_stream_with_heartbeat(rescue_messages, model=active_model):
+                if item.get("type") == "heartbeat":
+                    yield {
+                        "type": "statusEvent",
+                        "statusEvent": {
+                            "id": f"model-rescue-wait-{uuid4().hex[:8]}",
+                            "intentType": intent,
+                            "intentLabel": "模型修正中",
+                            "matchedSkills": list(_selected_tools.keys()),
+                            "isBackground": False,
+                            "memoryScope": memory_scope,
+                            "traceId": trace_id,
+                        },
+                    }
+                    continue
+                chunk = str(item.get("text") or "")
+                if chunk:
+                    rescue_parts.append(chunk)
+                    yield {"type": "token", "text": chunk}
+        except Exception:
+            # 救援失败则保留原始回复
+            pass
+        else:
+            if rescue_parts:
+                ai_reply = "".join(rescue_parts)
+
+    if not ai_reply.strip():
+        had_tool_activity = bool(tool_loop_events or api_tool_events)
+        yield {
+            "type": "failureHintEvent",
+            "failureHintEvent": {
+                "id": f"failure-hint-{uuid4().hex[:8]}",
+                "traceId": trace_id,
+                "keyword": "tool_executed_no_summary" if had_tool_activity else "model_empty_response",
+                "stage": "model_stream",
+                "recoverable": True,
+                "detail": (
+                    "工具事件已产生，但模型没有返回总结文本。"
+                    if had_tool_activity else
+                    "模型请求结束但没有返回可显示文本。"
+                ),
+            },
+        }
+
     # ── AI 回复完成后：生成 Obsidian 写入草稿 ──
     if obsidian_write_intent:
         try:
+            parsed_write_request = _parse_obsidian_write_request(query)
+            write_mode = parsed_write_request.mode
             ai_content = _generate_obsidian_draft_with_ai(query, enriched_messages, ai_reply)
             if ai_content:
                 draft_event_id = f"obsidian-write-{uuid4().hex[:8]}"
-                content_with_tag = (
+                content_with_tag = ai_content if write_mode == "overwrite" else (
                     "\n<!-- Archer Desktop AI 生成 -->\n"
                     f"{ai_content}\n"
                 )
+                # 计算 before/after 预览
+                try:
+                    from skills.obsidian_write import compute_preview
+                    preview = compute_preview({
+                        "path": obsidian_target_path,
+                        "content": content_with_tag,
+                        "mode": write_mode,
+                    })
+                except Exception:
+                    preview = None
                 request = _make_api_tool_request(
                     "obsidian_write",
                     {
                         "path": obsidian_target_path,
                         "content": content_with_tag,
-                        "mode": "append",
+                        "mode": write_mode,
+                        "expected_mtime": preview["mtime"] if preview else None,
+                        "expected_size": preview["size"] if preview else None,
+                        "expected_fingerprint": preview["fingerprint"] if preview else None,
                     },
                     event_id=draft_event_id,
                     display_name="obsidian_write",
                     extra={
                         "path": obsidian_target_path,
-                        "mode": "append",
+                        "mode": write_mode,
                         "contentPreview": ai_content[:500],
+                        "beforeText": preview["before"] if preview else "",
+                        "afterText": preview["after"] if preview else content_with_tag[:2000],
+                        "previewMode": write_mode,
+                        "previewExists": preview["exists"] if preview else False,
+                        "workIntent": _obsidian_work_intent(
+                            obsidian_target_path or "",
+                            write_mode,
+                            before_text=preview["before"] if preview else "",
+                        ),
                     },
                     force_approval=False,
                 )
@@ -2007,7 +2780,7 @@ def _iter_chat_chunks(
                         False,
                         {
                             "path": obsidian_target_path,
-                            "mode": "append",
+                            "mode": write_mode,
                             "contentPreview": ai_content[:500],
                         },
                     )

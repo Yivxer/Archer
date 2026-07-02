@@ -133,6 +133,7 @@ input:focus-visible {
   height: 34px;
   flex: 0 0 auto;
   position: relative;
+  overflow: visible;
   filter:
     drop-shadow(0 -3px 8px rgba(77,217,212,0.10))
     drop-shadow(0 8px 14px rgba(245,97,42,0.06));
@@ -902,7 +903,7 @@ body {
 }
 
 .has-sidebar .window-drag-strip {
-  left: 228px;
+  left: var(--sidebar-width);
 }
 
 .app-title-tools {

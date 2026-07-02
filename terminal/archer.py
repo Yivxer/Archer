@@ -46,6 +46,7 @@ from core.scheduler import (
     add_task, remove_task as remove_cron_task, set_enabled as cron_set_enabled,
     list_tasks, run_due_tasks, run_task_by_id, parse_interval, fmt_interval,
 )
+from core.reflection_scheduler import ensure_hypothesis_scan_schedule
 from core.mcp import load_from_config as mcp_load
 from workflows.runner import handle_workflow
 from terminal.state import get_state, reset_state
@@ -62,6 +63,7 @@ from terminal.ui import (
     _strip_md, _brand_spinner,
     stage_memories,
 )
+from terminal.commands.reflect import _reflect_to_text
 
 console = Console()
 
@@ -92,6 +94,19 @@ _MCP_CAPABILITY_KW = frozenset([
 # _listen_mode 已迁移到 terminal.state (State.listen_mode)，此处保留注释供参考
 _listen_mode: bool = False
 _LISTEN_LOG_DIR = _PROJECT_ROOT / ".listen_logs"
+_stage_memories = stage_memories
+
+
+def _reflect(session):
+    """Compatibility wrapper for tests and old imports from root archer.py."""
+    from terminal.commands import reflect as reflect_cmd
+
+    original_stream_chat = reflect_cmd.stream_chat
+    reflect_cmd.stream_chat = stream_chat
+    try:
+        return reflect_cmd._reflect(session)
+    finally:
+        reflect_cmd.stream_chat = original_stream_chat
 
 
 def _persist_mode(mode: str) -> None:
@@ -227,7 +242,7 @@ def _auto_extract(history: list[dict], silent: bool = False):
     try:
         mems, obsidian_hints = extract(history)
         if mems:
-            stage_memories(mems, source="auto", silent=silent)
+            _stage_memories(mems, source="auto", silent=silent)
             # SOUL 相关记忆 → soul proposal（不自动写入）
             soul_ids = propose_from_memories(mems, source="extract")
             if soul_ids and not silent:
@@ -308,7 +323,9 @@ def run():
         console.print(f"[dim]MCP 初始化失败，已跳过：{_e}[/dim]")
 
     # ── 首次运行引导 / 欢迎横幅 ────────────────────────────────────────────
-    if not cfg.get("api", {}).get("api_key") and not cfg.get("api", {}).get("model"):
+    from core.model_profiles import active_api_config
+    active_api = active_api_config(cfg)
+    if not active_api.get("api_key") and not active_api.get("model"):
         onboarded = _onboard()
         if onboarded:
             cfg = load_config()
@@ -316,6 +333,7 @@ def run():
         _welcome(cfg)
 
     # ── 启动时执行到期定时任务 ─────────────────────────────────────────────────
+    ensure_hypothesis_scan_schedule()
     startup_cron = run_due_tasks(skills)
     for task, tr in startup_cron:
         label = task.get("label") or task["skill_name"]
@@ -350,7 +368,8 @@ def run():
             except Exception as e:
                 console.print(f"[dim]压缩失败，跳过：{e}[/dim]")
 
-        current_model = cfg["api"]["model"]
+        active_api = active_api_config(cfg)
+        current_model = active_api["model"]
         mode_auto = cfg["persona"].get("mode_auto", True)
         current_mode = last_stance if mode_auto else cfg["persona"].get("current_mode", cfg["persona"].get("default_mode", "coach"))
         modes = cfg.get("persona", {}).get("modes", {})
@@ -434,6 +453,7 @@ def run():
         )
         from core.orchestrator import (
             build_task_plan,
+            collect_soul_insight_context,
             format_mode_constraints_for_prompt,
             format_task_plan_for_prompt,
             orchestrate_user_input,
@@ -443,6 +463,7 @@ def run():
             manual_mode=None if cfg["persona"].get("mode_auto", True) else cfg["persona"].get("current_mode"),
             active_project_id=get_state().active_project_id,
             history=session.history,
+            soul_insight=collect_soul_insight_context(limit=3),
         )
         task_plan_block = format_task_plan_for_prompt(
             build_task_plan(user_text, orchestration)
@@ -494,8 +515,9 @@ def run():
         has_images = any(r["type"] == "image" for r in refs)
         active_model = ""
         if has_images:
-            vision_model = cfg["api"].get("vision_model", "")
-            text_model   = cfg["api"]["model"]
+            active_api = active_api_config(cfg)
+            vision_model = active_api.get("vision_model", "")
+            text_model   = active_api["model"]
             if not vision_model or vision_model == text_model:
                 console.print("[yellow]图片需要支持视觉的模型，请在 archer.toml 中配置 vision_model。[/yellow]")
                 has_images = False
@@ -527,7 +549,7 @@ def run():
                 needs_tools=bool(intent_info.get("needs_tools")),
                 has_images=has_images,
             )
-            if cfg["api"].get("model_auto", True) and model_reason not in ("locked", "single"):
+            if active_api_config(cfg).get("model_auto", True) and model_reason not in ("locked", "single"):
                 console.print(f"[dim]· 模型 → {active_model}（{model_reason}）[/dim]")
 
         try:

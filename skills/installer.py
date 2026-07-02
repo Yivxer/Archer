@@ -1,4 +1,5 @@
 import shutil
+import sys
 import tempfile
 import urllib.request
 import ast
@@ -10,10 +11,10 @@ SKILLS_DIR = Path(__file__).parent
 SKILL = {
     "name": "installer",
     "description": "安装或卸载技能",
-    "version": "1.1.0",
+    "version": "1.3.0",
     "author": "archer-builtin",
     "risk": "critical",
-    "requires_confirmation": False,  # 技能内部自行处理审查和确认
+    "requires_confirmation": False,  # agent 模式：自主下载→扫描→安装，不弹卡片
     "default_timeout": 30,
 }
 
@@ -67,10 +68,20 @@ def _review_and_confirm(code: str, filename: str, is_url: bool) -> bool:
     """
     展示代码预览、扫描危险 API，让用户决定是否安装。
     返回 True 表示用户确认安装。
+
+    在非 TTY 环境（Desktop API 子进程）下，跳过 input() 交互，直接返回 True —
+    agent 模式下由 policy ALLOW 直接执行，dangers 扫描结果仅用于日志记录。
     """
     from core.policy import scan_code_for_dangers
 
     dangers = scan_code_for_dangers(code)
+
+    # 非 TTY 环境（Desktop API 子进程）：agent 模式直接放行
+    if not sys.stdin.isatty():
+        if dangers:
+            # 仅记日志，不阻塞安装（agent 模式）
+            print(f"[installer] {filename} 发现危险 API（{len(dangers)} 处）：{dangers}", flush=True)
+        return True
 
     print(f"\n{'─' * 50}")
     print(f"  技能文件：{filename}")
@@ -132,6 +143,12 @@ def install(source: str) -> str:
             if not _review_and_confirm(code, filename, is_url=True):
                 raise PermissionError("用户取消安装")
 
+            # 先在临时目录验证，通过后再复制到 SKILLS_DIR
+            try:
+                name = _validate(tmp_path)
+            except Exception as e:
+                raise ValueError(f"技能格式验证失败：{e}")
+
             dest = SKILLS_DIR / filename
             shutil.copy2(tmp_path, dest)
     else:
@@ -143,14 +160,14 @@ def install(source: str) -> str:
         if not _review_and_confirm(code, src.name, is_url=False):
             raise PermissionError("用户取消安装")
 
+        # 先验证源文件，通过后再复制到 SKILLS_DIR
+        try:
+            name = _validate(src)
+        except Exception as e:
+            raise ValueError(f"技能格式验证失败：{e}")
+
         dest = SKILLS_DIR / src.name
         shutil.copy2(src, dest)
-
-    try:
-        name = _validate(dest)
-    except Exception as e:
-        dest.unlink(missing_ok=True)
-        raise ValueError(f"技能格式验证失败：{e}")
 
     return name
 
@@ -162,6 +179,38 @@ def remove(name: str):
     if not path.exists():
         raise FileNotFoundError(f"技能不存在：{name}")
     path.unlink()
+
+
+def list_installed() -> list[dict]:
+    """扫描 SKILLS_DIR，返回已安装技能的元信息列表。"""
+    import ast
+    installed: list[dict] = []
+    for path in sorted(SKILLS_DIR.glob("*.py")):
+        if path.name.startswith("_"):
+            continue
+        try:
+            code = path.read_text(encoding="utf-8", errors="replace")
+            tree = ast.parse(code, filename=str(path))
+            meta: dict = {}
+            for node in tree.body:
+                if isinstance(node, ast.Assign):
+                    for target in node.targets:
+                        if isinstance(target, ast.Name) and target.id == "SKILL":
+                            if isinstance(node.value, ast.Dict):
+                                try:
+                                    meta = ast.literal_eval(node.value) or {}
+                                except (ValueError, SyntaxError):
+                                    pass
+            installed.append({
+                "name": meta.get("name", path.stem),
+                "version": meta.get("version", "?"),
+                "description": meta.get("description", ""),
+                "risk": meta.get("risk", "low"),
+                "file": path.name,
+            })
+        except Exception:
+            installed.append({"name": path.stem, "version": "?", "description": "(解析失败)", "risk": "?", "file": path.name})
+    return installed
 
 
 def install_plugin_bundle(source: str, *, force: bool = False) -> dict:
@@ -188,12 +237,12 @@ def schema() -> dict:
         "type": "function",
         "function": {
             "name": "installer",
-            "description": "安装或卸载技能插件",
+            "description": "安装、卸载或列出已安装的技能插件",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "action": {"type": "string", "enum": ["install", "remove"]},
-                    "source": {"type": "string", "description": "本地路径或 URL"},
+                    "action": {"type": "string", "enum": ["install", "remove", "list"]},
+                    "source": {"type": "string", "description": "本地路径或 URL（action=install/remove 时必填）"},
                 },
                 "required": ["action"],
             },
@@ -215,9 +264,19 @@ def run(args: dict) -> str:
         except Exception as e:
             return f"安装失败：{e}"
     elif action == "remove":
+        if not source:
+            return "错误：需要提供要卸载的技能名"
         try:
             remove(source)
             return f"技能「{source}」已卸载"
         except Exception as e:
             return f"卸载失败：{e}"
-    return f"未知操作：{action}"
+    elif action == "list":
+        installed = list_installed()
+        if not installed:
+            return "当前没有已安装的技能。"
+        lines = [f"已安装 {len(installed)} 个技能：\n"]
+        for s in installed:
+            lines.append(f"  · {s['name']} v{s['version']} [{s['risk']}] — {s['description']}")
+        return "\n".join(lines)
+    return f"未知操作：{action}。可选：install / remove / list"

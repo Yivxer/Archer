@@ -75,12 +75,22 @@ function isHugoBlogPublishRequest(text: string): boolean {
   const lowered = text.toLowerCase()
   const blogTarget = /枫弋|札记|yivxer-blog|iver\.yivxer|枫弋博客/.test(lowered)
   const publishAction = /部署|发布|上线|发到|投稿/.test(lowered)
-  return blogTarget && publishAction
+  const localMarkdownPublish = /\/users\/.+\.md/.test(lowered) && /文章|笔记/.test(lowered) && publishAction
+  return (blogTarget && publishAction) || localMarkdownPublish
 }
 
 function isApprovalFirstRequest(text: string): boolean {
   const lowered = text.toLowerCase()
   return APPROVAL_TARGETS.some((keyword) => lowered.includes(keyword.toLowerCase()))
+}
+
+function pythonOrchestratorRoute(title: string): RuntimeTaskRoute {
+  return {
+    mode: 'foreground',
+    reason: 'python orchestrator owns routing',
+    title,
+    timeoutSeconds: 300,
+  }
 }
 
 export function routeTaskForRuntime(input: RuntimeTaskRouteInput): RuntimeTaskRoute {
@@ -118,12 +128,7 @@ export function routeTaskForRuntime(input: RuntimeTaskRouteInput): RuntimeTaskRo
   }
 
   if (text.length >= 1200 || lineCount >= 14) {
-    return {
-      mode: 'background',
-      reason: 'large request',
-      title: compactTitle(text),
-      timeoutSeconds: 600,
-    }
+    return pythonOrchestratorRoute(compactTitle(text))
   }
 
   if (hasSignal && (text.length >= 80 || fileCount > 0 || hasPathOrCode)) {
@@ -135,12 +140,7 @@ export function routeTaskForRuntime(input: RuntimeTaskRouteInput): RuntimeTaskRo
         timeoutSeconds: 300,
       }
     }
-    return {
-      mode: 'background',
-      reason: 'implementation-style request',
-      title: compactTitle(text),
-      timeoutSeconds: 600,
-    }
+    return pythonOrchestratorRoute(compactTitle(text))
   }
 
   return {

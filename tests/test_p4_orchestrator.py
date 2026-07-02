@@ -54,6 +54,46 @@ class TestOrchestratorSnapshot(unittest.TestCase):
         self.assertIn("soul", result.memory_scope)
         self.assertIn("emotion", result.memory_scope)
 
+    def test_due_hypothesis_signal_marks_soul_insight_context(self):
+        result = orchestrate_user_input(
+            "我最近又开始焦虑了，想复盘一下",
+            soul_insight={
+                "due_hypotheses": [
+                    {
+                        "id": 7,
+                        "title": "运动后情绪更稳定",
+                        "statement": "连续三天力量训练后，晚间焦虑会下降。",
+                    }
+                ]
+            },
+        )
+
+        self.assertIn("hypothesis", result.memory_scope)
+        self.assertIn("soul_insight:due_hypotheses:1", result.reasons)
+        self.assertEqual(result.soul_insight["due_hypotheses"][0]["id"], 7)
+        self.assertIn("验证假设", orchestration_status_labels(result))
+
+    def test_orchestration_event_includes_soul_insight_due_hypotheses(self):
+        from core.orchestrator import orchestration_to_event_dict
+
+        result = orchestrate_user_input(
+            "我想复盘一下最近的状态",
+            soul_insight={
+                "due_hypotheses": [
+                    {
+                        "id": 7,
+                        "title": "运动后情绪更稳定",
+                        "statement": "连续三天力量训练后，晚间焦虑会下降。",
+                    }
+                ]
+            },
+        )
+
+        event = orchestration_to_event_dict(result)
+
+        self.assertEqual(event["soulInsight"]["dueHypotheses"][0]["id"], 7)
+        self.assertIn("验证假设", event["labels"])
+
     def test_short_chat_stays_light_without_memory(self):
         result = orchestrate_user_input("在吗")
 
@@ -95,6 +135,15 @@ class TestOrchestratorSnapshot(unittest.TestCase):
         result = orchestrate_user_input("在吗")
 
         self.assertIsNone(build_task_plan("在吗", result))
+
+    def test_hugo_publish_from_obsidian_path_does_not_create_obsidian_write_plan(self):
+        text = (
+            "/Users/Yivxer/Library/Mobile Documents/iCloud~md~obsidian/Documents/"
+            "个人知识管理系统/当训练变成习惯以后，人会对疲劳变得迟钝.md部署这一篇文章"
+        )
+        result = orchestrate_user_input(text)
+
+        self.assertIsNone(build_task_plan(text, result))
 
     def test_formats_plan_for_prompt_with_approval_marker(self):
         text = "帮我把这篇文章提炼成方法论，并写入 Obsidian"
@@ -283,6 +332,40 @@ class TestDesktopMemoryExtractionPolicy(unittest.TestCase):
         self.assertEqual(orch_events[0]["subIntent"], "project_planning")
         self.assertIn("项目规划", orch_events[0]["labels"])
 
+    def test_desktop_stream_orchestration_event_includes_due_hypothesis(self):
+        import tempfile
+        from datetime import datetime, timedelta
+        from pathlib import Path
+
+        import memory.store as store
+        from memory.hypothesis_tracker import create_hypothesis
+        from terminal.api._tools import _iter_chat_chunks
+
+        original_db_path = store.DB_PATH
+        with tempfile.TemporaryDirectory() as tmp:
+            store.DB_PATH = Path(tmp) / "archer.db"
+            try:
+                store.init_db()
+                create_hypothesis(
+                    "运动后情绪更稳定",
+                    "连续三天力量训练后，晚间焦虑会下降。",
+                    validate_after_days=1,
+                    now=datetime.now() - timedelta(days=3),
+                )
+                messages = [{"role": "user", "content": "我想复盘一下最近的焦虑"}]
+
+                chunks = []
+                for chunk in _iter_chat_chunks(messages, memory_mode="off", obsidian_mode="off"):
+                    chunks.append(chunk)
+                    if chunk.get("type") == "orchestrationEvent":
+                        break
+
+                event = next(chunk["orchestrationEvent"] for chunk in chunks if chunk.get("type") == "orchestrationEvent")
+                self.assertIn("验证假设", event["labels"])
+                self.assertEqual(event["soulInsight"]["dueHypotheses"][0]["title"], "运动后情绪更稳定")
+            finally:
+                store.DB_PATH = original_db_path
+
 
 class TestModeConstraints(unittest.TestCase):
     def test_emotional_reflection_gets_listener_constraints(self):
@@ -351,7 +434,7 @@ class TestMemoryCandidateReason(unittest.TestCase):
         self.assertEqual(pending[0]["id"], pid)
         self.assertEqual(pending[0]["suggest_reason"], "项目进展 · 来自：Archer 下一阶段")
 
-    def test_desktop_project_update_is_staged_for_review(self):
+    def test_desktop_project_update_high_confidence_auto_saves(self):
         import tempfile
         import memory.store as store_mod
         from terminal.api._tools import _do_extract_api
@@ -372,22 +455,57 @@ class TestMemoryCandidateReason(unittest.TestCase):
                         "type": "project",
                         "importance": 4,
                         "tags": "Archer,P4",
-                        "confidence": 0.7,
+                        "confidence": 0.82,
                         "depth": 3,
                     }
                 ], [])
                 _do_extract_api(history)
             pending = store_mod.list_pending()
+            confirmed = store_mod.list_all()
         finally:
             store_mod.DB_PATH = old_db
 
         mock_extract.assert_called_once()
         _, kwargs = mock_extract.call_args
         self.assertIn("project_update", kwargs.get("candidate_types", []))
+        self.assertEqual(len(pending), 0)
+        self.assertEqual(len(confirmed), 1)
+        self.assertEqual(confirmed[0]["type"], "project")
+
+    def test_desktop_sensitive_memory_stays_pending(self):
+        import tempfile
+        import memory.store as store_mod
+        from terminal.api._tools import _do_extract_api
+
+        old_db = store_mod.DB_PATH
+        tmp = tempfile.mkdtemp()
+        store_mod.DB_PATH = store_mod.Path(tmp) / "test.db"
+        store_mod.init_db()
+        history = [
+            {"role": "user", "content": "我最近总是焦虑和内耗，反复卡在同一个地方"},
+            {"role": "assistant", "content": "听起来这个循环已经持续一段时间了。"},
+        ]
+        try:
+            with patch("memory.extract.extract") as mock_extract:
+                mock_extract.return_value = ([
+                    {
+                        "content": "用户最近反复感到焦虑和内耗。",
+                        "type": "emotion_pattern",
+                        "importance": 3,
+                        "tags": "emotion",
+                        "confidence": 0.9,
+                        "depth": 3,
+                    }
+                ], [])
+                _do_extract_api(history)
+            pending = store_mod.list_pending()
+            confirmed = store_mod.list_all()
+        finally:
+            store_mod.DB_PATH = old_db
+
         self.assertEqual(len(pending), 1)
-        self.assertEqual(pending[0]["status"], "pending")
-        self.assertEqual(pending[0]["type"], "project")
-        self.assertIn("项目进展", pending[0]["suggest_reason"])
+        self.assertEqual(pending[0]["type"], "emotion_pattern")
+        self.assertEqual(len(confirmed), 0)
 
 
 class TestSceneOneProjectPlanningClosedLoop(unittest.TestCase):
@@ -434,6 +552,18 @@ class TestSceneTwoWritingRevisionClosedLoop(unittest.TestCase):
         self.assertIn("减少 AI 味", constraints)
         self.assertIn("写作协助", labels)
         self.assertIsNone(plan)
+
+    def test_writing_outline_summary_stays_in_writer_lane(self):
+        text = (
+            "帮我分析一下写作的大纲：我想用“六月：悬置·好一点，再好一点”"
+            "作为月度总结主题。"
+        )
+        result = orchestrate_user_input(text)
+
+        self.assertEqual(result.sub_intent, "writing_assistance")
+        self.assertEqual(result.mode, "writer")
+        self.assertFalse(result.needs_tools)
+        self.assertIn("writing_style", result.memory_scope)
 
     def test_desktop_stream_scene_two_orchestration(self):
         messages = [{

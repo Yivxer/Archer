@@ -12,6 +12,8 @@ my-bundle/
     hello_world.py
   modes/
     demo_mode.md
+  experts/
+    demo_expert.toml
   hooks.json           # 可选；也可写在 plugin.json 的 hooks 字段
 ```
 
@@ -24,6 +26,7 @@ my-bundle/
 | `description` | | 简介 |
 | `skills` | | 相对路径列表，默认 `skills/*.py` |
 | `modes` | | 相对路径列表，默认 `modes/*.md` |
+| `experts` | | 相对路径列表，默认 `experts/*.toml` |
 | `hooks` | | 与 `archer.toml [hooks]` 相同结构 |
 
 ## 安装位置
@@ -42,6 +45,7 @@ my-bundle/
 
 - `skills/loader.register_all_skills()` 扫描已安装插件的 `skills/`
 - `core/stance.available_modes()` 包含插件 `modes/`
+- `core/experts.load_plugin_experts()` 包含插件 `experts/*.toml`
 - `core/context._get_mode_prompt()` 可读插件 mode 文件
 - `HookRegistry.from_config()` 合并插件 hooks
 

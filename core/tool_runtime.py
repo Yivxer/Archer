@@ -82,8 +82,11 @@ def invoke(skill_name: str, args: dict, skills: dict,
     started_str = _fmt_ts(started_at)
 
     executor = ThreadPoolExecutor(max_workers=1)
+    structured_runner = getattr(mod, "run_structured", None)
+    runner = structured_runner or mod.run
+    runner_name = "structured" if structured_runner else "run"
     try:
-        future = executor.submit(mod.run, args)
+        future = executor.submit(runner, args)
         raw = future.result(timeout=effective_timeout)
     except FutureTimeoutError:
         executor.shutdown(wait=False)
@@ -114,7 +117,17 @@ def invoke(skill_name: str, args: dict, skills: dict,
     finally:
         executor.shutdown(wait=False)
 
-    content = str(raw) if raw is not None else ""
+    raw_ok = True
+    raw_summary = ""
+    raw_metadata: dict[str, Any] = {}
+    if isinstance(raw, dict) and "output" in raw:
+        raw_ok = bool(raw.get("ok", True))
+        raw_summary = str(raw.get("summary") or "")
+        metadata = raw.get("metadata")
+        raw_metadata = dict(metadata) if isinstance(metadata, dict) else {}
+        content = str(raw.get("output") or "")
+    else:
+        content = str(raw) if raw is not None else ""
     tokens_est = max(1, len(content) // 4)
     truncated = len(content) > MAX_INLINE_CHARS
     artifact_path = None
@@ -122,20 +135,24 @@ def invoke(skill_name: str, args: dict, skills: dict,
     if truncated:
         artifact_path = save_tool_result(skill_name, content)
         preview = content[:PREVIEW_CHARS] + "…"
-        summary = f"{skill_name} 完成（结果较长，约 {tokens_est} tokens，已存 artifact）"
+        summary = raw_summary or f"{skill_name} 完成（结果较长，约 {tokens_est} tokens，已存 artifact）"
     else:
         preview = content
-        summary = f"{skill_name} 完成"
+        summary = raw_summary or f"{skill_name} 完成"
 
     return ToolResult(
-        ok=True,
+        ok=raw_ok,
         skill=skill_name,
         summary=summary,
         content_preview=preview,
         artifact_path=artifact_path,
         truncated=truncated,
         tokens_estimate=tokens_est,
-        meta=_build_meta(started_str, started_at),
+        meta={
+            **_build_meta(started_str, started_at),
+            "runner": runner_name,
+            "metadata": raw_metadata,
+        },
     )
 
 

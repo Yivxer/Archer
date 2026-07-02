@@ -1,0 +1,424 @@
+import React from 'react'
+import { Brain, ChevronRight, History, Layers, Search } from 'lucide-react'
+import { loadLocalSession, resolvePendingMemory, searchLocalSessions } from '../adapters/localArcher'
+import { EmptyDetail, SearchBox } from '../components/common'
+import {
+  ReviewMemoryGroupsPanel,
+  ReviewInitiativeShadowPanel,
+  ReviewPendingMemoryPanel,
+  ReviewRelatedMemoryPanel,
+  ReviewSignalsPanel,
+  ReviewSoulProfilePanel,
+  type ReviewMemoryGroup,
+} from '../components/ReviewPanels'
+import type { ArcherAdapter, MemoryItem, Route, SessionDetail, SessionSearchResult } from '../types'
+
+export function ReviewPage({
+  data,
+  onRefresh,
+  onOpenSession,
+  onNavigate,
+  onMemoryItemsChange,
+}: {
+  data: ArcherAdapter
+  onRefresh: () => Promise<void>
+  onOpenSession: (session: ArcherAdapter['sessions'][number]) => void
+  onNavigate: (route: Route) => void
+  onMemoryItemsChange?: (items: MemoryItem[]) => void
+}) {
+  const [selectedId, setSelectedId] = React.useState(data.sessions[0]?.id ?? '')
+  const [detail, setDetail] = React.useState<SessionDetail | null>(null)
+  const [detailState, setDetailState] = React.useState<'idle' | 'loading' | 'error'>('idle')
+  const [query, setQuery] = React.useState('')
+  const [expertFilter, setExpertFilter] = React.useState('all')
+  const [memoryItems, setMemoryItems] = React.useState(data.memory)
+  const [memoryBusyId, setMemoryBusyId] = React.useState<number | null>(null)
+  const [memoryNotice, setMemoryNotice] = React.useState('')
+  const [contentResults, setContentResults] = React.useState<SessionSearchResult[] | null>(null)
+  const [contentSearching, setContentSearching] = React.useState(false)
+  const expertOptions = data.experts?.experts ?? []
+  const pendingMemoryCount = memoryItems.filter((item) => item.status === 'pending').length
+  const pendingReviewMemories = memoryItems.filter((item) => item.status === 'pending').slice(0, 3)
+  const memoryGroups = React.useMemo(() => buildReviewMemoryGroups(memoryItems), [memoryItems])
+  const canResolveMemory = data.status.adapter === 'local'
+
+  React.useEffect(() => {
+    setSelectedId(data.sessions[0]?.id ?? '')
+    setDetail(null)
+    setDetailState('idle')
+  }, [data])
+
+  React.useEffect(() => {
+    setMemoryItems(data.memory)
+    setMemoryBusyId(null)
+  }, [data.memory])
+
+  React.useEffect(() => {
+    if (!selectedId || data.status.adapter !== 'local') {
+      setDetail(null)
+      setDetailState('idle')
+      return
+    }
+    let cancelled = false
+    setDetailState('loading')
+    loadLocalSession(selectedId)
+      .then((value) => {
+        if (cancelled) return
+        setDetail(value)
+        setDetailState('idle')
+      })
+      .catch(() => {
+        if (cancelled) return
+        setDetail(null)
+        setDetailState('error')
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [selectedId, data.status.adapter])
+
+  const now = new Date()
+  const todayStr = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`
+  const yd = new Date(now); yd.setDate(yd.getDate() - 1)
+  const yesterdayStr = `${yd.getFullYear()}${String(yd.getMonth() + 1).padStart(2, '0')}${String(yd.getDate()).padStart(2, '0')}`
+
+  function groupLabel(date: string): string {
+    if (date === todayStr || date === '今天') return '今天'
+    if (date === yesterdayStr || date === '昨天') return '昨天'
+    return '更早'
+  }
+
+  const cleanQuery = query.trim().toLowerCase()
+  const visibleSessions = React.useMemo(() => {
+    const filtered = expertFilter === 'all'
+      ? data.sessions
+      : data.sessions.filter((session) => session.expertId === expertFilter)
+    return cleanQuery
+      ? filtered.filter((session) => {
+        const haystack = [
+          session.title,
+          session.preview,
+          session.date,
+          session.tone,
+          session.expertLabel,
+          session.expertId,
+        ].filter(Boolean).join(' ').toLowerCase()
+        return haystack.includes(cleanQuery)
+      })
+      : filtered
+  }, [cleanQuery, data.sessions, expertFilter])
+  const selected = visibleSessions.find((session) => session.id === selectedId)
+    ?? contentResults?.find((r) => r.id === selectedId)
+    ?? visibleSessions[0]
+
+  React.useEffect(() => {
+    if (visibleSessions.length && !visibleSessions.some((session) => session.id === selectedId)) {
+      setSelectedId(visibleSessions[0].id)
+    }
+  }, [selectedId, visibleSessions])
+
+  const contentSearchEnabled = data.status.adapter === 'local'
+  React.useEffect(() => {
+    if (!contentSearchEnabled) {
+      setContentResults(null)
+      return
+    }
+    const trimmed = query.trim()
+    if (!trimmed || trimmed.length < 2) {
+      setContentResults(null)
+      return
+    }
+    let cancelled = false
+    setContentSearching(true)
+    const timer = setTimeout(() => {
+      searchLocalSessions(trimmed)
+        .then((results) => {
+          if (!cancelled) setContentResults(results)
+        })
+        .catch(() => {
+          if (!cancelled) setContentResults(null)
+        })
+        .finally(() => {
+          if (!cancelled) setContentSearching(false)
+        })
+    }, 300)
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+    }
+  }, [query, contentSearchEnabled])
+
+  async function resolveReviewMemory(id: number, accepted: boolean) {
+    if (!canResolveMemory) return
+    setMemoryBusyId(id)
+    setMemoryNotice('')
+    try {
+      const result = await resolvePendingMemory(id, accepted)
+      if (!result.ok) {
+        setMemoryNotice('无待处理记忆被更新')
+        return
+      }
+      setMemoryItems((current) => {
+        const nextItems = current.filter((item) => item.id !== id)
+        onMemoryItemsChange?.(nextItems)
+        return nextItems
+      })
+      setMemoryNotice(accepted ? '已确认，写入长期记忆' : '已放弃')
+    } catch (error) {
+      setMemoryNotice(error instanceof Error ? error.message : '记忆更新失败')
+    } finally {
+      setMemoryBusyId(null)
+    }
+  }
+
+  const relatedMemories = React.useMemo(() => {
+    if (!selected) return []
+    return memoryItems
+      .map((item) => ({ item, score: scoreMemoryForSession(item, selected) }))
+      .filter(({ score }) => score > 0)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 4)
+      .map(({ item }) => item)
+  }, [memoryItems, selected])
+
+  const reviewSignals = [
+    data.periodReviews.weekly,
+    data.periodReviews.monthly,
+    data.periodReviews.life_stage,
+  ].filter((review) => review.highlights.length || review.growth_markers.length || review.suggested_questions.length)
+  const soulSections = data.soulProfile.empty ? [] : data.soulProfile.sections.filter((section) => section.items.length).slice(0, 4)
+
+  const grouped: { label: string; sessions: typeof data.sessions }[] = []
+  for (const session of visibleSessions) {
+    const label = groupLabel(session.date)
+    const existing = grouped.find((group) => group.label === label)
+    if (existing) existing.sessions.push(session)
+    else grouped.push({ label, sessions: [session] })
+  }
+
+  return (
+    <div className="split-page">
+      <div className="list-column">
+        <div className="sessions-head">
+          <div>
+            <h1>Review</h1>
+            <p>{data.status.adapter === 'local' ? '本地会话与复盘入口' : '示例会话'}</p>
+          </div>
+          <span>{visibleSessions.length}</span>
+        </div>
+        <div className="list-toolbar">
+          <SearchBox placeholder="搜索会话" value={query} onChange={setQuery} />
+          {expertOptions.length > 0 && (
+            <select
+              className="session-expert-filter"
+              value={expertFilter}
+              onChange={(event) => setExpertFilter(event.target.value)}
+              aria-label="按专家筛选"
+            >
+              <option value="all">全部专家</option>
+              {expertOptions.map((expert) => (
+                <option key={expert.id} value={expert.id}>{expert.label}</option>
+              ))}
+            </select>
+          )}
+          <button className="quiet-button" type="button" onClick={onRefresh}>
+            刷新
+          </button>
+        </div>
+        {contentResults ? (
+          contentResults.length ? (
+            <React.Fragment>
+              <div className="session-group-label">
+                内容匹配 {contentResults.length} 条{contentSearching ? ' · 搜索中…' : ''}
+              </div>
+              {contentResults.map((result) => (
+                <button
+                  className={`list-row ${selected?.id === result.id ? 'active' : ''}`}
+                  key={result.id}
+                  type="button"
+                  onClick={() => setSelectedId(result.id)}
+                >
+                  <div>
+                    <strong>{result.title}</strong>
+                    <span>
+                      {result.turns} 轮
+                      {result.expertLabel ? ` · ${result.expertLabel}` : ''}
+                    </span>
+                    {result.snippet && (
+                      <span className="session-preview">"{result.snippet}"</span>
+                    )}
+                  </div>
+                  <ChevronRight size={16} />
+                </button>
+              ))}
+            </React.Fragment>
+          ) : (
+            <div className="empty-inline">{contentSearching ? '搜索中…' : '无内容匹配'}</div>
+          )
+        ) : grouped.length ? grouped.map((group) => (
+          <React.Fragment key={group.label}>
+            <div className="session-group-label">{group.label}</div>
+            {group.sessions.map((session) => (
+              <button
+                className={`list-row ${selected?.id === session.id ? 'active' : ''}`}
+                key={session.id}
+                type="button"
+                onClick={() => setSelectedId(session.id)}
+              >
+                <div>
+                  <strong>{session.title}</strong>
+                  <span>
+                    {session.turns} 轮
+                    {session.expertLabel ? ` · ${session.expertLabel}` : session.tone ? ` · ${session.tone}` : ''}
+                  </span>
+                  {session.preview && (
+                    <span className="session-preview">"{session.preview}"</span>
+                  )}
+                </div>
+                <ChevronRight size={16} />
+              </button>
+            ))}
+          </React.Fragment>
+        )) : (
+          <div className="empty-inline">无匹配会话</div>
+        )}
+      </div>
+      {selected ? (
+        <div className="session-detail">
+          <div className="session-detail-head">
+            <div className="session-detail-icon"><History size={18} /></div>
+            <div>
+              <h2>{selected.title}</h2>
+              <p>{data.status.adapter === 'local' ? '只读预览，恢复后可续写。' : '连接本地服务后读取完整消息。'}</p>
+            </div>
+            <button className="quiet-button strong session-open-button" type="button" onClick={() => onOpenSession(selected)}>
+              恢复
+            </button>
+          </div>
+          <div className="review-shortcuts" aria-label="复盘相关入口">
+            <button type="button" className="quiet-button" onClick={() => onNavigate('Memory')}>
+              <Brain size={15} />
+              记忆审阅{pendingMemoryCount ? ` · ${pendingMemoryCount} 待确认` : ''}
+            </button>
+            <button type="button" className="quiet-button" onClick={() => onNavigate('Soul')}>
+              <Layers size={15} />
+              Soul 复盘
+            </button>
+          </div>
+          <dl>
+            <div>
+              <dt>日期</dt>
+              <dd>{selected.date}</dd>
+            </div>
+            <div>
+              <dt>轮次</dt>
+              <dd>{selected.turns}</dd>
+            </div>
+            <div>
+              <dt>专家</dt>
+              <dd>{selected.expertLabel || '未标记'}</dd>
+            </div>
+            <div>
+              <dt>模式</dt>
+              <dd>{selected.tone}</dd>
+            </div>
+          </dl>
+          <ReviewRelatedMemoryPanel relatedMemories={relatedMemories} selectedId={selected.id} onNavigate={onNavigate} />
+          <ReviewPendingMemoryPanel
+            pendingMemoryCount={pendingMemoryCount}
+            pendingReviewMemories={pendingReviewMemories}
+            memoryNotice={memoryNotice}
+            canResolveMemory={canResolveMemory}
+            memoryBusyId={memoryBusyId}
+            onResolve={(id, accepted) => void resolveReviewMemory(id, accepted)}
+            onNavigate={onNavigate}
+          />
+          <ReviewInitiativeShadowPanel initiativeShadow={data.initiativeShadow} />
+          <ReviewMemoryGroupsPanel memoryGroups={memoryGroups} onNavigate={onNavigate} />
+          <ReviewSoulProfilePanel soulSections={soulSections} onNavigate={onNavigate} />
+          <ReviewSignalsPanel reviewSignals={reviewSignals} journalReview={data.journalReview} onNavigate={onNavigate} />
+          {detailState === 'loading' && <p className="detail-muted">读取中…</p>}
+          {detailState === 'error' && <p className="detail-error">会话读取失败</p>}
+          {detail?.messages.length ? (
+            <div className="session-message-list">
+              {detail.messages.map((message) => (
+                <article className={`session-message ${message.role}`} key={message.id}>
+                  <span>{message.role}</span>
+                  <p>{message.text}</p>
+                </article>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      ) : (
+        <EmptyDetail icon={History} title="暂无会话" text="本地 sessions 目录为空。" />
+      )}
+    </div>
+  )
+}
+
+function scoreMemoryForSession(memory: MemoryItem, session: ArcherAdapter['sessions'][number]): number {
+  let score = 0
+  if (memory.sessionId && memory.sessionId === session.id) score += 100
+  const haystack = [
+    memory.content,
+    memory.sessionSummary,
+    memory.label,
+    memory.type,
+    memory.suggestReason,
+  ].filter(Boolean).join(' ').toLowerCase()
+  const needles = [
+    session.title,
+    session.preview,
+    session.expertLabel,
+    session.expertId,
+    session.tone,
+  ]
+    .filter(Boolean)
+    .flatMap((value) => tokenize(String(value)))
+  for (const needle of needles) {
+    if (haystack.includes(needle)) score += needle.length > 4 ? 8 : 3
+  }
+  if (memory.status === 'pending') score += 1
+  return score
+}
+
+function buildReviewMemoryGroups(items: MemoryItem[]): ReviewMemoryGroup[] {
+  const grouped = new Map<string, MemoryItem[]>()
+  for (const item of items) {
+    if (item.status !== 'confirmed') continue
+    const key = item.blockType || 'insight'
+    const group = grouped.get(key) ?? []
+    group.push(item)
+    grouped.set(key, group)
+  }
+  return Array.from(grouped.entries())
+    .map(([key, group]) => ({
+      key,
+      label: memoryBlockLabel(key),
+      count: group.length,
+      items: group.slice(0, 2),
+    }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 4)
+}
+
+function memoryBlockLabel(blockType: string): string {
+  const map: Record<string, string> = {
+    human: '档案',
+    persona: 'Persona',
+    preference: '偏好',
+    decision: '决策',
+    event: '事件',
+    insight: '洞察',
+  }
+  return map[blockType] || blockType
+}
+
+function tokenize(text: string): string[] {
+  return text
+    .toLowerCase()
+    .split(/[\s,.;:!?，。；：！？、'"“”‘’（）()【】\[\]<>《》/\\|-]+/)
+    .map((part) => part.trim())
+    .filter((part) => part.length >= 2)
+}

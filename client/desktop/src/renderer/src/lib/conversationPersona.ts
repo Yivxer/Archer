@@ -54,17 +54,55 @@ export function modelLabelFromStatus(model: string | undefined): string {
   return model
 }
 
+export const MODEL_PROFILE_SHORT_LABELS = {
+  lite: 'DSK',
+  pro: 'KIM',
+  max: 'GLM',
+} as const
+
+export type ModelProfileId = keyof typeof MODEL_PROFILE_SHORT_LABELS
+
+export function modelProfileShortLabel(activeProfile: ModelProfileId | undefined): string {
+  return MODEL_PROFILE_SHORT_LABELS[activeProfile || 'lite']
+}
+
+export function modelSwitchNotice(previous: ModelProfileId | undefined, next: ModelProfileId): { text: string; detail: string } {
+  return {
+    text: `⇄ 模型已从 ${modelProfileShortLabel(previous)} 更改为 ${modelProfileShortLabel(next)}`,
+    detail: '在对话中途切换模型会降低性能表现。背景信息可能会自动压缩。',
+  }
+}
+
+export function expertShortLabel(
+  expertId: string | undefined,
+  experts: Array<{ id: string; label: string }>,
+  fallbackLabel?: string,
+): string {
+  if (fallbackLabel?.trim()) return fallbackLabel.trim()
+  if (!expertId || expertId === 'default') {
+    return experts.find((item) => item.id === 'default')?.label ?? '基础 Archer'
+  }
+  return experts.find((item) => item.id === expertId)?.label ?? expertId
+}
+
+export function expertModelChipLabel(
+  expertId: string | undefined,
+  experts: Array<{ id: string; label: string }>,
+  modelProfile: ModelProfileId | undefined,
+  fallbackExpertLabel?: string,
+): string {
+  return `${expertShortLabel(expertId, experts, fallbackExpertLabel)} · ${modelProfileShortLabel(modelProfile)}`
+}
+
 export function connectionStatusLabel(
   apiState: string,
   isLocal: boolean
 ): string {
   if (isLocal || apiState === 'connected') return '已就绪'
   if (apiState === 'loading') return '连接中'
-  if (apiState === 'missing_token') return '缺少口令'
-  if (apiState === 'bad_token') return '口令不匹配'
-  if (apiState === 'api_offline') return '大脑未运行'
-  if (apiState === 'error') return '未连接'
-  return '未连接'
+  if (apiState === 'api_offline') return '重连中'
+  if (apiState === 'error') return '环境异常'
+  return '启动中'
 }
 
 export function formatTokenCount(value: number): string {

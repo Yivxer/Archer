@@ -1,27 +1,50 @@
 import React from 'react'
-import { ArrowUp, Check, ChevronDown, Copy, CornerDownLeft, Crop, Edit3, FileText, Github, Infinity, Loader2, Mic, Monitor, Paperclip, RotateCcw, Send, Terminal, UserRoundCog, X } from 'lucide-react'
-import { appendLocalSession, approveJobToolEvent, cancelBackgroundJobEvent, createBackgroundJobEvent, fetchBackgroundJob, pollBackgroundJobEvents, retryBackgroundJobEvent, saveLocalSession, spawnChildJobs, streamLocalChat, submitToolApprovalEvent, switchLocalMode } from '../adapters/localArcher'
+import { Activity, ArrowUp, Check, ChevronDown, Copy, CornerDownLeft, Crop, Download, Edit3, FileText, Github, Loader2, Mic, Monitor, Paperclip, RotateCcw, Send, Terminal, X } from 'lucide-react'
+import { appendLocalSession, approveJobToolEvent, cancelBackgroundJobEvent, createBackgroundJobEvent, ensureLocalConnection, fetchBackgroundJob, listBackgroundJobs, pollBackgroundJobEvents, retryBackgroundJobEvent, saveLocalSession, spawnChildJobs, streamLocalChat, ChatBusyError, StreamIdleTimeoutError, submitToolApprovalEvent, switchLocalExpert, switchLocalActiveProfile } from '../adapters/localArcher'
 import { pickChatGreeting } from '../lib/chatGreetings'
-import { extendedConversationModes, PERSONA_PRESETS, personaIdFromMode } from '../lib/conversationPersona'
-import type { ArcherAdapter, ChatMessage, FileRef, MemoryContextMode, ObsidianContextMode, SessionDetail, ToolEvent } from '../types'
-import { ArcherRing, MarkdownMessage, ThinkingDots } from '../components/common'
-import { createInitialRuntimeState, createPersistentEventLog, reduceRuntimeEvent, routeTaskForRuntime, jobSnapshotToAgentEvent, buildPlanChildJobSpecs, buildPlanCoordinatorPrompt, buildPlanExecutionPrompt, planWithStatus } from '../../../agent'
-import type { AgentEvent, EventLog, JobEvent, OrchestrationEvent, PlanEvent } from '../../../agent'
+import { extendedConversationModes, modelProfileShortLabel, modelSwitchNotice } from '../lib/conversationPersona'
+import type { ArcherAdapter, BackgroundJob, ChatMessage, ExpertStarter, FileRef, MemoryContextMode, ObsidianContextMode, Route, SavedSession, SessionDetail, ToolEvent, WorkIntent, WorkReceipt } from '../types'
+import { ArcherRing, MarkdownMessage, ThinkingDots, ThinkingMutter } from '../components/common'
+import { ExpertAvatar } from '../components/ExpertAvatar'
+import { WorkspaceContextPanel, type WorkspaceJobSummary } from '../components/WorkspaceContextPanel'
+import { buildThinkingMutter } from '../lib/thinkingMutter'
+import { buildTraceDiagnostics, createInitialRuntimeState, createPersistentEventLog, reduceRuntimeEvent, restoreRuntimeStateFromEvents, routeTaskForRuntime, jobSnapshotToAgentEvent, buildPlanChildJobSpecs, buildPlanCoordinatorPrompt, buildPlanExecutionPrompt, planWithStatus } from '../../../agent'
+import type { AgentEvent, ApprovalResultEvent, EventLog, JobEvent, OrchestrationEvent, PlanEvent, TraceDiagnostics } from '../../../agent'
+import type { InitiativeEvent } from '../../../agent/contracts'
 
-const CHAT_STARTERS = [
+const DEFAULT_STARTERS: ExpertStarter[] = [
   { label: '先听我说', prompt: '我先说一段，你不用急着给方案。' },
   { label: '有点卡住', prompt: '我现在有点卡住，想先说一段。' },
   { label: '轻轻复盘', prompt: '帮我轻轻复盘一下刚才这件事。' },
   { label: '继续那条线', prompt: '我们继续刚才那条线。' },
 ]
 
-const MODEL_OPTIONS = [
-  { id: 'auto', label: '自动模型', note: '当前由 Archer 自动选择' },
-]
+function isAbortError(error: unknown): boolean {
+  return (error instanceof DOMException && error.name === 'AbortError') || (error instanceof Error && error.name === 'AbortError')
+}
 
-const PERSONA_OPTIONS = PERSONA_PRESETS
-const extendedPersonaModes = (modes: ArcherAdapter['modes']['modes']) =>
-  extendedConversationModes(modes)
+function isRequestTimeout(error: unknown): boolean {
+  return error instanceof StreamIdleTimeoutError
+    || (error instanceof Error && /timed out|timeout|超时/i.test(error.message))
+}
+
+function isChatBusy(error: unknown): boolean {
+  return error instanceof ChatBusyError
+    || (error instanceof Error && /chat_busy|上一轮对话仍在处理中|仍在处理/i.test(error.message))
+}
+
+function failureHintFallback(event: AgentEvent | null, sawToolEvent: boolean): string {
+  if (event?.type !== 'failure.hint') {
+    return sawToolEvent ? '已执行操作，详见上方卡片。' : '模型没有返回内容，请打开诊断查看原因。'
+  }
+  if (event.keyword === 'model_empty_response') return '模型请求成功但没有返回文本，请打开诊断查看本轮模型状态。'
+  if (event.keyword === 'tool_executed_no_summary') return '工具已执行，但模型没有返回总结，结果见上方卡片。'
+  if (event.keyword === 'model_stream_timeout') return '模型流式响应超时，请稍后重试。'
+  if (event.keyword === 'provider_connection_failed') return '模型服务连接失败，请检查当前 provider/API 配置。'
+  if (event.keyword === 'chat_busy') return '上一轮仍在处理，请等它结束后再发送。'
+  if (event.keyword === 'context_trimmed') return '本轮上下文已裁剪，部分旧历史没有带入。'
+  return event.detail || '本轮没有返回可显示内容，请打开诊断查看原因。'
+}
 
 export function ChatPage({
   data,
@@ -30,8 +53,11 @@ export function ChatPage({
   activeSession,
   sessionLoadState = 'idle',
   sessionLoadError = '',
+  resetRuntimeOnMount = false,
   onNavigate,
+  onInitiativeEvent,
   onRefresh,
+  onExpertSwitch,
   onSessionAppended
 }: {
   data: ArcherAdapter
@@ -40,14 +66,16 @@ export function ChatPage({
   activeSession?: SessionDetail | null
   sessionLoadState?: 'idle' | 'loading' | 'error'
   sessionLoadError?: string
-  onNavigate?: (route: 'Chat' | 'Sessions' | 'Tasks' | 'Memory' | 'Soul' | 'Skills' | 'Settings') => void
+  resetRuntimeOnMount?: boolean
+  onNavigate?: (route: Route) => void
+  onInitiativeEvent?: (event: InitiativeEvent) => void
   onRefresh?: () => Promise<void>
-  onSessionAppended?: (messages: ChatMessage[]) => void
+  onExpertSwitch?: () => Promise<void>
+  onSessionAppended?: (messages: ChatMessage[], savedSession?: SavedSession) => void
 }) {
   const [homeGreeting] = React.useState(() => pickChatGreeting())
   const [messages, setMessages] = React.useState<ChatMessage[]>(activeSession?.messages ?? data.chat.initialMessages)
   const [draft, setDraft] = React.useState('')
-  const [draftCollapsed, setDraftCollapsed] = React.useState(false)
   const [isTyping, setIsTyping] = React.useState(false)
   const bottomRef = React.useRef<HTMLDivElement>(null)
   const composerRef = React.useRef<HTMLDivElement>(null)
@@ -59,6 +87,7 @@ export function ChatPage({
   const [isSending, setIsSending] = React.useState(false)
   const [isBackgrounding, setIsBackgrounding] = React.useState(false)
   const [chatError, setChatError] = React.useState('')
+  const [tracePanel, setTracePanel] = React.useState<TraceDiagnostics | null>(null)
   const [saveState, setSaveState] = React.useState('')
   const [toolEvents, setToolEvents] = React.useState<ToolEvent[]>(data.chat.toolEvents)
   const [toolNotice, setToolNotice] = React.useState('')
@@ -66,27 +95,109 @@ export function ChatPage({
   const [activeComposerMenu, setActiveComposerMenu] = React.useState<'attach' | 'screenshot' | 'model' | 'persona' | null>(null)
   const [captureSources, setCaptureSources] = React.useState<Array<{ id: string; name: string; kind: 'screen' | 'window'; thumbnailEmpty?: boolean; screenStatus?: string }>>([])
   const [captureSourcesState, setCaptureSourcesState] = React.useState<'idle' | 'loading' | 'error'>('idle')
-  const [selectedModel, setSelectedModel] = React.useState('auto')
-  const [selectedPersona, setSelectedPersona] = React.useState('default')
-  const activeConversationMode = data.modes.current || data.status.mode || 'auto'
-  const morePersonaModes = extendedPersonaModes(data.modes.modes)
+  const [selectedModel, setSelectedModel] = React.useState<'lite' | 'pro' | 'max'>(data.settings.activeProfile || 'lite')
+  const [switchingModel, setSwitchingModel] = React.useState<'lite' | 'pro' | 'max' | null>(null)
+  const [localExpertId, setLocalExpertId] = React.useState<string | null>(null)
+  const [expertSwitching, setExpertSwitching] = React.useState(false)
+  const [workspaceJobs, setWorkspaceJobs] = React.useState<BackgroundJob[]>([])
+  const [workspaceJobsState, setWorkspaceJobsState] = React.useState<'idle' | 'loading' | 'error'>('idle')
+  const [workspaceContextOpen, setWorkspaceContextOpen] = React.useState(() => (
+    window.localStorage.getItem('archer-workspace-context-open') === '1'
+  ))
+  const expertSwitchingRef = React.useRef(false)
+  const activeExpertId = localExpertId ?? data.experts?.current ?? data.status.expertId ?? 'default'
+  const expertOptions = data.experts?.experts ?? []
+  const activeExpert = expertOptions.find((option) => option.id === activeExpertId)
+  const homeStarters = (activeExpert?.starters?.length ? activeExpert.starters : DEFAULT_STARTERS).slice(0, 4)
+  const modelProfiles = data.settings.modelProfiles ?? []
+  const fullConversationModes = extendedConversationModes(data.modes.modes ?? [])
+  const activeThread = React.useMemo(() => (
+    activeSession?.threadId
+      ? data.threads.find((thread) => thread.id === activeSession.threadId)
+      : undefined
+  ), [activeSession?.threadId, data.threads])
+
+  function sessionSaveMeta() {
+    return {
+      expertId: activeExpertId,
+      expertLabel: activeExpert?.label || data.status.expertLabel,
+    }
+  }
+
+  function threadContextPayload() {
+    if (!activeThread?.title && !activeThread?.summary) return null
+    return {
+      title: activeThread?.title,
+      summary: activeThread?.summary,
+    }
+  }
 
   React.useEffect(() => {
-    setSelectedPersona(personaIdFromMode(data.modes.current))
-  }, [data.modes.current])
+    setSelectedModel(data.settings.activeProfile || 'lite')
+  }, [data.settings.activeProfile])
+
+  React.useEffect(() => {
+    if (data.status.adapter !== 'local') {
+      setWorkspaceJobs([])
+      setWorkspaceJobsState('idle')
+      return
+    }
+    let cancelled = false
+    setWorkspaceJobsState('loading')
+    listBackgroundJobs()
+      .then((result) => {
+        if (cancelled) return
+        setWorkspaceJobs(result.jobs)
+        setWorkspaceJobsState('idle')
+      })
+      .catch(() => {
+        if (cancelled) return
+        setWorkspaceJobs([])
+        setWorkspaceJobsState('error')
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [data.status.adapter])
+
+  React.useEffect(() => {
+    setLocalExpertId(null)
+  }, [data.experts?.current, data.status.expertId])
+
+  React.useEffect(() => {
+    window.localStorage.setItem('archer-workspace-context-open', workspaceContextOpen ? '1' : '0')
+  }, [workspaceContextOpen])
   const [copiedMessageId, setCopiedMessageId] = React.useState<number | null>(null)
   const [collapsedMessages, setCollapsedMessages] = React.useState<Record<number, boolean>>({})
   const runtimeSessionId = activeSession?.id || 'desktop-session'
   const eventLogRef = React.useRef<EventLog | null>(null)
   if (eventLogRef.current === null) {
     eventLogRef.current = createPersistentEventLog(window.localStorage)
+    if (resetRuntimeOnMount) {
+      eventLogRef.current.clearSession(runtimeSessionId)
+    }
   }
   const [runtimeState, setRuntimeState] = React.useState(() => restoreRuntimeState(runtimeSessionId, eventLogRef.current))
   const runtimeJobs = Object.values(runtimeState.jobs).sort((a, b) => b.createdAt.localeCompare(a.createdAt))
-  const runtimePlans = Object.values(runtimeState.plans).sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+  const sidebarJobs = mergeWorkspaceJobs(runtimeJobs, workspaceJobs).slice(0, 3)
+  const activeSidebarJobCount = sidebarJobs.filter((job) => (
+    job.status === 'queued' || job.status === 'running' || job.status === 'waiting_approval'
+  )).length
+  const runtimePlans = Object.values(runtimeState.plans)
+    .filter((plan) => !isMisroutedHugoPublishPlan(plan))
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
   function recordAgentEvent(event: AgentEvent) {
     eventLogRef.current?.append(event)
     setRuntimeState((current) => reduceRuntimeEvent(current, event))
+    if (event.type === 'initiative.event') onInitiativeEvent?.(event)
+  }
+
+  function openTraceDiagnostics(traceId?: string) {
+    const events = runtimeState.events
+    const selectedTraceId = traceId
+      || [...events].reverse().find((event) => event.traceId)?.traceId
+      || ''
+    setTracePanel(buildTraceDiagnostics(events, selectedTraceId))
   }
 
   React.useEffect(() => {
@@ -95,12 +206,12 @@ export function ChatPage({
     setIsSending(false)
     setIsBackgrounding(false)
     setChatError('')
+    setTracePanel(null)
     setSaveState('')
     setToolEvents(activeSession ? [] : data.chat.toolEvents)
     setToolNotice('')
     setFileRefs([])
     setActiveComposerMenu(null)
-    setDraftCollapsed(false)
     setCopiedMessageId(null)
     setCollapsedMessages({})
     setRuntimeState(restoreRuntimeState(activeSession?.id || 'desktop-session', eventLogRef.current))
@@ -152,30 +263,29 @@ export function ChatPage({
   React.useEffect(() => {
     const textarea = draftTextareaRef.current
     if (!textarea) return
-    if (draftCollapsed) {
-      textarea.style.height = ''
-      textarea.style.overflowY = 'hidden'
-      return
-    }
     textarea.style.height = 'auto'
     const lineHeight = parseFloat(window.getComputedStyle(textarea).lineHeight) || 23
     const maxHeight = Math.round(lineHeight * 10 + 20)
     const nextHeight = Math.min(textarea.scrollHeight, maxHeight)
     textarea.style.height = `${nextHeight}px`
     textarea.style.overflowY = textarea.scrollHeight > maxHeight ? 'auto' : 'hidden'
-  }, [draft, draftCollapsed])
+  }, [draft])
 
   // 自动清理已完成的工具事件
   React.useEffect(() => {
     const staleIds = toolEvents
-      .filter((e) => e.status === 'complete' || e.status === 'denied' || e.status === 'blocked')
+      .filter((e) => {
+        const result = runtimeState.toolResults[e.id]
+        if (result?.receipt) return false
+        return e.status === 'complete' || e.status === 'denied' || e.status === 'blocked' || result
+      })
       .map((e) => e.id)
     if (!staleIds.length) return
     const timer = setTimeout(() => {
       setToolEvents((current) => current.filter((e) => !staleIds.includes(e.id)))
     }, 3000)
     return () => clearTimeout(timer)
-  }, [toolEvents])
+  }, [toolEvents, runtimeState.toolResults])
 
   // 键盘快捷键
   React.useEffect(() => {
@@ -187,7 +297,6 @@ export function ChatPage({
         e.preventDefault()
         setMessages(data.chat.initialMessages)
         setDraft('')
-        setDraftCollapsed(false)
         setToolEvents([])
         eventLogRef.current?.clear()
         setRuntimeState(createInitialRuntimeState(runtimeSessionId))
@@ -201,7 +310,6 @@ export function ChatPage({
         e.preventDefault()
         setMessages(data.chat.initialMessages)
         setDraft('')
-        setDraftCollapsed(false)
         setToolEvents([])
         setChatError('')
         setSaveState('')
@@ -228,9 +336,15 @@ export function ChatPage({
   async function sendMessage() {
     const text = draft.trim()
     if (!text || isSending || isBackgrounding) return
-    let sentFileRefs = fileRefs
+    let sentFileRefs = await prepareFileRefsForSend(text)
     if (!sentFileRefs.length && lastAttachedFilesRef.current.length && messageWantsHugoPublish(text)) {
-      sentFileRefs = lastAttachedFilesRef.current
+      sentFileRefs = await hydrateFileRefs(lastAttachedFilesRef.current)
+    }
+    const explicitFailures = sentFileRefs.filter((file) => file.attachStatus === 'failed' && isExplicitMarkdownPath(text, file.path))
+    if (explicitFailures.length) {
+      setToolNotice(`文稿读取失败：${explicitFailures.map((file) => file.name).join('、')}`)
+      setFileRefs(sentFileRefs)
+      return
     }
     if (data.status.adapter === 'local') {
       const route = routeTaskForRuntime({ text, fileCount: sentFileRefs.length })
@@ -246,12 +360,16 @@ export function ChatPage({
     }
     const previousMessages = messages
     const nextId = messages.length + 1
-    const userMessage: ChatMessage = { id: nextId, role: 'user', text }
+    const sentMessageFileRefs = sentFileRefs.map((file) => (
+      file.content
+        ? { ...file, attachStatus: 'ok' as const, attachDetail: fileAttachLabel(file) }
+        : { ...file, attachStatus: 'reading' as const, attachDetail: '读取中…' }
+    ))
+    const userMessage: ChatMessage = { id: nextId, role: 'user', text, fileRefs: sentMessageFileRefs }
     const nextMessages = [...messages, userMessage]
     setMessages(nextMessages)
     setDraft('')
-    setDraftCollapsed(false)
-    setFileRefs((current) => current.map((file) => ({ ...file, attachStatus: 'reading' as const, attachDetail: '上传中…' })))
+    setFileRefs([])
     setChatError('')
     setSaveState('')
     setToolEvents((current) => current.filter((event) => (
@@ -260,14 +378,7 @@ export function ChatPage({
       && !event.id.startsWith('mock-')
       && !event.id.startsWith('local-')
     )))
-    const reused = !fileRefs.length && sentFileRefs.length > 0
-    setToolNotice(
-      sentFileRefs.length
-        ? (reused
-          ? `沿用上轮 ${sentFileRefs.length} 个附件，正在读取…`
-          : `已附带 ${sentFileRefs.length} 个文件，正在读取…`)
-        : ''
-    )
+    setToolNotice('')
     eventLogRef.current?.clearSession(runtimeSessionId)
     setRuntimeState((current) => ({
       ...createInitialRuntimeState(runtimeSessionId),
@@ -278,13 +389,15 @@ export function ChatPage({
     }))
     setIsSending(true)
 
-    if (data.status.adapter !== 'local') {
-      const fileNote = sentFileRefs.length ? '\n\n本地文件引用会在连接本地 API 后注入当前对话。' : ''
-      setMessages([...nextMessages, { id: nextId + 1, role: 'assistant', text: data.chat.mockReply + fileNote }])
-      setIsTyping(false)
+    if (!(await ensureLocalConnection())) {
+      setMessages(previousMessages)
+      setDraft(text)
+      setFileRefs(sentMessageFileRefs)
       setIsSending(false)
+      setChatError('大脑正在启动，几秒后会自动连上。')
       return
     }
+    await onRefresh?.()
 
     setIsTyping(true)
     const controller = new AbortController()
@@ -296,21 +409,28 @@ export function ChatPage({
       }
       const assistantId = nextId + 1
       const requestMessages = nextMessages.map((message) => ({ role: message.role, content: message.text }))
-      setMessages([...nextMessages, { id: assistantId, role: 'assistant', text: '' }])
+      const thinkingMutter = buildThinkingMutter(text, sentFileRefs.length)
+      setMessages([...nextMessages, { id: assistantId, role: 'assistant', text: '', mutter: thinkingMutter }])
+      let streamedReply = ''
       let reply = ''
+      let sawToolEvent = false
+      let lastFailureHint: AgentEvent | null = null
       await streamLocalChat(
         requestMessages,
         memoryMode,
         obsidianMode,
         sentFileRefs,
+        threadContextPayload(),
         (chunk) => {
-          reply += chunk
+          streamedReply += chunk
+          reply = streamedReply
           setMessages([...nextMessages, { id: assistantId, role: 'assistant', text: reply }])
         },
         (event) => {
+          sawToolEvent = true
           if (event.name === 'file.reference' && event.draft?.path) {
             const refPath = String(event.draft.path)
-            setFileRefs((current) => current.map((file) => {
+            const updateRef = (file: FileRef): FileRef => {
               if (file.path !== refPath) return file
               if (event.status === 'complete') {
                 const chars = event.draft?.injectedChars
@@ -324,7 +444,12 @@ export function ChatPage({
                 return { ...file, attachStatus: 'failed', attachDetail: event.summary || '读取失败' }
               }
               return { ...file, attachStatus: 'reading', attachDetail: event.summary || '读取中…' }
-            }))
+            }
+            setMessages((current) => current.map((message) => (
+              message.id === nextId
+                ? { ...message, fileRefs: (message.fileRefs || []).map(updateRef) }
+                : message
+            )))
           }
           setToolEvents((current) => {
             const existing = current.findIndex((item) => item.id === event.id)
@@ -332,24 +457,30 @@ export function ChatPage({
             return current.map((item) => (item.id === event.id ? event : item))
           })
         },
-        recordAgentEvent,
+        (event) => {
+          if (event.type === 'failure.hint') lastFailureHint = event
+          recordAgentEvent(event)
+        },
         controller.signal,
         runtimeSessionId
       )
-      if (!reply) {
-        setMessages([...nextMessages, { id: assistantId, role: 'assistant', text: '（模型无回复）' }])
+      if (!streamedReply) {
+        // 模型未返回文本时，根据是否有工具事件给出更友好的兜底
+        reply = failureHintFallback(lastFailureHint, sawToolEvent)
+        setMessages([...nextMessages, { id: assistantId, role: 'assistant', text: reply }])
       } else {
         try {
           const finalMessages: ChatMessage[] = [...nextMessages, { id: assistantId, role: 'assistant', text: reply }]
           if (activeSession) {
-            await appendLocalSession(activeSession.id, [
+            const saved = await appendLocalSession(activeSession.id, [
               { role: 'user', content: text },
               { role: 'assistant', content: reply }
             ])
-            onSessionAppended?.(finalMessages)
+            onSessionAppended?.(finalMessages, saved)
             setSaveState('已续写当前会话')
           } else {
-            await saveLocalSession([...requestMessages, { role: 'assistant', content: reply }])
+            const saved = await saveLocalSession([...requestMessages, { role: 'assistant', content: reply }], sessionSaveMeta())
+            onSessionAppended?.(finalMessages, saved)
             setSaveState('已保存到历史会话')
           }
           await onRefresh?.()
@@ -359,15 +490,27 @@ export function ChatPage({
         }
       }
     } catch (error) {
-      const aborted = (error instanceof DOMException && error.name === 'AbortError') || (error instanceof Error && error.name === 'AbortError')
-      if (aborted) {
+      if (isAbortError(error)) {
         setMessages(previousMessages)
         setDraft(text)
-        setDraftCollapsed(false)
+        setFileRefs(sentMessageFileRefs)
         setToolEvents([])
         setToolNotice('已停止发送，内容已放回输入框')
+      } else if (isRequestTimeout(error)) {
+        setMessages(previousMessages)
+        setDraft(text)
+        setFileRefs(sentMessageFileRefs)
+        setToolEvents([])
+        setToolNotice('请求超时，内容已放回输入框。可以稍后重试。')
+      } else if (isChatBusy(error)) {
+        setMessages(previousMessages)
+        setDraft(text)
+        setFileRefs(sentMessageFileRefs)
+        setToolEvents([])
+        setToolNotice('上一轮还在处理中，内容已放回输入框。等它结束后再发送。')
       } else {
         setChatError(error instanceof Error ? error.message : '请求失败')
+        setFileRefs(sentMessageFileRefs)
         setMessages([
           ...nextMessages,
           {
@@ -388,17 +531,6 @@ export function ChatPage({
       if (abortControllerRef.current === controller) abortControllerRef.current = null
       setIsTyping(false)
       setIsSending(false)
-      setFileRefs((current) => {
-        if (!current.length) return current
-        const failed = current.filter((file) => file.attachStatus === 'failed')
-        const ok = current.filter((file) => file.attachStatus === 'ok')
-        if (failed.length) {
-          setToolNotice(`附件读取失败：${failed.map((file) => file.name).join('、')}`)
-        } else if (ok.length) {
-          setToolNotice(`附件已读取：${ok.map((file) => file.name).join('、')}`)
-        }
-        return []
-      })
     }
   }
 
@@ -450,14 +582,17 @@ export function ChatPage({
       ))
       try {
         if (activeSession) {
-          await appendLocalSession(activeSession.id, [{ role: 'assistant', content: reply }])
+          const saved = await appendLocalSession(activeSession.id, [{ role: 'assistant', content: reply }])
           onSessionAppended?.(nextMessages.map((message) =>
             message.id === assistantId ? { ...message, text: reply } : message,
-          ))
+          ), saved)
           setSaveState('计划任务结果已续写当前会话')
         } else {
           const requestMessages = messages.map((message) => ({ role: message.role, content: message.text }))
-          await saveLocalSession([...requestMessages, { role: 'assistant', content: reply }])
+          const saved = await saveLocalSession([...requestMessages, { role: 'assistant', content: reply }], sessionSaveMeta())
+          onSessionAppended?.(nextMessages.map((message) =>
+            message.id === assistantId ? { ...message, text: reply } : message,
+          ), saved)
           setSaveState('计划任务结果已保存到历史会话')
         }
         await onRefresh?.()
@@ -466,9 +601,7 @@ export function ChatPage({
         setChatError(error instanceof Error ? error.message : '保存失败')
       }
     } catch (error) {
-      const aborted = (error instanceof DOMException && error.name === 'AbortError')
-        || (error instanceof Error && error.name === 'AbortError')
-      if (!aborted) {
+      if (!isAbortError(error)) {
         const message = error instanceof Error ? error.message : '计划任务失败'
         setChatError(message)
         setMessages((current) => current.map((item) =>
@@ -550,8 +683,8 @@ export function ChatPage({
       id: assistantId,
       role: 'assistant',
       text: options.autoRouted
-        ? `这个请求我已自动放入后台执行，完成后会把结果贴回来。${options.reason ? `\n\n原因：${backgroundRouteReasonLabel(options.reason)}` : ''}`
-        : '已放入后台执行，完成后我会把结果贴回来。',
+        ? `我先把具体执行放到后台跑，完成后会把结果贴回来。${options.reason ? `\n\n原因：${backgroundRouteReasonLabel(options.reason)}` : ''}`
+        : '我先放到后台执行，完成后会把结果贴回来。',
     }
     const nextMessages = [...messages, userMessage, pendingAssistant]
     const controller = new AbortController()
@@ -560,7 +693,6 @@ export function ChatPage({
     backgroundJobAbortRef.current = controller
     setMessages(nextMessages)
     setDraft('')
-    setDraftCollapsed(false)
     setFileRefs([])
     setChatError('')
     setSaveState('')
@@ -588,22 +720,23 @@ export function ChatPage({
         ? finalJob.result || '后台任务已完成，但没有返回内容。'
         : `后台任务${finalJob.status === 'failed' ? '失败' : '结束'}：${finalJob.error || finalJob.result || finalJob.status}`
       const finalMessages: ChatMessage[] = nextMessages.map((message) =>
-        message.id === assistantId ? { ...message, text: reply } : message
+        message.id === assistantId ? { ...message, text: reply, mutter: undefined } : message
       )
       setMessages((current) => current.map((message) =>
-        message.id === assistantId ? { ...message, text: reply } : message
+        message.id === assistantId ? { ...message, text: reply, mutter: undefined } : message
       ))
       try {
         if (activeSession) {
-          await appendLocalSession(activeSession.id, [
+          const saved = await appendLocalSession(activeSession.id, [
             { role: 'user', content: text },
             { role: 'assistant', content: reply }
           ])
-          onSessionAppended?.(finalMessages)
+          onSessionAppended?.(finalMessages, saved)
           setSaveState('后台结果已续写当前会话')
         } else {
           const requestMessages = [...messages, userMessage].map((message) => ({ role: message.role, content: message.text }))
-          await saveLocalSession([...requestMessages, { role: 'assistant', content: reply }])
+          const saved = await saveLocalSession([...requestMessages, { role: 'assistant', content: reply }], sessionSaveMeta())
+          onSessionAppended?.(finalMessages, saved)
           setSaveState('后台结果已保存到历史会话')
         }
         await onRefresh?.()
@@ -612,8 +745,7 @@ export function ChatPage({
         setChatError(error instanceof Error ? error.message : '保存失败')
       }
     } catch (error) {
-      const aborted = (error instanceof DOMException && error.name === 'AbortError') || (error instanceof Error && error.name === 'AbortError')
-      if (!aborted) {
+      if (!isAbortError(error)) {
         const message = error instanceof Error ? error.message : '后台任务失败'
         setChatError(message)
         setMessages((current) => current.map((item) =>
@@ -654,8 +786,7 @@ export function ChatPage({
         recordAgentEvent,
         { signal: controller.signal }
       ).catch((error) => {
-        const aborted = (error instanceof DOMException && error.name === 'AbortError') || (error instanceof Error && error.name === 'AbortError')
-        if (!aborted) setToolNotice(error instanceof Error ? error.message : '后台任务轮询失败')
+        if (!isAbortError(error)) setToolNotice(error instanceof Error ? error.message : '后台任务轮询失败')
       }).finally(() => {
         if (backgroundJobAbortRef.current === controller) backgroundJobAbortRef.current = null
       })
@@ -687,48 +818,6 @@ export function ChatPage({
       // recordAgentEvent persists the approval.result and updates runtimeState.toolResults,
       // which the UI reads to determine decision state for each tool card.
       recordAgentEvent(approvalEvent)
-      setToolEvents((current) =>
-        current.map((event) => {
-          if (event.id !== eventId) return event
-          if (decision === 'denied') {
-            return { ...event, status: 'denied', summary: '草稿已放弃', detail: result.message, requiresApproval: false }
-          }
-          if (event.name === 'shell.execute') {
-            return {
-              ...event,
-              status: result.executed ? 'complete' : 'blocked',
-              summary: result.executed ? 'Shell 命令已执行' : `命令执行失败：${event.draft?.command || ''}`,
-              detail: result.output ? `output: ${result.output.slice(0, 300)}${result.output.length > 300 ? '…(已截断)' : ''}` : result.message,
-              requiresApproval: false,
-            }
-          }
-          if (event.name === 'github') {
-            return {
-              ...event,
-              status: result.executed ? 'complete' : 'blocked',
-              summary: result.executed ? 'GitHub 操作已完成' : 'GitHub 操作失败',
-              detail: result.output ? `output: ${result.output.slice(0, 300)}${result.output.length > 300 ? '…(已截断)' : ''}` : result.message,
-              requiresApproval: false,
-            }
-          }
-          if (event.name === 'hugo_blog') {
-            return {
-              ...event,
-              status: result.executed ? 'complete' : 'blocked',
-              summary: result.executed ? '博客发布已执行' : '博客发布失败或未执行',
-              detail: result.output ? `output: ${result.output.slice(0, 500)}${result.output.length > 500 ? '…(已截断)' : ''}` : result.message,
-              requiresApproval: false,
-            }
-          }
-          return {
-            ...event,
-            status: result.executed ? 'complete' : 'blocked',
-            summary: result.executed ? '已写入本地 Obsidian' : '写入未执行',
-            detail: result.validatedPath ? `executed: ${result.executed}, path: ${result.validatedPath}` : result.message,
-            requiresApproval: false,
-          }
-        })
-      )
       const notice = result.executed
         ? (result.output?.trim() || result.message)
         : `未执行：${result.message}`
@@ -747,13 +836,21 @@ export function ChatPage({
     }
   }
 
-  const hasRuntimeActivity = runtimePlans.length > 0 || runtimeJobs.length > 0 || runtimeState.pendingApprovals.length > 0 || toolEvents.length > 0
+  const visibleToolEvents = toolEvents.filter((event) => !event.id.startsWith('mock-') && !isHiddenToolEvent(event.name))
+  const hasRuntimeActivity = runtimePlans.length > 0 || runtimeJobs.length > 0 || runtimeState.pendingApprovals.length > 0 || visibleToolEvents.length > 0
   const isHome = messages.length === 0 && !isTyping && !isSending && !activeSession && !hasRuntimeActivity
+  const displayToolEvents = React.useMemo(() => (
+    toolEvents
+      .filter((event) => !isHiddenToolEvent(event.name))
+      .map((event) => toolEventWithRuntimeResult(event, runtimeState.toolResults[event.id]))
+      .filter((event) => !event.requiresApproval)
+  ), [toolEvents, runtimeState.toolResults])
   const approvalToolEvents = React.useMemo(() => {
     const merged = new Map<string, ToolEvent>()
     for (const event of toolEvents) {
       if (
         event.requiresApproval
+        && !runtimeState.toolResults[event.id]
         && !event.id.startsWith('mock-')
         && !event.id.startsWith('local-')
       ) {
@@ -764,22 +861,50 @@ export function ChatPage({
       if (!merged.has(req.id)) merged.set(req.id, toolEventFromRuntimeRequest(req))
     }
     return [...merged.values()]
-  }, [toolEvents, runtimeState.pendingApprovals])
-  const draftLineCount = Math.max(1, draft.split('\n').length)
-  const shouldCollapseDraft = (text: string) => text.split('\n').length > 8 || text.length > 1800
-
+  }, [toolEvents, runtimeState.pendingApprovals, runtimeState.toolResults])
   function updateDraftText(text: string) {
     setDraft(text)
-    if (shouldCollapseDraft(text)) setDraftCollapsed(true)
-    if (!text.trim()) setDraftCollapsed(false)
   }
 
-  function handleDraftPaste(event: React.ClipboardEvent<HTMLTextAreaElement>) {
-    const pasted = event.clipboardData.getData('text')
-    if (!shouldCollapseDraft(pasted)) return
-    event.preventDefault()
-    setDraft(pasted)
-    setDraftCollapsed(true)
+  async function hydrateFileRefs(refs: FileRef[]): Promise<FileRef[]> {
+    const unique = dedupeFileRefs(refs).slice(0, 5)
+    if (!unique.length || !window.archerDesktop?.readFileReferences) return unique
+    const readable = unique.filter((file) => isTextLikeFile(file.path))
+    if (!readable.length) return unique
+    try {
+      const results = await window.archerDesktop.readFileReferences(readable)
+      const byPath = new Map(results.map((item) => [item.path, item]))
+      return unique.map((file) => {
+        const result = byPath.get(file.path)
+        if (!result) return file
+        if (!result.ok) {
+          return { ...file, size: result.size || file.size, attachStatus: 'failed', attachDetail: result.error || '读取失败' }
+        }
+        return {
+          ...file,
+          size: result.size || file.size,
+          attachStatus: 'ok',
+          attachDetail: result.truncated ? `已预读 ${result.contentChars || 0} 字，已截断` : `已预读 ${result.contentChars || 0} 字`,
+          content: result.content,
+          contentChars: result.contentChars,
+          truncated: result.truncated,
+        }
+      })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '读取失败'
+      return unique.map((file) => isTextLikeFile(file.path) ? { ...file, attachStatus: 'failed', attachDetail: message } : file)
+    }
+  }
+
+  async function prepareFileRefsForSend(text: string): Promise<FileRef[]> {
+    const explicitRefs = shouldLetBackendReadExplicitMarkdownPath(text) ? [] : extractMarkdownPathRefs(text)
+    const merged = dedupeFileRefs([...fileRefs, ...explicitRefs])
+    const hydrated = await hydrateFileRefs(merged)
+    lastAttachedFilesRef.current = hydrated
+    if (explicitRefs.length || hydrated.some((file) => file.content)) {
+      setFileRefs(hydrated)
+    }
+    return hydrated
   }
 
   async function pickLocalFiles() {
@@ -793,21 +918,31 @@ export function ChatPage({
       const picked = await window.archerDesktop.pickFiles()
       if (!picked.length) return
       let added = 0
+      let mergedRefs: FileRef[] = []
       setFileRefs((current) => {
         const known = new Set(current.map((item) => item.path))
         const next = [...current]
         for (const item of picked) {
           if (known.has(item.path)) continue
-          next.push({ ...item, attachStatus: 'ready', attachDetail: '待发送' })
+          next.push({ ...item, attachStatus: 'ready', attachDetail: '' })
           known.add(item.path)
           added += 1
         }
         const merged = next.slice(0, 5)
+        mergedRefs = merged
         lastAttachedFilesRef.current = merged
         return merged
       })
       if (added > 0) {
-        setToolNotice(`已添加 ${added} 个附件，发送后将自动读取内容`)
+        // 后台静默预读，不在 UI 显示"读取中"；预读失败也不报错（发送时由服务端兜底）
+        hydrateFileRefs(mergedRefs)
+          .then((hydrated) => {
+            lastAttachedFilesRef.current = hydrated
+            setFileRefs(hydrated)
+          })
+          .catch(() => {
+            // 预读失败保持 'ready' 状态，发送时由服务端处理
+          })
       }
     } catch (error) {
       setToolNotice(error instanceof Error ? error.message : '选择文件失败')
@@ -929,6 +1064,30 @@ export function ChatPage({
     }
   }
 
+  function exportConversation() {
+    const exportable = messages.filter((m) => m.text.trim())
+    if (!exportable.length) {
+      setToolNotice('没有可导出的对话')
+      return
+    }
+    const date = new Date().toISOString().slice(0, 10)
+    const title = exportable.find((m) => m.role === 'user')?.text.slice(0, 30).trim().replace(/\n/g, ' ') || '对话'
+    const md = exportable.map((m) => {
+      const role = m.role === 'user' ? '👤 **我**' : m.role === 'assistant' ? '🎯 **Archer**' : '⚙️ **系统**'
+      return `### ${role}\n\n${m.text}`
+    }).join('\n\n---\n\n')
+    const content = `# Archer 对话导出\n\n> 日期：${date}\n> 标题：${title}\n\n---\n\n${md}\n`
+    const blob = new Blob([content], { type: 'text/markdown;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `archer-${date}-${title.slice(0, 20).replace(/[/\\:*?"<>|]/g, '')}.md`
+    a.click()
+    URL.revokeObjectURL(url)
+    setToolNotice('已导出为 Markdown')
+    window.setTimeout(() => setToolNotice(''), 2000)
+  }
+
   function toggleMessageCollapsed(messageId: number) {
     setCollapsedMessages((current) => ({ ...current, [messageId]: !current[messageId] }))
   }
@@ -936,7 +1095,6 @@ export function ChatPage({
   function editUserMessage(message: ChatMessage) {
     setMessages((current) => current.slice(0, current.findIndex((item) => item.id === message.id)))
     setDraft(message.text)
-    setDraftCollapsed(shouldCollapseDraft(message.text))
     setToolEvents([])
     setToolNotice('已放回输入框，可重新编辑发送')
     window.setTimeout(() => draftTextareaRef.current?.focus(), 0)
@@ -944,14 +1102,51 @@ export function ChatPage({
 
   function useMessageAsDraft(message: ChatMessage) {
     setDraft(message.text)
-    setDraftCollapsed(shouldCollapseDraft(message.text))
     setToolNotice(message.role === 'assistant' ? '回答已放入输入框，可继续编辑' : '问题已放入输入框')
     window.setTimeout(() => draftTextareaRef.current?.focus(), 0)
   }
 
-  function useStarter(starter: (typeof CHAT_STARTERS)[number]) {
+  async function chooseChatModelProfile(profileId: 'lite' | 'pro' | 'max') {
+    if (switchingModel || profileId === selectedModel) {
+      setActiveComposerMenu(null)
+      return
+    }
+    const previousModel = selectedModel
+    setSelectedModel(profileId)
+    setSwitchingModel(profileId)
+    setActiveComposerMenu(null)
+    if (!(await ensureLocalConnection())) {
+      setSelectedModel(data.settings.activeProfile || 'lite')
+      setSwitchingModel(null)
+      setChatError('大脑未就绪，暂时无法切换模型。')
+      return
+    }
+    try {
+      const result = await switchLocalActiveProfile(profileId)
+      if (!result.ok) {
+        setSelectedModel(data.settings.activeProfile || 'lite')
+        setSwitchingModel(null)
+        setChatError(`模型切换失败：${result.error || '配置未保存'}`)
+        return
+      }
+      const notice = modelSwitchNotice(previousModel, profileId)
+      setMessages((current) => [
+        ...current,
+        { id: current.length + 1, role: 'system', text: notice.text, detail: notice.detail },
+      ])
+      setToolNotice(notice.detail)
+      setChatError('')
+      await onRefresh?.()
+    } catch (error) {
+      setSelectedModel(data.settings.activeProfile || 'lite')
+      setChatError(error instanceof Error ? error.message : '模型切换失败')
+    } finally {
+      setSwitchingModel(null)
+    }
+  }
+
+  function useStarter(starter: ExpertStarter) {
     setDraft(starter.prompt)
-    setDraftCollapsed(false)
     setToolNotice('')
     window.setTimeout(() => draftTextareaRef.current?.focus(), 0)
   }
@@ -972,12 +1167,12 @@ export function ChatPage({
     const previousMessages = messages
     const baseMessages = messages.slice(0, userIndex + 1)
     const assistantId = Math.max(0, ...baseMessages.map((item) => item.id)) + 1
-    const pendingAssistant: ChatMessage = { id: assistantId, role: 'assistant', text: '' }
+    const thinkingMutter = buildThinkingMutter(baseMessages[userIndex]?.text || '')
+    const pendingAssistant: ChatMessage = { id: assistantId, role: 'assistant', text: '', mutter: thinkingMutter }
     const requestMessages = baseMessages.map((item) => ({ role: item.role, content: item.text }))
 
     setMessages([...baseMessages, pendingAssistant])
     setDraft('')
-    setDraftCollapsed(false)
     setFileRefs([])
     setChatError('')
     setSaveState('')
@@ -998,14 +1193,18 @@ export function ChatPage({
     const controller = new AbortController()
     abortControllerRef.current = controller
     try {
+      let streamedReply = ''
       let reply = ''
+      let lastFailureHint: AgentEvent | null = null
       await streamLocalChat(
         requestMessages,
         memoryMode,
         obsidianMode,
         [],
+        threadContextPayload(),
         (chunk) => {
-          reply += chunk
+          streamedReply += chunk
+          reply = streamedReply
           setMessages([...baseMessages, { id: assistantId, role: 'assistant', text: reply }])
         },
         (event) => {
@@ -1015,30 +1214,43 @@ export function ChatPage({
             return current.map((item) => (item.id === event.id ? event : item))
           })
         },
-        recordAgentEvent,
+        (event) => {
+          if (event.type === 'failure.hint') lastFailureHint = event
+          recordAgentEvent(event)
+        },
         controller.signal,
         runtimeSessionId
       )
+      const regenerateHadToolEvents = toolEvents.length > 0
+      const regenerateReply = streamedReply
+        ? reply
+        : failureHintFallback(lastFailureHint, regenerateHadToolEvents)
       const finalMessages: ChatMessage[] = [
         ...baseMessages,
-        { id: assistantId, role: 'assistant', text: reply || '（模型无回复）' }
+        { id: assistantId, role: 'assistant', text: regenerateReply }
       ]
       setMessages(finalMessages)
-      if (reply) {
+      if (streamedReply) {
         if (activeSession) {
           onSessionAppended?.(finalMessages)
           setSaveState('已重新生成当前回答')
         } else {
-          await saveLocalSession([...requestMessages, { role: 'assistant', content: reply }])
+          const saved = await saveLocalSession([...requestMessages, { role: 'assistant', content: reply }], sessionSaveMeta())
+          onSessionAppended?.(finalMessages, saved)
           setSaveState('已保存到历史会话')
         }
         await onRefresh?.()
       }
     } catch (error) {
-      const aborted = (error instanceof DOMException && error.name === 'AbortError') || (error instanceof Error && error.name === 'AbortError')
-      if (aborted) {
+      if (isAbortError(error)) {
         setMessages(previousMessages)
         setToolNotice('已停止重新生成')
+      } else if (isRequestTimeout(error)) {
+        setMessages(previousMessages)
+        setToolNotice('重新生成请求超时，可稍后再试')
+      } else if (isChatBusy(error)) {
+        setMessages(previousMessages)
+        setToolNotice('上一轮还在处理中，暂时不能重新生成。')
       } else {
         setChatError(error instanceof Error ? error.message : '重新生成失败')
         setMessages(previousMessages)
@@ -1050,13 +1262,16 @@ export function ChatPage({
     }
   }
 
-  const composerPlaceholder = draftCollapsed
-    ? '长文本已折叠，回车发送完整内容。'
-    : isHome
+  const composerPlaceholder = isHome
       ? '想说点什么…'
       : activeSession
         ? '接着这段聊…'
         : '继续说…'
+
+  const modelButtonLabel = modelProfileShortLabel(selectedModel)
+  const activeExpertTitle = expertOptions.find((item) => item.id === activeExpertId)?.label
+    || data.status.expertLabel
+    || '基础 Archer'
 
   const composerEl = (
     <>
@@ -1086,22 +1301,10 @@ export function ChatPage({
           ))}
         </div>
       )}
-        <div className={`draft-collapse-card-placeholder ${draftCollapsed ? 'visible' : ''}`}>
-          {draftCollapsed && (
-            <>
-              <span>已折叠 {draftLineCount} 行长文本</span>
-              <button type="button" onClick={() => setDraftCollapsed(false)}>展开</button>
-              <button type="button" onClick={() => { setDraft(''); setDraftCollapsed(false) }}>移除</button>
-            </>
-          )}
-        </div>
       <textarea
         ref={draftTextareaRef}
-        className={draftCollapsed ? 'is-collapsed' : ''}
-        value={draftCollapsed ? '' : draft}
-        readOnly={draftCollapsed}
+        value={draft}
         onChange={(e) => updateDraftText(e.target.value)}
-        onPaste={handleDraftPaste}
         onCompositionStart={() => { composingRef.current = true }}
         onCompositionEnd={() => { composingRef.current = false }}
         onKeyDown={(e) => {
@@ -1118,33 +1321,15 @@ export function ChatPage({
         <div className="composer-left">
           <div className="composer-menu-wrapper">
             <button
-              className={`composer-tool-btn${activeComposerMenu === 'attach' ? ' active' : ''}`}
+              className="composer-tool-btn"
               type="button"
-              onClick={() => setActiveComposerMenu((current) => (current === 'attach' ? null : 'attach'))}
+              onClick={() => void pickLocalFiles()}
               disabled={isSending}
               title="添加附件"
               aria-label="添加附件"
             >
               <Paperclip size={17} />
             </button>
-            {activeComposerMenu === 'attach' && (
-              <div className="composer-popover attach-menu">
-                <button type="button" onClick={pickLocalFiles}>
-                  <FileText size={15} />
-                  <span>
-                    <strong>文件</strong>
-                    <em>文档、图片、视频</em>
-                  </span>
-                </button>
-                <button type="button" onClick={pickLocalFiles}>
-                  <Paperclip size={15} />
-                  <span>
-                    <strong>照片或视频</strong>
-                    <em>从本地选择</em>
-                  </span>
-                </button>
-              </div>
-            )}
           </div>
           <div className="composer-menu-wrapper">
             <button
@@ -1213,123 +1398,153 @@ export function ChatPage({
           </button>
           <div className="composer-menu-wrapper">
             <button
-              className={`composer-tool-btn${activeComposerMenu === 'model' ? ' active' : ''}`}
-              type="button"
-              onClick={() => setActiveComposerMenu((current) => (current === 'model' ? null : 'model'))}
-              title="模型选择"
-              aria-label="模型选择"
-            >
-              <Infinity size={18} />
-            </button>
-            {activeComposerMenu === 'model' && (
-              <div className="composer-popover choice-menu">
-                {MODEL_OPTIONS.map((option) => (
-                  <button
-                    className={selectedModel === option.id ? 'active' : ''}
-                    type="button"
-                    key={option.id}
-                    onClick={() => {
-                      setSelectedModel(option.id)
-                      setActiveComposerMenu(null)
-                      setToolNotice(`${option.label} 已启用`)
-                    }}
-                  >
-                    <span>
-                      <strong>{option.label}</strong>
-                      <em>{option.note}</em>
-                    </span>
-                    {selectedModel === option.id && <Check size={14} />}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-          <div className="composer-menu-wrapper">
-            <button
-              className={`composer-tool-btn${activeComposerMenu === 'persona' || activeConversationMode !== 'auto' ? ' active' : ''}`}
+              className={`composer-tool-btn composer-expert-btn${activeComposerMenu === 'persona' || activeExpertId !== 'default' ? ' active' : ''}`}
               type="button"
               onClick={() => setActiveComposerMenu((current) => (current === 'persona' ? null : 'persona'))}
-              title="人格模型"
-              aria-label="人格模型"
+              title={`专家：${activeExpertTitle}`}
+              aria-label={`专家：${activeExpertTitle}`}
             >
-              <UserRoundCog size={17} />
+              <ExpertAvatar expertId={activeExpertId} size={26} title={activeExpertTitle} />
             </button>
             {activeComposerMenu === 'persona' && (
               <div className="composer-popover choice-menu persona-menu">
-                <p className="composer-menu-section-label">快捷人格</p>
-                {PERSONA_OPTIONS.map((option) => (
+                <p className="composer-menu-section-label">专家工作台</p>
+                {expertOptions.map((option) => (
                   <button
-                    className={activeConversationMode === option.mode ? 'active' : ''}
+                    className={activeExpertId === option.id ? 'active' : ''}
                     type="button"
                     key={option.id}
+                    disabled={expertSwitching}
                     onClick={() => {
                       void (async () => {
+                        if (expertSwitchingRef.current || option.id === activeExpertId) return
+                        expertSwitchingRef.current = true
+                        setExpertSwitching(true)
                         setActiveComposerMenu(null)
-                        if (data.status.adapter === 'local') {
-                          try {
-                            const result = await switchLocalMode(option.mode)
-                            setSelectedPersona(option.id)
-                            setToolNotice(`已切换到 ${result.label}`)
-                            await onRefresh?.()
-                            return
-                          } catch (error) {
-                            setToolNotice(error instanceof Error ? error.message : '模式切换失败')
-                            return
+                        setLocalExpertId(option.id)
+                        setChatError('')
+                        try {
+                          if (data.status.adapter !== 'local') {
+                            if (!(await ensureLocalConnection())) {
+                              throw new Error('大脑未就绪，暂时无法切换专家。')
+                            }
                           }
+                          await switchLocalExpert(option.id)
+                          if (onExpertSwitch) {
+                            await onExpertSwitch()
+                          } else {
+                            await onRefresh?.()
+                          }
+                        } catch (error) {
+                          setChatError(error instanceof Error ? error.message : '专家切换失败')
+                        } finally {
+                          expertSwitchingRef.current = false
+                          setExpertSwitching(false)
+                          setLocalExpertId(null)
                         }
-                        setSelectedPersona(option.id)
-                        setToolNotice(`${option.label} 已选择（连接本地后可写入模式）`)
                       })()
                     }}
                   >
+                    <ExpertAvatar expertId={option.id} size={24} title={option.label} />
                     <span>
                       <strong>{option.label}</strong>
                       <em>{option.note}</em>
                     </span>
-                    {activeConversationMode === option.mode && <Check size={14} />}
+                    {activeExpertId === option.id && <Check size={14} />}
                   </button>
                 ))}
-                {morePersonaModes.length > 0 && (
+                {fullConversationModes.length > 0 && (
                   <>
                     <p className="composer-menu-section-label">全部姿态</p>
-                    {morePersonaModes.map((mode) => (
+                    {fullConversationModes.slice(0, 4).map((mode) => (
                       <button
-                        className={activeConversationMode === mode.id ? 'active' : ''}
                         type="button"
                         key={mode.id}
                         onClick={() => {
-                          void (async () => {
-                            setActiveComposerMenu(null)
-                            if (data.status.adapter === 'local') {
-                              try {
-                                const result = await switchLocalMode(mode.id)
-                                setSelectedPersona(personaIdFromMode(mode.id))
-                                setToolNotice(`已切换到 ${result.label}`)
-                                await onRefresh?.()
-                                return
-                              } catch (error) {
-                                setToolNotice(error instanceof Error ? error.message : '模式切换失败')
-                                return
-                              }
-                            }
-                            setToolNotice(`${mode.label} 已选择（连接本地后可写入模式）`)
-                          })()
+                          setActiveComposerMenu(null)
+                          sessionStorage.setItem('archer-settings-tab', 'context')
+                          onNavigate?.('Settings')
                         }}
                       >
                         <span>
                           <strong>{mode.label}</strong>
-                          <em>{mode.id}</em>
+                          <em>在设置页切换完整对话姿态</em>
                         </span>
-                        {activeConversationMode === mode.id && <Check size={14} />}
                       </button>
                     ))}
                   </>
                 )}
+                {onNavigate && (
+                  <button
+                    className="composer-menu-footer"
+                    type="button"
+                    onClick={() => {
+                      setActiveComposerMenu(null)
+                      sessionStorage.setItem('archer-settings-tab', 'context')
+                      onNavigate('Settings')
+                    }}
+                  >
+                    <span>
+                      <strong>更多姿态</strong>
+                      <em>建造者、镜面、哲学家等 12 种完整姿态</em>
+                    </span>
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+          <div className="composer-menu-wrapper">
+              <button
+              className={`composer-tool-btn composer-model-btn has-label${activeComposerMenu === 'model' ? ' active' : ''}`}
+              type="button"
+              onClick={() => setActiveComposerMenu((current) => (current === 'model' ? null : 'model'))}
+              disabled={Boolean(switchingModel)}
+              title={`模型：${modelButtonLabel}`}
+              aria-label={`模型：${modelButtonLabel}`}
+            >
+              <span className="composer-model-label">{modelButtonLabel}</span>
+            </button>
+            {activeComposerMenu === 'model' && (
+              <div className="composer-popover choice-menu">
+                {modelProfiles.map((option) => (
+                  <button
+                    className={selectedModel === option.id ? 'active' : ''}
+                    type="button"
+                    key={option.id}
+                    disabled={Boolean(switchingModel) || selectedModel === option.id}
+                    onClick={() => {
+                      void chooseChatModelProfile(option.id)
+                    }}
+                    title={option.configured ? `${modelProfileShortLabel(option.id)} 已配置` : `${modelProfileShortLabel(option.id)} 未配置 API key`}
+                  >
+                    <span>
+                      <strong>{modelProfileShortLabel(option.id)}</strong>
+                      <em>{option.provider}{option.model ? ` · ${option.model}` : ''}{option.configured ? '' : ' · 未配置'}</em>
+                    </span>
+                    {selectedModel === option.id && <Check size={14} />}
+                  </button>
+                ))}
+                <button type="button" onClick={() => onNavigate?.('Settings')}>
+                  <span>
+                    <strong>打开模型设置</strong>
+                    <em>查看 key 状态、测试当前档位</em>
+                  </span>
+                </button>
               </div>
             )}
           </div>
         </div>
         <div className="composer-right">
+          <button
+            className="composer-tool-btn"
+            type="button"
+            onClick={exportConversation}
+            disabled={!messages.some((m) => m.text.trim())}
+            title="导出为 Markdown"
+            aria-label="导出为 Markdown"
+          >
+            <Download size={16} />
+          </button>
           <button
             className={`composer-background${isBackgrounding ? ' active' : ''}`}
             type="button"
@@ -1361,9 +1576,24 @@ export function ChatPage({
         <div className="home-centerpiece">
           <ArcherRing large living />
           <p className="home-title">{homeGreeting}</p>
+          <div className="starter-row" aria-label="快捷开场">
+            {homeStarters.map((starter) => (
+              <button key={starter.label} type="button" onClick={() => useStarter(starter)}>
+                {starter.label}
+              </button>
+            ))}
+          </div>
           {sessionLoadState === 'loading' && <div className="session-source-banner">读取会话中…</div>}
           {sessionLoadState === 'error' && <div className="session-source-banner warning">{sessionLoadError || '会话读取失败'}</div>}
-          {chatError && <div className="chat-error">{chatError}</div>}
+          {chatError && (
+            <div className="chat-error with-action">
+              <span>{chatError}</span>
+              <button type="button" onClick={() => openTraceDiagnostics()} title="诊断" aria-label="诊断">
+                <Activity size={13} />
+              </button>
+            </div>
+          )}
+          {tracePanel && <TraceDiagnosticsPanel diagnostics={tracePanel} onClose={() => setTracePanel(null)} />}
           {composerEl}
         </div>
       </div>
@@ -1371,13 +1601,33 @@ export function ChatPage({
   }
 
   return (
-    <div className="chat-layout">
+    <div className={`chat-layout${workspaceContextOpen ? ' with-workspace-context' : ''}`}>
+      {workspaceContextOpen && (
+        <WorkspaceContextPanel
+          activeExpertTitle={activeExpertTitle}
+          isHistorySession={Boolean(activeSession)}
+          modelButtonLabel={modelButtonLabel}
+          memoryMode={memoryMode}
+          obsidianMode={obsidianMode}
+          sidebarJobs={sidebarJobs}
+          workspaceJobsState={workspaceJobsState}
+          activeSidebarJobCount={activeSidebarJobCount}
+          homeStarters={homeStarters}
+          onUseStarter={useStarter}
+          onNavigate={onNavigate}
+          onClose={() => setWorkspaceContextOpen(false)}
+        />
+      )}
       <div className="conversation">
         {activeSession && (
           <div className="session-source-banner">
             <span>已恢复历史会话</span>
             <strong>{activeSession.title}</strong>
-            <em>{activeSession.date} · {activeSession.turns} 轮 · 继续发送会续写当前会话</em>
+            <em>
+              {activeSession.date} · {activeSession.turns} 轮
+              {activeSession.expertLabel ? ` · ${activeSession.expertLabel}` : ''}
+              {' · '}继续发送会续写当前会话
+            </em>
           </div>
         )}
         {sessionLoadState === 'error' && <div className="session-source-banner warning">{sessionLoadError || '会话读取失败'}</div>}
@@ -1388,12 +1638,38 @@ export function ChatPage({
           const displayText = isCollapsed && message.text.length > 220 ? `${message.text.slice(0, 220).trim()}…` : message.text
           return (
             <div key={message.id} className={`message-row ${message.role}${canAct ? ' has-actions' : ''}${isCollapsed ? ' is-collapsed' : ''}`}>
-              {message.role === 'assistant' && (
+	              {message.role === 'assistant' && (
                 <div className="avatar"><ArcherRing small /></div>
               )}
-              <div className="message-stack">
-                <div className={`message-bubble${message.role === 'assistant' && !message.text.trim() && isTyping ? ' typing-brand' : ''}`}>
-                  {message.role === 'assistant' && !message.text.trim() && isTyping ? (
+	              <div className="message-stack">
+                {message.role === 'user' && message.fileRefs?.length ? (
+                  <div className="message-file-ref-row" aria-label="本轮引用文件">
+                    {message.fileRefs.map((file) => (
+                      <span
+                        className={`message-file-ref-chip${file.previewDataUrl ? ' has-preview' : ''}`}
+                        data-status={file.attachStatus || 'ready'}
+                        key={file.path}
+                        title={file.attachDetail ? `${file.path}\n${file.attachDetail}` : file.path}
+                      >
+                        {file.previewDataUrl ? (
+                          <img src={file.previewDataUrl} alt="" />
+                        ) : (
+                          <FileText size={13} />
+                        )}
+                        <span>
+                          <strong>{file.name}</strong>
+                          <em>{fileAttachLabel(file)}</em>
+                        </span>
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
+	                <div className={`message-bubble${message.role === 'assistant' && !message.text.trim() && (message.mutter || isTyping) ? ' typing-brand' : ''}`}>
+	                  {message.role === 'system' && message.detail ? (
+	                    <span title={message.detail}>{displayText}</span>
+	                  ) : message.role === 'assistant' && !message.text.trim() && message.mutter ? (
+	                    <ThinkingMutter text={message.mutter} />
+                  ) : message.role === 'assistant' && !message.text.trim() && isTyping ? (
                     <ThinkingDots />
                   ) : isAssistantLike ? <MarkdownMessage text={displayText} /> : message.text}
                 </div>
@@ -1480,8 +1756,7 @@ export function ChatPage({
           />
         ))}
 
-        {toolEvents
-          .filter((event) => !event.requiresApproval && !isHiddenToolEvent(event.name))
+        {displayToolEvents
           .map((event) => (
             <ToolEventCard
               key={event.id}
@@ -1491,36 +1766,101 @@ export function ChatPage({
             />
           ))}
 
-        {chatError && <div className="chat-error">{chatError}</div>}
+        {chatError && (
+          <div className="chat-error with-action">
+            <span>{chatError}</span>
+            <button type="button" onClick={() => openTraceDiagnostics()} title="诊断" aria-label="诊断">
+              <Activity size={13} />
+            </button>
+          </div>
+        )}
         <div ref={bottomRef} />
       </div>
 
-      {approvalToolEvents.length > 0 && (
-        <div className="chat-approval-dock" aria-label="待确认操作">
-          {approvalToolEvents.map((event) => (
-            <ToolEventCard
-              key={event.id}
-              event={event}
-              decision={runtimeState.toolResults[event.id]?.decision}
-              onDecide={(nextDecision) => decideTool(event.id, nextDecision)}
-              defaultExpanded={event.name === 'hugo_blog'}
-            />
-          ))}
-        </div>
-      )}
-
       <div className="conversation-divider" />
+      {tracePanel && <TraceDiagnosticsPanel diagnostics={tracePanel} onClose={() => setTracePanel(null)} />}
       {composerEl}
     </div>
   )
 }
 
+function TraceDiagnosticsPanel({ diagnostics, onClose }: { diagnostics: TraceDiagnostics; onClose: () => void }) {
+  const context = diagnostics.runtimeContext
+  const failure = diagnostics.failureHint
+  return (
+    <aside className="trace-panel" aria-label="诊断面板">
+      <div className="trace-panel-header">
+        <div>
+          <strong>诊断</strong>
+          <span>{diagnostics.traceId || '暂无 traceId'}</span>
+        </div>
+        <button type="button" onClick={onClose} title="关闭" aria-label="关闭">
+          <X size={14} />
+        </button>
+      </div>
+      {diagnostics.empty ? (
+        <p className="trace-empty">暂无诊断事件</p>
+      ) : (
+        <>
+          <dl className="trace-kv">
+            <div><dt>任务</dt><dd>{context?.task || '未知'}</dd></div>
+            <div><dt>阶段</dt><dd>{context?.phase || failure?.stage || '未知'}</dd></div>
+            <div><dt>下一步</dt><dd>{context?.expectedNext || '未记录'}</dd></div>
+            <div><dt>故障</dt><dd>{failure ? `${failure.keyword} · ${failure.recoverable ? '可恢复' : '不可恢复'}` : '无'}</dd></div>
+          </dl>
+          {failure && <p className="trace-failure">{failure.detail}</p>}
+          <div className="trace-events">
+            {diagnostics.recentEvents.map((event) => (
+              <div key={event.id} className="trace-event-row">
+                <span>{event.type}</span>
+                <em>{describeTraceEvent(event)}</em>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </aside>
+  )
+}
+
+function describeTraceEvent(event: AgentEvent): string {
+  if (event.type === 'runtime.context') return `${event.task} / ${event.phase}`
+  if (event.type === 'failure.hint') return `${event.keyword} / ${event.stage}`
+  if (event.type === 'tool.request') return `${event.toolName} / ${event.status} / ${event.permissionLevel || 'unknown'}`
+  if (event.type === 'tool.result') return `${event.toolName} / ${event.status}`
+  if (event.type === 'approval.result') return `${event.decision} / ${event.executed ? 'executed' : 'skipped'}`
+  if (event.type === 'job.event') return `${event.title} / ${event.status}${event.stale ? ' / stale' : ''}`
+  if (event.type === 'status.event') return `${event.intentType} / ${event.intentLabel}`
+  return event.type
+}
+
 function restoreRuntimeState(sessionId: string, eventLog: EventLog | null) {
-  const state = createInitialRuntimeState(sessionId)
-  if (!eventLog) return state
-  return eventLog
-    .forSession(sessionId)
-    .reduce((current, event) => reduceRuntimeEvent(current, event), state)
+  return restoreRuntimeStateFromEvents(sessionId, eventLog?.all() ?? [])
+}
+
+function mergeWorkspaceJobs(runtimeJobs: JobEvent[], workspaceJobs: BackgroundJob[]): WorkspaceJobSummary[] {
+  const merged = new Map<string, WorkspaceJobSummary>()
+  for (const job of workspaceJobs) {
+    merged.set(job.id, {
+      id: job.id,
+      title: job.title,
+      status: job.status,
+      kind: job.kind,
+      preview: job.result || job.error || job.prompt,
+      createdAt: job.createdAt,
+    })
+  }
+  for (const job of runtimeJobs) {
+    merged.set(job.jobId, {
+      id: job.jobId,
+      title: job.title,
+      status: job.status,
+      kind: 'runtime',
+      preview: job.detail,
+      createdAt: job.createdAt,
+    })
+  }
+  return Array.from(merged.values()).sort((a, b) => b.createdAt.localeCompare(a.createdAt))
 }
 
 /** Convert a runtime ToolRequestEvent to display-friendly ToolEvent for ToolEventCard rendering */
@@ -1547,6 +1887,21 @@ function toolEventFromRuntimeRequest(req: import('../../../agent').ToolRequestEv
   }
 }
 
+function toolEventWithRuntimeResult(event: ToolEvent, result?: ApprovalResultEvent): ToolEvent {
+  if (!result) return event
+  const output = result.output
+    ? `output: ${result.output.slice(0, 500)}${result.output.length > 500 ? '…(已截断)' : ''}`
+    : result.message
+  return {
+    ...event,
+    status: result.decision === 'denied' ? 'denied' : result.executed ? 'complete' : 'blocked',
+    summary: result.message || event.summary,
+    detail: output,
+    requiresApproval: false,
+    receipt: result.receipt,
+  }
+}
+
 function JobEventCard({
   job,
   onCancel,
@@ -1567,7 +1922,7 @@ function JobEventCard({
       <div className="job-event-summary">
         {isActive && !needsApproval ? <Loader2 size={14} /> : needsApproval ? <Loader2 size={14} /> : <Check size={14} />}
         <span>{job.title || '后台任务'}</span>
-        <em>{jobStatusLabel(job.status)}</em>
+        <em>{jobStatusLabel(job.status, job.stale)}</em>
         {isActive && !needsApproval && (
           <button type="button" onClick={onCancel} title="取消后台任务" aria-label="取消后台任务">
             <X size={13} />
@@ -1694,6 +2049,9 @@ function ToolEventCard({
       {expanded && (
         <div className="tool-event-detail">
           <p>{event.summary}</p>
+          {event.receipt ? (
+            <WorkReceiptBlock receipt={event.receipt} />
+          ) : null}
           <ToolEventBody event={event} kind={kind} />
         </div>
       )}
@@ -1710,6 +2068,10 @@ function toolCompactText(event: ToolEvent, kind: 'shell' | 'github' | 'file' | '
 
 function ToolEventBody({ event, kind }: { event: ToolEvent; kind: 'shell' | 'github' | 'file' | 'publish' }) {
   const output = event.detail.startsWith('output: ') ? event.detail.slice(8) : ''
+  const workIntent = event.draft?.workIntent
+  if (workIntent) {
+    return <WorkIntentBlock intent={workIntent} fallbackDetail={event.detail} />
+  }
 
   if (kind === 'shell') {
     return (
@@ -1759,6 +2121,56 @@ function ToolEventBody({ event, kind }: { event: ToolEvent; kind: 'shell' | 'git
       <strong>{event.draft?.path || event.detail || event.name}</strong>
       {event.draft?.contentPreview && <span>{event.draft.contentPreview}</span>}
       {!event.draft?.contentPreview && event.detail && <span>{event.detail}</span>}
+      {event.draft?.beforeText !== undefined && event.draft?.afterText !== undefined && (
+        <div className="obsidian-diff-preview">
+          {event.draft.previewExists && event.draft.beforeText ? (
+            <div className="diff-side diff-before">
+              <em>写入前</em>
+              <pre>{event.draft.beforeText}</pre>
+            </div>
+          ) : (
+            <div className="diff-side diff-empty">
+              <em>笔记不存在，将新建</em>
+            </div>
+          )}
+          <div className="diff-side diff-after">
+            <em>写入后（{event.draft.previewMode || 'append'}）</em>
+            <pre>{event.draft.afterText}</pre>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function WorkIntentBlock({ intent, fallbackDetail }: { intent: WorkIntent; fallbackDetail: string }) {
+  const targets = Array.isArray(intent.targets) ? intent.targets : []
+  const steps = Array.isArray(intent.steps) ? intent.steps : []
+  return (
+    <div className="tool-path-block">
+      <strong>{[intent.workflowName, intent.action].filter(Boolean).join(' · ') || '工作确认'}</strong>
+      {targets.map((target, index) => (
+        <span key={`${target.label || 'target'}-${index}`}>
+          {[target.label, target.path || target.url].filter(Boolean).join('：')}
+        </span>
+      ))}
+      {steps.length > 0 && <span>预计步骤：{steps.join(' → ')}</span>}
+      {intent.verifyPlan && <span>验证：{intent.verifyPlan}</span>}
+      {intent.rollbackPlan && <span>回滚：{intent.rollbackPlan}</span>}
+      {!targets.length && fallbackDetail && <span>{fallbackDetail}</span>}
+    </div>
+  )
+}
+
+function WorkReceiptBlock({ receipt }: { receipt: WorkReceipt }) {
+  return (
+    <div className="tool-path-block">
+      <strong>{receipt.done}</strong>
+      {receipt.source && <span>来源：{receipt.source}</span>}
+      {receipt.target && <span>目标：{receipt.target}</span>}
+      {receipt.verification && <span>验证：{receipt.verification}</span>}
+      {receipt.rollback && <span>回滚：{receipt.rollback}</span>}
+      {receipt.traceId && <span>Trace：{receipt.traceId}</span>}
     </div>
   )
 }
@@ -1775,8 +2187,10 @@ function toolTitle(event: ToolEvent): string {
   if (event.name === 'shell' || event.name === 'shell.execute') return 'Shell 命令'
   if (event.name === 'github' || event.name === 'github_ops') return 'GitHub 操作'
   if (event.name === 'hugo_blog') return '博客发布'
-  if (event.name === 'file.reference') return '本地文件引用'
-  if (event.name.includes('obsidian')) return 'Obsidian 写入'
+  if (event.name === 'file.reference') return isObsidianMarkdownPath(String(event.draft?.path || '')) ? 'Obsidian 文稿引用' : '本地文件引用'
+  if (event.name === 'obsidian_read') return 'Obsidian 读取'
+  if (event.name === 'obsidian_write') return 'Obsidian 写入'
+  if (event.name.includes('obsidian')) return 'Obsidian 文档'
   return event.name
 }
 
@@ -1804,12 +2218,13 @@ function statusLabel(status: ToolEvent['status'], needsApproval: boolean): strin
   return status
 }
 
-function jobStatusLabel(status: JobEvent['status']): string {
+function jobStatusLabel(status: JobEvent['status'], stale?: boolean): string {
   if (status === 'queued') return '等待中'
   if (status === 'running') return '执行中'
   if (status === 'waiting_approval') return '等待确认'
   if (status === 'complete') return '已完成'
   if (status === 'failed') return '失败'
+  if (status === 'cancelled' && stale) return '已取消（无进展超时）'
   if (status === 'cancelled') return '已取消'
   return status
 }
@@ -1822,7 +2237,54 @@ function backgroundRouteReasonLabel(reason: string): string {
 
 function messageWantsHugoPublish(text: string): boolean {
   const lowered = text.toLowerCase()
-  return /部署|上线|发布|枫弋|札记|博客|iver\.yivxer|yivxer-blog/.test(lowered)
+  const publishSignal = /部署|上线|发布|枫弋|札记|博客|iver\.yivxer|yivxer-blog/.test(lowered)
+  const localMarkdownArticle = /\/users\/.+\.md/.test(lowered) && /文章|笔记/.test(lowered)
+  return publishSignal || localMarkdownArticle
+}
+
+function isTextLikeFile(path: string): boolean {
+  return /\.(md|txt|json|toml|ya?ml|py|tsx?|jsx?|css|html|csv|log)$/i.test(path)
+}
+
+function isObsidianMarkdownPath(path: string): boolean {
+  return /\.md$/i.test(path) && (/iCloud~md~obsidian|Obsidian|\/Documents\/个人知识管理系统\//i.test(path))
+}
+
+function extractMarkdownPathRefs(text: string): FileRef[] {
+  const matches = text.match(/(?:~|\/Users)\/[^\n\r]+?\.md\b/g) || []
+  return matches.map((raw) => {
+    const path = raw.trim()
+    return {
+      path,
+      name: path.split(/[\\/]/).pop() || path,
+      attachStatus: 'reading' as const,
+      attachDetail: '读取中…',
+    }
+  })
+}
+
+function shouldLetBackendReadExplicitMarkdownPath(text: string): boolean {
+  if (!extractMarkdownPathRefs(text).length) return false
+  return /(?:枫弋札记|博客|博文|部署|发布|上传|发到|写到博客|hugo|yivxer-blog)/i.test(text)
+}
+
+function isExplicitMarkdownPath(text: string, path: string): boolean {
+  return extractMarkdownPathRefs(text).some((ref) => ref.path === path)
+}
+
+function dedupeFileRefs(refs: FileRef[]): FileRef[] {
+  const byPath = new Map<string, FileRef>()
+  for (const ref of refs) {
+    if (!ref.path || byPath.has(ref.path)) continue
+    byPath.set(ref.path, ref)
+  }
+  return [...byPath.values()]
+}
+
+function isMisroutedHugoPublishPlan(plan: PlanEvent): boolean {
+  const hasObsidianWrite = plan.steps.some((step) => step.tool === 'obsidian_write' || step.action === 'write_obsidian')
+  const prompt = [plan.prompt, plan.detail, plan.title].filter(Boolean).join(' ')
+  return hasObsidianWrite && messageWantsHugoPublish(prompt)
 }
 
 function fileAttachLabel(file: FileRef): string {

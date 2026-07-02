@@ -11,6 +11,7 @@ describe('contract schemas', () => {
       toolName: 'hugo_blog',
       displayName: 'hugo_blog',
       risk: 'low',
+      permissionLevel: 'deploy-remote',
       status: 'waiting_approval',
       args: { action: 'deploy' },
       summary: '确认部署枫弋札记',
@@ -19,6 +20,9 @@ describe('contract schemas', () => {
       blocked: false,
     })
     expect(parsed.type).toBe('tool.request')
+    if (parsed.type === 'tool.request') {
+      expect(parsed.permissionLevel).toBe('deploy-remote')
+    }
   })
 
   it('rejects unknown event types', () => {
@@ -43,6 +47,35 @@ describe('contract schemas', () => {
       message: '',
     })
     expect(result.success).toBe(false)
+  })
+
+  it('accepts approval results with work receipt', () => {
+    const parsed = parseAgentEvent({
+      type: 'approval.result',
+      id: 'approval-1',
+      sessionId: 'session-1',
+      createdAt: '2026-06-30T10:00:00.000Z',
+      requestId: 'tool-1',
+      decision: 'approved',
+      permissionLevel: 'deploy-remote',
+      executed: true,
+      ok: true,
+      output: '部署成功',
+      message: '已发布',
+      receipt: {
+        done: '已发布《Test》到枫弋札记',
+        source: '/tmp/source.md',
+        target: 'https://iver.yivxer.com/posts/test/',
+        verification: 'HTTP 200',
+        rollback: 'content/posts/test.md',
+        traceId: 'trace-1',
+      },
+    })
+
+    expect(parsed.type).toBe('approval.result')
+    if (parsed.type === 'approval.result') {
+      expect(parsed.receipt?.verification).toBe('HTTP 200')
+    }
   })
 
   it('accepts a valid job event', () => {
@@ -94,5 +127,43 @@ describe('contract schemas', () => {
     })
 
     expect(parsed.type).toBe('orchestration.event')
+  })
+
+  it('accepts status, runtime context, and failure hint events', () => {
+    expect(parseAgentEvent({
+      type: 'status.event',
+      id: 'status-1',
+      sessionId: 'session-1',
+      createdAt: '2026-06-28T10:00:00.000Z',
+      intentType: 'writing',
+      intentLabel: '写作协助',
+      matchedSkills: ['hugo_blog'],
+      isBackground: false,
+      memoryScope: ['project'],
+    }).type).toBe('status.event')
+
+    expect(parseAgentEvent({
+      type: 'runtime.context',
+      id: 'ctx-1',
+      sessionId: 'session-1',
+      createdAt: '2026-06-28T10:00:01.000Z',
+      task: 'blog_publish',
+      phase: 'route',
+      userIntent: 'deploy_existing_post',
+      lastResult: '',
+      expectedNext: 'select_workflow_or_model',
+      matchedSkills: ['hugo_blog'],
+    }).type).toBe('runtime.context')
+
+    expect(parseAgentEvent({
+      type: 'failure.hint',
+      id: 'failure-1',
+      sessionId: 'session-1',
+      createdAt: '2026-06-28T10:00:02.000Z',
+      keyword: 'command_timeout',
+      stage: 'model_stream',
+      recoverable: true,
+      detail: 'connect timeout',
+    }).type).toBe('failure.hint')
   })
 })

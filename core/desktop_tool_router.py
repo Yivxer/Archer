@@ -57,6 +57,19 @@ class DesktopTurnPlan:
     intent: str = "chat"
 
 
+@dataclass(frozen=True)
+class ObsidianWriteRequest:
+    path: str
+    body: str
+    mode: str = "append"
+
+
+_OBSIDIAN_EDIT_TERMS = (
+    "调整", "修改", "改一下", "改成", "润色", "优化", "重写",
+    "修订", "改写", "整理一下", "编辑",
+)
+
+
 # ── Obsidian path / content extraction（自 _tools.py 迁入）────────────────────
 
 def clean_obsidian_path(path: str) -> str:
@@ -79,9 +92,17 @@ def extract_obsidian_target_path(query: str) -> str:
     if quoted:
         return clean_obsidian_path(quoted.group(1))
 
-    absolute = re.search(r"((?:/Users|~/).*?\.md)", query, re.IGNORECASE | re.DOTALL)
+    absolute = re.search(r"((?:/|~/)[^\r\n]*?\.md)", query, re.IGNORECASE)
     if absolute:
         return clean_obsidian_path(absolute.group(1))
+
+    verb_target = re.search(
+        r"(?:写入|写到|记录到|保存到|追加到|记到)\s*([A-Za-z0-9_\-./\u4e00-\u9fff📌🚀🦞]+\.md)",
+        query,
+        re.IGNORECASE,
+    )
+    if verb_target:
+        return clean_obsidian_path(verb_target.group(1))
 
     relative = re.search(r"([A-Za-z0-9_\-./\u4e00-\u9fff📌🚀🦞]+\.md)", query, re.IGNORECASE)
     if relative:
@@ -93,12 +114,20 @@ def extract_obsidian_target_path(query: str) -> str:
 def extract_obsidian_write_content(query: str) -> str:
     target_path = extract_obsidian_target_path(query)
     if target_path and target_path in query:
-        after_path = query.split(target_path, 1)[1].strip()
-        after_path = after_path.lstrip("：:，,。；;、\n \t")
+        before_path, after_path_raw = query.split(target_path, 1)
+        inline_match = re.search(
+            r"(?:把|将)(.+?)(?:写入|写到|记录到|保存到|追加到|记到)\s*$",
+            before_path.strip(),
+            re.DOTALL,
+        )
+        if inline_match and inline_match.group(1).strip():
+            return inline_match.group(1).strip()
+        after_path = after_path_raw.strip()
+        after_path = after_path.lstrip("」』\"'`：:，,。；;、\n \t")
         if after_path:
             return after_path
 
-    path_match = re.search(r"(?:/Users|~/).*?\.md", query, re.IGNORECASE | re.DOTALL)
+    path_match = re.search(r"(?:/|~/)[^\r\n]*?\.md", query, re.IGNORECASE)
     if path_match:
         after_path = query[path_match.end():].strip().lstrip("：:，,。；;、\n \t")
         if after_path:
@@ -113,6 +142,17 @@ def extract_obsidian_write_content(query: str) -> str:
         if match and match.group(1).strip():
             return match.group(1).strip()
     return query.strip()
+
+
+def parse_obsidian_write_request(query: str) -> ObsidianWriteRequest:
+    path = extract_obsidian_target_path(query)
+    has_explicit_path = path != "Archer/客户端写入草稿.md"
+    is_edit = has_explicit_path and any(_term_is_active(query, term) for term in _OBSIDIAN_EDIT_TERMS)
+    return ObsidianWriteRequest(
+        path=path,
+        body=extract_obsidian_write_content(query),
+        mode="overwrite" if is_edit else "append",
+    )
 
 
 # ── Shell / GitHub extraction ────────────────────────────────────────────────
@@ -244,8 +284,10 @@ def score_obsidian_write(query: str) -> tuple[float, dict]:
         score = 0.86
     elif any(_term_is_active(query, k) for k in medium):
         score = 0.70
-    path = extract_obsidian_target_path(query)
-    return score, {"path": path, "mode": "append"}
+    parsed = parse_obsidian_write_request(query)
+    if parsed.path != "Archer/客户端写入草稿.md" and any(_term_is_active(query, k) for k in _OBSIDIAN_EDIT_TERMS):
+        score = max(score, 0.82)
+    return score, {"path": parsed.path, "mode": parsed.mode, "body": parsed.body}
 
 
 def score_obsidian_read(query: str) -> tuple[float, dict]:
@@ -290,12 +332,22 @@ _HUGO_CREATE_TERMS = (
 )
 
 
+def is_hugo_capability_question(query: str) -> bool:
+    return bool(re.search(
+        r"(?:可以|能不能|能否|是否|现在能|现在可以).{0,12}(?:部署|发布|上传).{0,12}(?:博客|枫弋札记|网站|站点)",
+        query,
+        re.IGNORECASE,
+    ))
+
+
 def has_hugo_blog_target(query: str) -> bool:
     lowered = query.lower()
     return any(term in lowered for term in _HUGO_BLOG_TARGET_TERMS)
 
 
 def wants_hugo_deploy(query: str) -> bool:
+    if is_hugo_capability_question(query):
+        return False
     lowered = query.lower()
     if not any(_term_is_active(query, term) for term in _HUGO_DEPLOY_TERMS):
         return False
@@ -317,12 +369,14 @@ _HUGO_PUBLISH_HINT_TERMS = (
 
 def wants_hugo_publish(query: str, file_refs: list | None = None) -> bool:
     """是否应走枫弋札记发布/部署工作流（含附件 Markdown）。"""
+    if is_hugo_capability_question(query):
+        return False
     if wants_hugo_deploy(query) or wants_hugo_creation(query):
         return True
     lowered = query.lower()
     if has_hugo_blog_target(query) and any(term in lowered for term in _HUGO_PUBLISH_HINT_TERMS):
         return True
-    if re.search(r"/Users/[^\s`']+\.md", query) and any(
+    if re.search(r"/Users/[^\n\r`'\"]+?\.md", query) and any(
         term in lowered for term in (*_HUGO_BLOG_TARGET_TERMS, "发布", "部署", "上线", "文章", "笔记")
     ):
         return True
@@ -374,7 +428,9 @@ def is_plain_content_request(query: str) -> bool:
     return any(term in lowered for term in (
         "帮我生成一篇", "生成一篇", "帮我写一篇", "写一篇", "按照这个逻辑",
         "帮我分析文章", "分析文章", "改写", "润色", "扩写", "缩写",
-        "写成文章", "整理成文章", "生成文章",
+        "写成文章", "整理成文章", "生成文章", "写作大纲", "写作的大纲",
+        "文章大纲", "文章结构", "帮我分析一下写作", "帮我分析这段",
+        "帮我看看这段",
     ))
 
 
@@ -555,7 +611,10 @@ def plan_desktop_turn(
 
     skills = all_skills if all_skills is not None else load_skills()
     raw = select_skills(query, skills)
-    filtered = filter_skills_for_intent(query, raw, intent=intent)
+    force_hugo_workflow = wants_hugo_publish(query) and "hugo_blog" in raw
+    filtered = filter_skills_for_intent(query, raw, intent=intent) if (needs_tools or force_hugo_workflow) else {}
+    if force_hugo_workflow:
+        filtered = {"hugo_blog": raw["hugo_blog"]}
     tool_plan = plan_desktop_tools(
         query, filtered,
         intent=intent,

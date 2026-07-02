@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import threading
 
 import pytest
 from fastapi.testclient import TestClient
@@ -20,6 +21,20 @@ def test_health_is_public(client):
     response = client.get("/health")
     assert response.status_code == 200
     assert response.json()["ok"] is True
+
+
+def test_ready_is_public(client):
+    response = client.get("/ready")
+    assert response.status_code == 200
+    assert response.json() == {"ok": True, "ready": True, "runtime": "fastapi"}
+
+
+def test_health_ready_and_status_are_not_rate_limited(client, monkeypatch):
+    monkeypatch.setattr("terminal.api.fastapi_app.check_rate_limit", lambda _client_ip, _path: False)
+
+    assert client.get("/health").status_code == 200
+    assert client.get("/ready").status_code == 200
+    assert client.get("/status", headers={"Authorization": "Bearer test-token"}).status_code == 200
 
 
 def test_status_requires_bearer_token(client):
@@ -43,6 +58,8 @@ def test_post_jobs_requires_object_body(client):
     )
     assert response.status_code == 400
     assert response.json()["error"] == "validation_error"
+    assert "message" in response.json()
+    assert "detail" in response.json()
 
 
 def test_post_jobs_creates_job(tmp_path, monkeypatch, client):
@@ -86,6 +103,74 @@ def test_chat_stream_returns_sse(client, monkeypatch):
         assert "hi" in body
 
 
+def test_chat_stream_returns_busy_when_concurrency_slot_is_full(client, monkeypatch):
+    monkeypatch.setattr(
+        "terminal.api.fastapi_app._iter_chat_chunks",
+        lambda *args, **kwargs: iter([{"type": "token", "text": "should-not-run"}]),
+    )
+    semaphore = client.app.state.chat_stream_semaphore
+    assert semaphore.acquire(blocking=False) is True
+    try:
+        response = client.post(
+            "/chat/stream",
+            headers={"Authorization": "Bearer test-token"},
+            json={"messages": [{"role": "user", "content": "hello"}]},
+        )
+    finally:
+        semaphore.release()
+
+    assert response.status_code == 429
+    assert response.json()["error"] == "chat_busy"
+
+
+def test_chat_stream_events_release_slot_when_client_closes(monkeypatch):
+    from terminal.api.fastapi_app import _chat_stream_events
+
+    def endless_chunks(*args, **kwargs):
+        yield {"type": "token", "text": "first"}
+        while True:
+            yield {"type": "statusEvent", "statusEvent": {"id": "still-running"}}
+
+    monkeypatch.setattr("terminal.api.fastapi_app._iter_chat_chunks", endless_chunks)
+    monkeypatch.setattr("terminal.api.fastapi_app._bg_extract_api", lambda history: None)
+
+    semaphore = threading.BoundedSemaphore(1)
+    assert semaphore.acquire(blocking=False) is True
+    stream = _chat_stream_events(
+        {"messages": [{"role": "user", "content": "hello"}]},
+        release_slot=semaphore.release,
+    )
+    assert "first" in next(stream)
+    stream.close()
+
+    assert semaphore.acquire(blocking=False) is True
+    semaphore.release()
+
+
+def test_chat_stream_events_release_slot_on_generator_error(monkeypatch):
+    from terminal.api.fastapi_app import _chat_stream_events
+
+    def failing_chunks(*args, **kwargs):
+        yield {"type": "token", "text": "first"}
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr("terminal.api.fastapi_app._iter_chat_chunks", failing_chunks)
+    monkeypatch.setattr("terminal.api.fastapi_app._bg_extract_api", lambda history: None)
+
+    semaphore = threading.BoundedSemaphore(1)
+    assert semaphore.acquire(blocking=False) is True
+    stream = _chat_stream_events(
+        {"messages": [{"role": "user", "content": "hello"}]},
+        release_slot=semaphore.release,
+    )
+    assert "first" in next(stream)
+    with pytest.raises(RuntimeError, match="boom"):
+        next(stream)
+
+    assert semaphore.acquire(blocking=False) is True
+    semaphore.release()
+
+
 def test_websocket_chat_streams_events(client, monkeypatch):
     monkeypatch.setattr(
         "terminal.api.fastapi_app._iter_chat_chunks",
@@ -106,7 +191,87 @@ def test_websocket_rejects_missing_token(client):
             pass
 
 
+def test_wildcard_get_dispatch_preserves_query(client, monkeypatch):
+    captured = {}
+
+    def fake_payload_get(path):
+        captured["path"] = path
+        return 200, {"ok": True, "path": path}
+
+    monkeypatch.setattr("terminal.api.fastapi_app.payload_get", fake_payload_get)
+
+    response = client.get(
+        "/memory?include_rejected=true",
+        headers={"Authorization": "Bearer test-token"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"ok": True, "path": "/memory?include_rejected=true"}
+    assert captured["path"] == "/memory?include_rejected=true"
+
+
+def test_wildcard_get_dispatch_runs_in_threadpool(client, monkeypatch):
+    calls = []
+
+    async def fake_run_in_threadpool(fn, *args, **kwargs):
+        calls.append((fn.__name__, args))
+        return fn(*args, **kwargs)
+
+    monkeypatch.setattr("terminal.api.fastapi_app.run_in_threadpool", fake_run_in_threadpool)
+    monkeypatch.setattr("terminal.api.fastapi_app.payload_get", lambda path: (200, {"path": path}))
+
+    response = client.get("/memory", headers={"Authorization": "Bearer test-token"})
+
+    assert response.status_code == 200
+    assert response.json() == {"path": "/memory"}
+    assert calls == [("_dispatch_get", ("/memory",))]
+
+
+def test_wildcard_post_dispatch_preserves_body(client, monkeypatch):
+    captured = {}
+
+    def fake_payload_post(path, body):
+        captured["path"] = path
+        captured["body"] = body
+        return 200, {"ok": True}
+
+    monkeypatch.setattr("terminal.api.fastapi_app.payload_post", fake_payload_post)
+
+    response = client.post(
+        "/settings/validate",
+        headers={"Authorization": "Bearer test-token"},
+        json={"apiKey": "sk-test"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"ok": True}
+    assert captured == {"path": "/settings/validate", "body": {"apiKey": "sk-test"}}
+
+
+def test_wildcard_post_dispatch_runs_in_threadpool(client, monkeypatch):
+    calls = []
+
+    async def fake_run_in_threadpool(fn, *args, **kwargs):
+        calls.append((fn.__name__, args))
+        return fn(*args, **kwargs)
+
+    monkeypatch.setattr("terminal.api.fastapi_app.run_in_threadpool", fake_run_in_threadpool)
+    monkeypatch.setattr("terminal.api.fastapi_app.payload_post", lambda path, body: (200, {"path": path, "body": body}))
+
+    response = client.post(
+        "/settings/validate",
+        headers={"Authorization": "Bearer test-token"},
+        json={"apiKey": "sk-test"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"path": "/settings/validate", "body": {"apiKey": "sk-test"}}
+    assert calls == [("_dispatch_post", ("/settings/validate", {"apiKey": "sk-test"}))]
+
+
 def test_unknown_route_returns_404(client):
     response = client.get("/missing-route", headers={"Authorization": "Bearer test-token"})
     assert response.status_code == 404
     assert response.json()["error"] == "not_found"
+    assert response.json()["message"] == "not_found"
+    assert response.json()["detail"] == "/missing-route"

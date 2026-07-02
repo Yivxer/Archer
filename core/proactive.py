@@ -46,6 +46,9 @@ def scan_proactive_touch(
     anxiety = _anxiety_item(db_path, now, options)
     if anxiety:
         items.append(anxiety)
+    hypothesis = _due_hypothesis_item(db_path, now, options)
+    if hypothesis:
+        items.append(hypothesis)
 
     rank = {"high": 0, "medium": 1, "low": 2}
     return sorted(items, key=lambda item: rank.get(item.get("severity", "low"), 9))[:5]
@@ -144,6 +147,42 @@ def _anxiety_item(db_path: Path, now: datetime, options: dict) -> dict | None:
         "detail": f"近 {days} 天焦虑平均 {score}/10，可以做一次轻复盘。",
         "action": "开始复盘",
         "target": "Chat",
+    }
+
+
+def _due_hypothesis_item(db_path: Path, now: datetime, options: dict) -> dict | None:
+    if options.get("hypothesis_due", True) is False:
+        return None
+    if not db_path.exists():
+        return None
+    stamp = now.isoformat(timespec="seconds")
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    try:
+        row = conn.execute(
+            "SELECT id, title, statement, validate_after FROM hypotheses "
+            "WHERE status='active' AND validate_after <= ? "
+            "AND (muted_until IS NULL OR muted_until = '' OR muted_until <= ?) "
+            "ORDER BY validate_after ASC, id ASC LIMIT 1",
+            (stamp, stamp),
+        ).fetchone()
+    except sqlite3.Error:
+        row = None
+    finally:
+        conn.close()
+    if not row:
+        return None
+    due_at = _parse_iso(str(row["validate_after"] or ""))
+    overdue_days = max(0, (now - due_at).days) if due_at else 0
+    detail = f"到期约 {overdue_days} 天：{str(row['statement'])[:42]}"
+    return {
+        "id": f"hypothesis-review-{row['id']}",
+        "kind": "hypothesis_review",
+        "severity": "medium",
+        "title": f"有一个假设到了验证时间：{row['title']}",
+        "detail": detail,
+        "action": "验证假设",
+        "target": "Memory",
     }
 
 

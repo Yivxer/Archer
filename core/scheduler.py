@@ -191,9 +191,12 @@ def _mark_ran(task_id: int, interval_h: int, db_path: Path = DB_PATH):
 
 # ── 执行 ───────────────────────────────────────────────────────────────────────
 
-def run_task(task: dict, skills: dict) -> Any:
+def run_task(task: dict, skills: dict, db_path: Path = DB_PATH) -> Any:
     """执行单个任务，返回 ToolResult（技能不存在时返回 None）。"""
     skill_name = task["skill_name"]
+    if skill_name == "reflection_scheduler.scan_hypotheses":
+        from core.reflection_scheduler import scan_due_hypotheses
+        return scan_due_hypotheses(db_path=db_path)
     if skill_name not in skills:
         return None
     try:
@@ -218,7 +221,7 @@ def run_due_tasks(skills: dict, db_path: Path = DB_PATH) -> list[tuple[dict, Any
             _mark_ran(task["id"], task["interval_h"], db_path)
             results.append((task, None))
         else:
-            tr = run_task(task, skills)
+            tr = run_task(task, skills, db_path=db_path)
             _mark_ran(task["id"], task["interval_h"], db_path)
             results.append((task, tr))
     return results
@@ -229,7 +232,7 @@ def run_task_by_id(task_id: int, skills: dict, db_path: Path = DB_PATH) -> Any:
     task = get_task(task_id, db_path)
     if task is None:
         return None
-    tr = run_task(task, skills)
+    tr = run_task(task, skills, db_path=db_path)
     _mark_ran(task_id, task["interval_h"], db_path)
     return tr
 

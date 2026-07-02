@@ -3,6 +3,7 @@
 # archer.toml is gitignored — it will never be committed.
 
 [api]
+active_profile = "lite"                           # lite | pro | max
 base_url     = "https://api.deepseek.com/v1"   # or any OpenAI-compatible endpoint
 api_key      = "sk-your-api-key-here"
 model        = "deepseek-chat"
@@ -11,6 +12,36 @@ vision_model = "deepseek-chat"                  # model to use when images are a
 models       = ["deepseek-chat", "deepseek-reasoner"]  # [0]=快聊 [1]=重推理/工具；/model 列表
 timeout_s    = 45
 max_retries  = 1
+
+[model_profiles.lite]
+label        = "DSK"
+provider     = "DeepSeek"
+base_url     = "https://api.deepseek.com/v1"
+api_key      = "sk-your-api-key-here"
+model        = "deepseek-chat"
+model_auto   = true
+vision_model = "deepseek-chat"
+models       = ["deepseek-chat", "deepseek-reasoner"]
+
+[model_profiles.pro]
+label        = "KIM"
+provider     = "Kimi"
+base_url     = ""                                # fill after Kimi API approval
+api_key      = ""                                # fill after approval
+model        = ""                                # fill after approval
+model_auto   = false
+vision_model = ""
+models       = []
+
+[model_profiles.max]
+label        = "GLM"
+provider     = "GLM"
+base_url     = ""                                # fill after GLM API approval
+api_key      = ""                                # fill after approval
+model        = ""                                # fill after approval
+model_auto   = false
+vision_model = ""
+models       = []
 
 # [api] OpenAI example:
 # base_url = "https://api.openai.com/v1"
@@ -25,6 +56,7 @@ covenant_path = "~/.archer/COVENANT.md"         # root covenant (never auto-modi
 presence_path = "~/.archer/PRESENCE.md"         # interaction style
 default_mode  = "coach"                         # mirror | coach | critic | operator
 current_mode  = "coach"                         # updated automatically by /mode
+current_expert = "default"                      # default | developer | video-coach | content-creator | counselor | parent-educator
 
 [persona.history]
 covenant_dir = "~/.archer/history/covenant/"    # proposed covenant revisions
@@ -45,6 +77,16 @@ prompt = "Current mode: critic. Challenge assumptions, find logic gaps and incon
 [persona.modes.operator]
 name   = "Operator"
 prompt = "Current mode: operator. Concise responses, complete the task directly, no extra questions."
+
+# Optional: override built-in experts or add custom workbenches.
+# [experts.my-coach]
+# label = "我的教练"
+# note = "个人成长与习惯"
+# skill_policy = "allowlist"
+# skills = ["summarize", "memory_save"]
+# prompt_overlay = "当前处于个人教练工作台。先澄清目标，再给最小下一步。"
+# memory_tags = ["expert:my-coach"]
+# starters = ["帮我看看这周最想推进的一件事", "轻轻复盘今天的状态"]
 
 [memory]
 db_path              = "~/.archer/archer.db"    # SQLite database (never committed)

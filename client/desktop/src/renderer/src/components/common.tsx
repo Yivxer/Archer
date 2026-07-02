@@ -34,18 +34,24 @@ export function FormField({
   label,
   value,
   onChange,
-  readOnly = false
+  readOnly = false,
+  type = 'text',
+  placeholder = '',
 }: {
   label: string
   value: string
   onChange?: (value: string) => void
   readOnly?: boolean
+  type?: string
+  placeholder?: string
 }) {
   return (
     <label className="form-field">
       <span>{label}</span>
       <input
+        type={type}
         value={value}
+        placeholder={placeholder}
         readOnly={readOnly}
         aria-readonly={readOnly}
         onChange={(event) => onChange?.(event.target.value)}
@@ -146,6 +152,15 @@ export function ThinkingDots() {
           <span className="dot" style={{ animationDelay: '0.36s' }}>.</span>
         </span>
       </span>
+    </span>
+  )
+}
+
+export function ThinkingMutter({ text }: { text: string }) {
+  return (
+    <span className="thinking-mutter" aria-live="polite">
+      <span className="thinking-ring" />
+      <span className="thinking-mutter-text">{text}</span>
     </span>
   )
 }

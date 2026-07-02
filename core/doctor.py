@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import sqlite3
 import socket
+import os
+import shutil
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
@@ -17,6 +19,8 @@ from typing import Callable
 from urllib.parse import urlparse
 
 import core.artifacts as _artifacts
+from core.cache_policy import cache_policy_summary
+from core.model_profiles import active_api_config, active_model_profile_id
 
 
 class Level(Enum):
@@ -32,6 +36,210 @@ class CheckResult:
     name:    str
     message: str
     fix_fn:  Callable[[], str] | None = field(default=None, repr=False)
+
+
+def _doctor_issue(code: str, level: Level, message: str, next_action: str) -> dict:
+    return {
+        "code": code,
+        "level": level.value.lower(),
+        "message": message,
+        "nextAction": next_action,
+    }
+
+
+def _looks_placeholder_key(value: str) -> bool:
+    key = str(value or "").strip()
+    return not key or key.startswith("your-") or len(key) < 10
+
+
+def _config_doctor_issues(cfg: dict) -> list[dict]:
+    issues: list[dict] = []
+    api = active_api_config(cfg)
+    profile = active_model_profile_id(cfg)
+    has_profiles = isinstance(cfg.get("model_profiles"), dict) and bool(cfg.get("model_profiles"))
+    api_prefix = f"model_profiles.{profile}" if has_profiles else "api"
+
+    if _looks_placeholder_key(str(api.get("api_key", ""))):
+        issues.append(_doctor_issue(
+            "missing_api_key",
+            Level.ERROR,
+            f"{api_prefix}.api_key 未配置或仍是占位符",
+            "在设置页填写当前模型 profile 的 API key，然后运行模型测试。",
+        ))
+    if not str(api.get("base_url", "")).strip():
+        issues.append(_doctor_issue(
+            "missing_base_url",
+            Level.ERROR,
+            f"{api_prefix}.base_url 未配置",
+            "在设置页填写可直连的 API base URL。",
+        ))
+    if not str(api.get("model", "")).strip():
+        issues.append(_doctor_issue(
+            "missing_model",
+            Level.ERROR,
+            f"{api_prefix}.model 未配置",
+            "在设置页选择或填写模型名称。",
+        ))
+
+    memory_path = str(cfg.get("memory", {}).get("db_path", "")).strip()
+    if not memory_path:
+        issues.append(_doctor_issue(
+            "missing_memory_db_path",
+            Level.ERROR,
+            "memory.db_path 未配置",
+            "在 archer.toml 的 [memory] 段配置 db_path，或通过设置页保存默认路径。",
+        ))
+    else:
+        db_path = Path(memory_path).expanduser()
+        if not db_path.exists():
+            issues.append(_doctor_issue(
+                "memory_db_missing",
+                Level.WARN,
+                f"memory.db_path 指向的数据库不存在：{db_path}",
+                "运行一次记忆初始化或确认 db_path 是否写错。",
+            ))
+
+    vault_path = str(cfg.get("obsidian", {}).get("vault_path", "")).strip()
+    if not vault_path:
+        issues.append(_doctor_issue(
+            "missing_obsidian_vault_path",
+            Level.WARN,
+            "obsidian.vault_path 未配置",
+            "如果要使用 Obsidian 读写，在 archer.toml 的 [obsidian] 段配置 vault_path。",
+        ))
+    else:
+        vault = Path(vault_path).expanduser()
+        if not vault.exists() or not vault.is_dir():
+            issues.append(_doctor_issue(
+                "obsidian_vault_missing",
+                Level.ERROR,
+                f"Obsidian vault 路径不存在或不是目录：{vault}",
+                "修正 obsidian.vault_path，确保它指向真实存在的 Obsidian vault 目录。",
+            ))
+
+    issues.extend(_blog_doctor_issues(cfg))
+    return issues
+
+
+def _blog_doctor_issues(cfg: dict) -> list[dict]:
+    issues: list[dict] = []
+    blog_dir_raw = str((cfg.get("paths", {}) or {}).get("blog_dir", "")).strip()
+    blog_dir = Path(blog_dir_raw).expanduser() if blog_dir_raw else Path("/Users/Yivxer/yivxer-blog")
+    if not blog_dir.exists() or not blog_dir.is_dir():
+        issues.append(_doctor_issue(
+            "blog_dir_missing",
+            Level.WARN,
+            f"博客目录不存在或不是目录：{blog_dir}",
+            "如果要使用枫弋札记发布，在 archer.toml 的 [paths] 段配置 blog_dir。",
+        ))
+        return issues
+
+    posts_dir = blog_dir / "content" / "posts"
+    if not posts_dir.exists() or not posts_dir.is_dir():
+        issues.append(_doctor_issue(
+            "blog_posts_dir_missing",
+            Level.WARN,
+            f"博客文章目录不存在：{posts_dir}",
+            "确认 Hugo 站点结构，或创建 content/posts 目录。",
+        ))
+
+    hugo_config = blog_dir / "hugo.toml"
+    if not hugo_config.is_file():
+        issues.append(_doctor_issue(
+            "hugo_config_missing",
+            Level.WARN,
+            f"Hugo 配置不存在：{hugo_config}",
+            "确认 blog_dir 指向 Hugo 站点根目录，并包含 hugo.toml。",
+        ))
+
+    deploy_sh = blog_dir / "deploy.sh"
+    if not deploy_sh.is_file():
+        issues.append(_doctor_issue(
+            "blog_deploy_script_missing",
+            Level.WARN,
+            f"博客部署脚本不存在：{deploy_sh}",
+            "确认枫弋札记仓库包含 deploy.sh，或先不要执行部署。",
+        ))
+    elif not os.access(deploy_sh, os.X_OK):
+        issues.append(_doctor_issue(
+            "blog_deploy_script_not_executable",
+            Level.WARN,
+            f"博客部署脚本不可执行：{deploy_sh}",
+            "运行 chmod +x deploy.sh 后再部署。",
+        ))
+
+    if not _hugo_binary_available():
+        issues.append(_doctor_issue(
+            "hugo_binary_missing",
+            Level.WARN,
+            "未找到 Hugo 可执行文件",
+            "安装 Hugo，或确认 /opt/homebrew/bin/hugo、/usr/local/bin/hugo 在本机可用。",
+        ))
+
+    deploy_content = ""
+    if deploy_sh.is_file():
+        try:
+            deploy_content = deploy_sh.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            deploy_content = ""
+    if deploy_content and ("rsync" in deploy_content or "ssh" in deploy_content.lower()):
+        if shutil.which("ssh") is None:
+            issues.append(_doctor_issue(
+                "ssh_binary_missing",
+                Level.WARN,
+                "deploy.sh 使用 SSH，但本机未找到 ssh 命令",
+                "安装或修复 OpenSSH 命令后再部署。",
+            ))
+        if shutil.which("rsync") is None:
+            issues.append(_doctor_issue(
+                "rsync_binary_missing",
+                Level.WARN,
+                "deploy.sh 使用 rsync，但本机未找到 rsync 命令",
+                "安装或修复 rsync 命令后再部署。",
+            ))
+    return issues
+
+
+def _hugo_binary_available() -> bool:
+    return (
+        shutil.which("hugo") is not None
+        or Path("/opt/homebrew/bin/hugo").exists()
+        or Path("/usr/local/bin/hugo").exists()
+    )
+
+
+def run_config_doctor(cfg: dict, *, config_path: Path | str | None = None) -> dict:
+    """Small, safe Desktop-facing config doctor."""
+    checked_at = datetime.now().isoformat(timespec="seconds")
+    try:
+        issues = _config_doctor_issues(cfg if isinstance(cfg, dict) else {})
+        issues.append(_doctor_issue(
+            "cache_policy",
+            Level.INFO,
+            cache_policy_summary(),
+            "",
+        ))
+    except Exception as exc:
+        issues = [_doctor_issue(
+            "doctor_failed",
+            Level.ERROR,
+            f"配置自检自身失败：{exc}",
+            "保留当前配置，不要继续写入；先查看 archer.toml 是否有语法或路径异常。",
+        )]
+
+    counts = {
+        "error": sum(1 for issue in issues if issue.get("level") == "error"),
+        "warn": sum(1 for issue in issues if issue.get("level") == "warn"),
+        "info": sum(1 for issue in issues if issue.get("level") == "info"),
+    }
+    return {
+        "ok": counts["error"] == 0,
+        "checkedAt": checked_at,
+        "configPath": str(config_path) if config_path is not None else "",
+        "summary": counts,
+        "issues": issues,
+        "nextActions": [issue["nextAction"] for issue in issues if issue.get("nextAction")],
+    }
 
 
 # ── 预期存在的表 ────────────────────────────────────────────────────────────────
@@ -76,32 +284,36 @@ _HIGH_RISK_SKILLS = {"shell", "installer"}
 
 
 def _check_config(cfg: dict) -> CheckResult:
+    api = active_api_config(cfg)
     missing = []
-    if not cfg.get("api", {}).get("api_key"):
-        missing.append("api.api_key")
-    if not cfg.get("api", {}).get("base_url"):
-        missing.append("api.base_url")
-    if not cfg.get("api", {}).get("model"):
-        missing.append("api.model")
+    profile = active_model_profile_id(cfg)
+    has_profiles = isinstance(cfg.get("model_profiles"), dict) and bool(cfg.get("model_profiles"))
+    if not api.get("api_key"):
+        missing.append(f"model_profiles.{profile}.api_key" if has_profiles else "api.api_key")
+    if not api.get("base_url"):
+        missing.append(f"model_profiles.{profile}.base_url" if has_profiles else "api.base_url")
+    if not api.get("model"):
+        missing.append(f"model_profiles.{profile}.model" if has_profiles else "api.model")
     if not cfg.get("memory", {}).get("db_path"):
         missing.append("memory.db_path")
     if missing:
         return CheckResult(Level.ERROR, "config", f"必要字段缺失：{', '.join(missing)}")
-    model = cfg["api"]["model"]
-    return CheckResult(Level.OK, "config", f"archer.toml 已加载，model = {model}")
+    model = api["model"]
+    return CheckResult(Level.OK, "config", f"archer.toml 已加载，profile = {profile}，model = {model}")
 
 
 def _check_api(cfg: dict) -> CheckResult:
-    base_url = cfg.get("api", {}).get("base_url", "")
-    model    = cfg.get("api", {}).get("model", "")
-    key      = cfg.get("api", {}).get("api_key", "")
+    api = active_api_config(cfg)
+    base_url = api.get("base_url", "")
+    model    = api.get("model", "")
+    key      = api.get("api_key", "")
     if not key or key.startswith("your-") or len(key) < 10:
         return CheckResult(Level.WARN, "api", "api_key 看起来是占位符或未配置")
     return CheckResult(Level.OK, "api", f"base_url = {base_url}，model = {model}")
 
 
 def _check_api_dns(cfg: dict) -> CheckResult:
-    base_url = cfg.get("api", {}).get("base_url", "")
+    base_url = active_api_config(cfg).get("base_url", "")
     if not base_url:
         return CheckResult(Level.WARN, "api_dns", "api.base_url 未配置，跳过 DNS 检查")
 

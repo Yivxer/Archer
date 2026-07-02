@@ -1,4 +1,5 @@
 [api]
+active_profile = "lite"          # lite | pro | max
 base_url     = "https://api.deepseek.com/v1"
 api_key      = "sk-xxxxxxxxxxxxxxxx"
 model        = "deepseek-chat"
@@ -8,11 +9,51 @@ models       = ["deepseek-chat", "deepseek-reasoner"]
 timeout_s    = 45
 max_retries  = 1
 
+[model_profiles.lite]
+label        = "DSK"
+provider     = "DeepSeek"
+base_url     = "https://api.deepseek.com/v1"
+api_key      = "sk-xxxxxxxxxxxxxxxx"
+model        = "deepseek-chat"
+model_auto   = true
+vision_model = "deepseek-chat"
+models       = ["deepseek-chat", "deepseek-reasoner"]
+
+[model_profiles.pro]
+label        = "KIM"
+provider     = "Kimi"
+base_url     = ""                # 填入 Kimi 的 OpenAI-compatible endpoint
+api_key      = ""                # 申请后再填
+model        = ""                # 申请后再填
+model_auto   = false
+vision_model = ""
+models       = []
+
+[model_profiles.max]
+label        = "GLM"
+provider     = "GLM"
+base_url     = ""                # 填入 GLM 的 OpenAI-compatible endpoint
+api_key      = ""                # 申请后再填
+model        = ""                # 申请后再填
+model_auto   = false
+vision_model = ""
+models       = []
+
 [persona]
 name              = "Archer"
+current_expert    = "default"
 soul_path         = "/path/to/your/SOUL.md"
 soul_profile_path = "/path/to/your/SOUL_PROFILE.json"
 memory_path       = "/path/to/your/MEMORY.md"
+
+# Optional: override built-in experts or add custom workbenches.
+# [experts.my-coach]
+# label = "我的教练"
+# note = "个人成长与习惯"
+# skill_policy = "allowlist"
+# skills = ["summarize", "memory_save"]
+# prompt_overlay = "当前处于个人教练工作台。"
+# memory_tags = ["expert:my-coach"]
 
 [memory]
 db_path              = "/path/to/Archer/memory/archer.db"

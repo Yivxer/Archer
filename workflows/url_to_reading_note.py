@@ -68,7 +68,11 @@ def run(args: list[str], console, cfg: dict) -> None:
         return
 
     # Step 3: 写入 Obsidian
-    vault = Path(cfg["obsidian"]["vault_path"]).expanduser().resolve()
+    from skills._vault import resolve_vault
+    vault = resolve_vault()
+    if vault is None:
+        console.print("[red]Obsidian vault 未配置：请在 archer.toml 设置 [obsidian].vault_path[/red]")
+        return
     today = datetime.now().strftime("%Y-%m-%d")
     # 取域名部分作为 slug
     domain = re.sub(r"https?://([^/]+).*", r"\1", url)

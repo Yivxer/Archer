@@ -1,0 +1,35 @@
+[
+  {
+    "id": "thread-20260702113927",
+    "title": "hello",
+    "summary": "目标：hello 最近结论：world",
+    "createdAt": "2026-07-02T11:39:27+00:00",
+    "updatedAt": "2026-07-02T11:39:27+00:00",
+    "sessionIds": [
+      "20260702_193927"
+    ],
+    "archived": false
+  },
+  {
+    "id": "thread-20260702113815",
+    "title": "old",
+    "summary": "目标：old 最近问题：next 最近结论：done",
+    "createdAt": "2026-07-02T11:38:15+00:00",
+    "updatedAt": "2026-07-02T11:38:15+00:00",
+    "sessionIds": [
+      "20260514_101500"
+    ],
+    "archived": false
+  },
+  {
+    "id": "thread-20260702111443",
+    "title": "old",
+    "summary": "目标：old 最近问题：next 最近结论：done",
+    "createdAt": "2026-07-02T11:14:43+00:00",
+    "updatedAt": "2026-07-02T11:14:43+00:00",
+    "sessionIds": [
+      "20260514_101500"
+    ],
+    "archived": false
+  }
+]

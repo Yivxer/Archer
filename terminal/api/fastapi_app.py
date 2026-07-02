@@ -1,22 +1,33 @@
 """FastAPI runtime for Archer Desktop API (P5.8)."""
 from __future__ import annotations
 
+import argparse
 import json
 import logging
+import os
+import sys
+import threading
 from collections.abc import Iterator
+from pathlib import Path
+
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
 
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
+from starlette.concurrency import run_in_threadpool
 from starlette.responses import Response
 
-from terminal.api._config import ALLOWED_DESKTOP_ORIGINS, _clean_chat_messages
+from terminal.api._config import ALLOWED_DESKTOP_ORIGINS, ROOT, _clean_chat_messages, _inject_thread_context
 from terminal.api._routes import payload_get, payload_post
 from terminal.api._security import (
     MAX_CONTENT_LENGTH,
     check_rate_limit,
     constant_time_compare,
     error_response,
+    normalize_error_payload,
 )
 from terminal.api._tools import (
     _bg_extract_api,
@@ -28,11 +39,13 @@ from terminal.api._tools import (
 
 logger = logging.getLogger("archer_api")
 
-PUBLIC_PATHS = frozenset({"/health", "/openapi.json", "/docs", "/redoc"})
+PUBLIC_PATHS = frozenset({"/health", "/ready", "/openapi.json", "/docs", "/redoc"})
+RATE_LIMIT_EXEMPT_PATHS = frozenset({"/health", "/ready", "/status"})
+DEFAULT_MAX_CHAT_STREAMS = max(1, int(os.environ.get("ARCHER_MAX_CHAT_STREAMS", "1") or "1"))
 
 
 def _authorized(path: str, authorization: str, desktop_token: str) -> bool:
-    if path == "/health":
+    if path in {"/health", "/ready"}:
         return True
     if not desktop_token:
         return False
@@ -60,6 +73,7 @@ def _path_with_query(request: Request) -> str:
 
 
 def _json_response(status: int, payload: dict | list) -> JSONResponse:
+    payload = normalize_error_payload(status, payload)
     return JSONResponse(status_code=status, content=payload)
 
 
@@ -90,19 +104,48 @@ def _dispatch_post(path: str, body: dict) -> JSONResponse:
         return _handle_dispatch_error(path, exc)
 
 
-def _chat_stream_events(payload: dict) -> Iterator[str]:
-    messages = _clean_chat_messages(payload.get("messages"))
+def _chat_stream_events(payload: dict, release_slot=None) -> Iterator[str]:
+    messages = _inject_thread_context(_clean_chat_messages(payload.get("messages")), payload.get("threadContext"))
     memory_mode = _clean_memory_mode(payload.get("memoryMode"))
     obsidian_mode = _clean_obsidian_mode(payload.get("obsidianMode"))
     file_refs = _clean_file_refs(payload.get("fileRefs"))
     reply_chunks: list[str] = []
-    for event in _iter_chat_chunks(messages, memory_mode, obsidian_mode, file_refs):
-        if event.get("type") == "token" and event.get("text"):
-            reply_chunks.append(str(event["text"]))
-        yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
-    if reply_chunks:
-        full_history = list(messages) + [{"role": "assistant", "content": "".join(reply_chunks)}]
-        _bg_extract_api(full_history)
+    has_error = False
+    chunk_iter = _iter_chat_chunks(messages, memory_mode, obsidian_mode, file_refs)
+    try:
+        try:
+            for event in chunk_iter:
+                if event.get("type") == "token" and event.get("text"):
+                    reply_chunks.append(str(event["text"]))
+                elif event.get("type") == "error":
+                    # 流式出错：标记，跳过后续记忆提取，避免从不完整/错误回复中提取垃圾记忆
+                    has_error = True
+                yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+        except GeneratorExit:
+            # 客户端断开连接：优雅关闭内层 generator，避免 Broken pipe 噪音
+            # Starlette 会在客户端断开时向 generator 抛 GeneratorExit
+            logger.info("[chat/stream] client disconnected, cleaning up generator")
+            _close_iter(chunk_iter)
+            raise
+        finally:
+            _close_iter(chunk_iter)
+        # 只在流式正常结束且无错误时提取记忆
+        if reply_chunks and not has_error:
+            full_history = list(messages) + [{"role": "assistant", "content": "".join(reply_chunks)}]
+            _bg_extract_api(full_history)
+    finally:
+        if callable(release_slot):
+            release_slot()
+
+
+def _close_iter(iter_obj) -> None:
+    """安全关闭 generator/iterator，兼容 mock 返回的普通 list_iterator。"""
+    close_fn = getattr(iter_obj, "close", None)
+    if callable(close_fn):
+        try:
+            close_fn()
+        except Exception:
+            pass
 
 
 def create_app(desktop_api_token: str = "") -> FastAPI:
@@ -112,6 +155,21 @@ def create_app(desktop_api_token: str = "") -> FastAPI:
         description="Local API for Archer Desktop client",
     )
     app.state.desktop_api_token = desktop_api_token
+    app.state.chat_stream_semaphore = threading.BoundedSemaphore(DEFAULT_MAX_CHAT_STREAMS)
+
+    @app.on_event("startup")
+    def _on_startup() -> None:
+        # 初始化定时任务：确保假设扫描任务存在，并执行到期的定时任务
+        # 移植自 terminal/archer.py:336-337，API 进程之前缺失此逻辑导致定时任务失效
+        try:
+            from core.reflection_scheduler import ensure_hypothesis_scan_schedule
+            from core.scheduler import run_due_tasks
+            from skills.loader import load_skills
+            ensure_hypothesis_scan_schedule()
+            run_due_tasks(load_skills())
+            logger.info("[startup] scheduled tasks initialized")
+        except Exception as exc:
+            logger.warning("[startup] scheduled tasks init failed: %s", exc)
 
     app.add_middleware(
         CORSMiddleware,
@@ -131,7 +189,7 @@ def create_app(desktop_api_token: str = "") -> FastAPI:
             return _json_response(401, {"error": "unauthorized", "message": "desktop API token is required"})
 
         client_ip = _client_ip(request)
-        if request.method != "OPTIONS" and not check_rate_limit(client_ip, path):
+        if request.method != "OPTIONS" and path not in RATE_LIMIT_EXEMPT_PATHS and not check_rate_limit(client_ip, path):
             status, body = error_response(429, "rate_limited", "请求过于频繁，请稍后重试")
             return _json_response(status, body)
 
@@ -152,13 +210,23 @@ def create_app(desktop_api_token: str = "") -> FastAPI:
     async def health() -> dict[str, bool]:
         return {"ok": True}
 
+    @app.get("/ready")
+    async def ready() -> dict[str, bool | str]:
+        return {"ok": True, "ready": True, "runtime": "fastapi"}
+
     @app.post("/chat/stream")
-    async def chat_stream(request: Request) -> StreamingResponse:
+    async def chat_stream(request: Request):
         payload = await request.json()
         if not isinstance(payload, dict):
             return _json_response(400, {"error": "validation_error", "message": "payload must be an object"})
+        semaphore = request.app.state.chat_stream_semaphore
+        if not semaphore.acquire(blocking=False):
+            return _json_response(429, {
+                "error": "chat_busy",
+                "message": "上一轮对话仍在处理中，请等待它结束后再发送。",
+            })
         return StreamingResponse(
-            _chat_stream_events(payload),
+            _chat_stream_events(payload, release_slot=semaphore.release),
             media_type="text/event-stream; charset=utf-8",
             headers={
                 "Cache-Control": "no-cache",
@@ -211,8 +279,10 @@ def create_app(desktop_api_token: str = "") -> FastAPI:
     async def get_route(full_path: str, request: Request) -> Response:
         if full_path == "health":
             return await health()
+        if full_path == "ready":
+            return await ready()
         path = _path_with_query(request)
-        return _dispatch_get(path)
+        return await run_in_threadpool(_dispatch_get, path)
 
     @app.api_route("/{full_path:path}", methods=["POST"])
     async def post_route(full_path: str, request: Request) -> Response:
@@ -225,7 +295,7 @@ def create_app(desktop_api_token: str = "") -> FastAPI:
             return _json_response(400, {"error": "validation_error", "message": str(exc)})
         if not isinstance(payload, dict):
             return _json_response(400, {"error": "validation_error", "message": "payload must be an object"})
-        return _dispatch_post(path, payload)
+        return await run_in_threadpool(_dispatch_post, path, payload)
 
     return app
 
@@ -237,3 +307,34 @@ def run_fastapi_server(host: str, port: int, desktop_api_token: str = "") -> Non
     logger.info("Archer Desktop API (FastAPI) listening on http://%s:%s", host, port)
     print(f"Archer Desktop API (FastAPI) listening on http://{host}:{port}")
     uvicorn.run(app, host=host, port=port, log_level="info")
+
+
+def configure_logging() -> None:
+    log_dir = ROOT / "logs"
+    log_dir.mkdir(exist_ok=True)
+    root_logger = logging.getLogger()
+    if root_logger.handlers:
+        return
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        handlers=[
+            logging.FileHandler(log_dir / "archer_api.log"),
+            logging.StreamHandler(),
+        ],
+    )
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Run Archer Desktop FastAPI runtime")
+    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--port", type=int, default=8765)
+    parser.add_argument("--token", default="")
+    args = parser.parse_args()
+
+    configure_logging()
+    run_fastapi_server(args.host, args.port, args.token)
+
+
+if __name__ == "__main__":
+    main()

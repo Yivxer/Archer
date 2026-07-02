@@ -20,22 +20,46 @@ from skills import (
 
 def test_obsidian_read_blocks_path_escape(monkeypatch):
     with tempfile.TemporaryDirectory() as vault:
-        monkeypatch.setattr(obsidian_read, "_vault", lambda: Path(vault))
+        monkeypatch.setattr(
+            obsidian_read, "_resolve_note_path",
+            lambda raw: _resolve_into_vault(raw, vault),
+        )
         result = obsidian_read.run({"path": "../secret.txt"})
         assert "路径被拒绝" in result
+
+
+def _resolve_into_vault(raw_path: str, vault: str):
+    """辅助：把路径解析到指定 vault 内（用于测试 mock）。"""
+    from pathlib import Path
+    vault_resolved = Path(vault).resolve()
+    p = Path(raw_path).expanduser()
+    if not p.is_absolute():
+        p = vault_resolved / raw_path
+    resolved = p.resolve()
+    try:
+        resolved.relative_to(vault_resolved)
+    except ValueError:
+        raise PermissionError("路径必须位于 Obsidian vault 内")
+    return resolved
 
 
 def test_obsidian_write_blocks_absolute_path_outside_vault(monkeypatch):
     with tempfile.TemporaryDirectory() as vault:
         outside = Path(tempfile.gettempdir()) / "archer-outside-note.md"
-        monkeypatch.setattr(obsidian_write, "_vault", lambda: Path(vault))
+        monkeypatch.setattr(
+            obsidian_write, "_resolve_note_path",
+            lambda raw: _resolve_into_vault(raw, vault),
+        )
         result = obsidian_write.run({"path": str(outside), "content": "x"})
         assert "路径被拒绝" in result
 
 
 def test_obsidian_write_allows_path_inside_vault(monkeypatch):
     with tempfile.TemporaryDirectory() as vault:
-        monkeypatch.setattr(obsidian_write, "_vault", lambda: Path(vault))
+        monkeypatch.setattr(
+            obsidian_write, "_resolve_note_path",
+            lambda raw: _resolve_into_vault(raw, vault),
+        )
         result = obsidian_write.run({"path": "notes/test.md", "content": "hello"})
         assert "已追加到" in result
         assert (Path(vault) / "notes" / "test.md").read_text(encoding="utf-8").strip() == "hello"
@@ -176,7 +200,7 @@ def test_obsidian_search_stays_inside_vault(monkeypatch):
         hidden = Path(vault) / ".obsidian" / "secret.md"
         hidden.parent.mkdir()
         hidden.write_text("needle", encoding="utf-8")
-        monkeypatch.setattr(obsidian_search, "_vault", lambda: Path(vault))
+        monkeypatch.setattr(obsidian_search, "_resolve_vault", lambda: Path(vault).resolve())
         result = obsidian_search.run({"keyword": "needle", "max_results": 10})
         assert "note.md" in result
         assert "secret.md" not in result

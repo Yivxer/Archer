@@ -2,10 +2,12 @@ import tomllib
 from datetime import datetime, timedelta
 from pathlib import Path
 
+from skills._vault import resolve_vault
+
 SKILL = {
     "name": "weekly_review",
     "description": "生成本周复盘报告，整合 Obsidian 记忆、NEXT.md 和 MEMORY.md",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "author": "archer-builtin",
 }
 
@@ -34,12 +36,14 @@ def schema() -> dict:
         },
     }
 
-def run(args: dict) -> str:
+def _run_impl(args: dict) -> str:
     cfg_path = Path(__file__).parent.parent / "archer.toml"
     with open(cfg_path, "rb") as f:
         cfg = tomllib.load(f)
 
-    vault        = Path(cfg["obsidian"]["vault_path"])
+    vault = resolve_vault()
+    if vault is None:
+        return "Obsidian vault 未配置：请在 archer.toml 设置 [obsidian].vault_path"
     week_summary = args.get("week_summary", "")
     focus        = args.get("focus", "")
 
@@ -82,3 +86,10 @@ def run(args: dict) -> str:
     )
 
     return "\n".join(parts)
+
+
+def run(args: dict) -> str:
+    try:
+        return _run_impl(args)
+    except Exception as e:
+        return f"周复盘执行失败：{type(e).__name__}: {e}"

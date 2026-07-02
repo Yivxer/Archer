@@ -31,6 +31,7 @@
   --radius-window: 10px;
   --radius-panel: 10px;
   --radius-composer: 10px;
+  --sidebar-width: 264px;
 }
 
 :root[data-theme="dark"] {
@@ -48,4 +49,11 @@
   --panel-border: rgba(77, 217, 212, 0.12);
   --soft-hover: rgba(77, 217, 212, 0.065);
   --quiet-glow: 0 24px 70px rgba(0, 0, 0, 0.28);
+}
+
+/* Dark overrides for hardcoded backgrounds */
+:root[data-theme="dark"] .app-shell,
+:root[data-theme="dark"] .chat-layout,
+:root[data-theme="dark"] .conversation {
+  background: var(--bg-1);
 }

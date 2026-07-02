@@ -6,6 +6,8 @@ model_select.py — 每轮模型选择（model_auto）
 """
 from __future__ import annotations
 
+from core.model_profiles import active_api_config
+
 _HEAVY_INTENTS = frozenset({"task", "project", "decision", "reflection"})
 _REASONING_SIGNALS = frozenset({
     "分析", "复盘", "推理", "论证", "利弊", "架构", "设计", "规划",
@@ -14,7 +16,7 @@ _REASONING_SIGNALS = frozenset({
 
 
 def _api_models(cfg: dict) -> list[str]:
-    api = cfg.get("api", {})
+    api = active_api_config(cfg)
     models = api.get("models")
     if isinstance(models, list) and models:
         return [str(m) for m in models if str(m).strip()]
@@ -31,7 +33,7 @@ def resolve_active_model(
     has_images: bool = False,
 ) -> tuple[str, str]:
     """返回 (model_name, reason)。reason 用于终端 dim 提示。"""
-    api = cfg.get("api", {})
+    api = active_api_config(cfg)
     models = _api_models(cfg)
     primary = str(api.get("model", "") or (models[0] if models else ""))
     vision = str(api.get("vision_model", "") or primary)
@@ -60,7 +62,7 @@ def resolve_active_model(
 
 def status_model_label(cfg: dict) -> str:
     """供 /status 与桌面状态栏：auto 或锁定模型名。"""
-    api = cfg.get("api", {})
+    api = active_api_config(cfg)
     if api.get("model_auto", True) is not False:
         return "auto"
     return str(api.get("model", "") or "")

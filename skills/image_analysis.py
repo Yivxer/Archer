@@ -43,7 +43,7 @@ def schema() -> dict:
     }
 
 
-def run(path: str, question: str = "") -> str:
+def _run_impl(path: str, question: str = "") -> str:
     p = Path(path).expanduser()
     if not p.exists():
         return f"图片不存在：{path}"
@@ -53,10 +53,12 @@ def run(path: str, question: str = "") -> str:
     cfg_path = Path(__file__).parent.parent / "archer.toml"
     with open(cfg_path, "rb") as f:
         cfg = tomllib.load(f)
+    from core.model_profiles import active_api_config
+    api = active_api_config(cfg)
 
-    vision_model = cfg["api"].get("vision_model", "")
-    api_key = cfg["api"].get("api_key", "")
-    base_url = cfg["api"].get("base_url", "https://api.openai.com/v1")
+    vision_model = api.get("vision_model", "")
+    api_key = api.get("api_key", "")
+    base_url = api.get("base_url", "https://api.openai.com/v1")
 
     if not vision_model:
         return "未配置视觉模型，请在 archer.toml 的 [api] 中设置 vision_model。"
@@ -80,3 +82,10 @@ def run(path: str, question: str = "") -> str:
         max_tokens=1024,
     )
     return resp.choices[0].message.content or "（无返回内容）"
+
+
+def run(path: str, question: str = "") -> str:
+    try:
+        return _run_impl(path, question)
+    except Exception as e:
+        return f"图片分析失败：{type(e).__name__}: {e}"

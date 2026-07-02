@@ -57,12 +57,15 @@ def _handle_skill(parts: list[str], skills: dict) -> dict:
     return skills
 
 def _handle_model(parts: list[str], cfg: dict):
-    models  = cfg["api"].get("models", [cfg["api"]["model"]])
-    current = cfg["api"]["model"]
-    model_auto = cfg["api"].get("model_auto", True)
+    from core.model_profiles import active_api_config, active_model_profile_id
+    api = active_api_config(cfg)
+    profile = active_model_profile_id(cfg)
+    models  = api.get("models", [api["model"]])
+    current = api["model"]
+    model_auto = api.get("model_auto", True)
     if len(parts) < 2:
         if model_auto:
-            console.print(f"\n  当前模型：[bold #c44e00]自动[/]  [dim]（基线 {current}）[/dim]")
+            console.print(f"\n  当前模型：[bold #c44e00]自动[/]  [dim]（{profile} · 基线 {current}）[/dim]")
         else:
             console.print(f"\n  当前模型：[bold #c44e00]{current}[/]  [dim]（已锁定）[/dim]")
         for m in models:

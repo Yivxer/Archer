@@ -13,10 +13,11 @@ sys.path.insert(0, str(ROOT))
 
 import core.artifacts as art_mod
 from core.doctor import (
-    Level, apply_fixes, run_checks,
+    Level, apply_fixes, run_checks, run_config_doctor,
     _check_api, _check_config, _check_memory, _check_pending,
     _check_api_dns, _check_soul, _check_obsidian, _check_skills, _check_artifacts,
 )
+from core.cache_policy import CACHE_POLICY
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -74,6 +75,81 @@ def test_config_missing_key():
     r = _check_config(cfg)
     assert r.level == Level.ERROR
     assert "api.api_key" in r.message
+
+
+def test_cache_policy_exposes_stability_ttls():
+    assert CACHE_POLICY.tool_draft_ttl_seconds == 30 * 60
+    assert CACHE_POLICY.tool_result_ttl_seconds == 10 * 60
+    assert CACHE_POLICY.tool_fingerprint_result_ttl_seconds == 10 * 60
+    assert CACHE_POLICY.vault_focus_sensor_ttl_seconds == 10 * 60
+    assert CACHE_POLICY.vault_focus_mtime_ttl_seconds == 5 * 60
+    assert CACHE_POLICY.model_response_cache_enabled is False
+
+
+def test_config_doctor_reports_cache_policy_summary(tmp_path):
+    cfg = _minimal_cfg(str(tmp_path))
+    result = run_config_doctor(cfg, config_path=tmp_path / "archer.toml")
+
+    cache_issues = [issue for issue in result["issues"] if issue["code"] == "cache_policy"]
+    assert cache_issues
+    assert cache_issues[0]["level"] == "info"
+    assert "tool_draft=1800s" in cache_issues[0]["message"]
+    assert "model_response=disabled" in cache_issues[0]["message"]
+
+
+def test_run_config_doctor_reports_missing_desktop_prerequisites(tmp_path):
+    cfg = {
+        "api": {"base_url": "https://api.test/v1", "model": "test-model"},
+        "memory": {},
+        "obsidian": {"vault_path": str(tmp_path / "missing-vault")},
+    }
+
+    result = run_config_doctor(cfg, config_path=tmp_path / "archer.toml")
+
+    assert result["ok"] is False
+    assert result["summary"]["error"] >= 1
+    codes = {issue["code"] for issue in result["issues"]}
+    assert "missing_api_key" in codes
+    assert "missing_memory_db_path" in codes
+    assert "obsidian_vault_missing" in codes
+    assert result["nextActions"]
+
+
+def test_run_config_doctor_reports_blog_prerequisites(tmp_path, monkeypatch):
+    blog_dir = tmp_path / "blog"
+    blog_dir.mkdir()
+    (blog_dir / "deploy.sh").write_text("#!/usr/bin/env bash\nrsync -av public/ host:/site\n", encoding="utf-8")
+    (blog_dir / "hugo.toml").write_text('baseURL = "https://example.com/"\n', encoding="utf-8")
+    cfg = {
+        "api": {"base_url": "https://api.test/v1", "model": "test-model", "api_key": "sk-test-valid-key"},
+        "memory": {"db_path": str(tmp_path / "memory.db")},
+        "obsidian": {"vault_path": str(tmp_path)},
+        "paths": {"blog_dir": str(blog_dir)},
+    }
+    monkeypatch.setattr("core.doctor.shutil.which", lambda _name: None)
+    monkeypatch.setattr("core.doctor._hugo_binary_available", lambda: False)
+
+    result = run_config_doctor(cfg, config_path=tmp_path / "archer.toml")
+
+    codes = {issue["code"] for issue in result["issues"]}
+    assert "blog_posts_dir_missing" in codes
+    assert "blog_deploy_script_not_executable" in codes
+    assert "hugo_binary_missing" in codes
+    assert "ssh_binary_missing" in codes
+    assert "rsync_binary_missing" in codes
+
+
+def test_run_config_doctor_catches_internal_exception(tmp_path, monkeypatch):
+    def boom(_cfg):
+        raise RuntimeError("doctor boom")
+
+    monkeypatch.setattr("core.doctor._config_doctor_issues", boom)
+
+    result = run_config_doctor({}, config_path=tmp_path / "archer.toml")
+
+    assert result["ok"] is False
+    assert result["issues"][0]["code"] == "doctor_failed"
+    assert "doctor boom" in result["issues"][0]["message"]
 
 
 # ── api checks ────────────────────────────────────────────────────────────────

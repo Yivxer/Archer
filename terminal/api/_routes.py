@@ -6,6 +6,8 @@ import json
 import os
 import re
 import threading
+import time
+import urllib.parse
 from datetime import datetime
 from pathlib import Path
 import tomllib
@@ -16,27 +18,41 @@ from terminal.api._config import (
     PENDING_TOOL_DRAFTS,
     ROOT,
     get_tool_draft,
+    get_tool_fingerprint_result,
+    get_tool_result,
     pop_tool_draft,
+    read_tool_approval_audit,
+    record_tool_approval_audit,
+    set_tool_fingerprint_result,
+    set_tool_result,
     set_tool_draft,
     SETTINGS_ALLOWED_FIELDS,
     _clean_session_messages,
     _load_config,
     _mask_key,
     _read_text,
+    tool_request_fingerprint,
     _valid_session_id,
+    mutate_config_text,
+    write_config_text,
 )
 from terminal.api._tools import (
     _append_obsidian_draft,
     _chat,
     _execute_github_operation,
     _execute_shell_command,
+    _failure_hint_event,
+    _run_hugo_publish_workflow,
 )
+from core.permission_levels import permission_level_for_tool
 
 BACKGROUND_JOBS: dict[str, dict] = {}
 BACKGROUND_JOB_LOCK = threading.Lock()
 BACKGROUND_JOBS_LOADED = False
 BACKGROUND_JOBS_PATH = ROOT / "memory" / "background_jobs.json"
 DEFAULT_BACKGROUND_JOB_TIMEOUT_SECONDS = 300
+BACKGROUND_JOB_STALE_SECONDS = 15 * 60
+IDEMPOTENT_TOOL_SKILLS = {"obsidian_write", "hugo_blog", "file_ops"}
 
 
 # ---------------------------------------------------------------------------
@@ -51,15 +67,76 @@ def _sessions(limit: int = 20) -> list[dict]:
         return []
     items: list[dict] = []
     for path in sorted(sessions_dir.glob("*.json"), reverse=True)[:limit]:
-        messages, _usage = read_session_file(path)
+        messages, _usage, meta = read_session_file(path)
         first_user = next((m.get("content", "") for m in messages if m.get("role") == "user"), "")
         title = str(first_user).strip().replace("\n", " ")[:42] or path.stem
         preview = str(first_user).strip().replace("\n", " ")[:60]
-        items.append({
+        item = {
             "id": path.stem, "title": title, "date": path.stem[:8],
             "turns": max(1, len(messages) // 2), "tone": "saved", "preview": preview,
-        })
+        }
+        if isinstance(meta, dict):
+            thread_id = str(meta.get("threadId", "") or "").strip()
+            expert_id = str(meta.get("expertId", "") or "").strip()
+            expert_label = str(meta.get("expertLabel", "") or "").strip()
+            if thread_id:
+                item["threadId"] = thread_id
+            if expert_id:
+                item["expertId"] = expert_id
+            if expert_label:
+                item["expertLabel"] = expert_label
+        items.append(item)
     return items
+
+
+def _sessions_search(query: str, limit: int = 30) -> list[dict]:
+    """Search session message content. Returns matching sessions with snippets."""
+    from core.session import SESSIONS_DIR
+    from core.session_store import read_session_file
+    query_lower = query.strip().lower()
+    if not query_lower:
+        return []
+    sessions_dir = Path(SESSIONS_DIR)
+    if not sessions_dir.exists():
+        return []
+    results: list[dict] = []
+    for path in sorted(sessions_dir.glob("*.json"), reverse=True)[:limit * 3]:
+        messages, _usage, meta = read_session_file(path)
+        first_user = next((m.get("content", "") for m in messages if m.get("role") == "user"), "")
+        title = str(first_user).strip().replace("\n", " ")[:42] or path.stem
+        snippet = ""
+        match_role = ""
+        for msg in messages:
+            content = str(msg.get("content", "") or "")
+            if query_lower in content.lower():
+                idx = content.lower().find(query_lower)
+                start = max(0, idx - 30)
+                end = min(len(content), idx + len(query) + 30)
+                snippet = ("…" if start > 0 else "") + content[start:end] + ("…" if end < len(content) else "")
+                match_role = str(msg.get("role", ""))
+                break
+        if not snippet:
+            continue
+        item = {
+            "id": path.stem, "title": title, "date": path.stem[:8],
+            "turns": max(1, len(messages) // 2), "tone": "saved",
+            "preview": str(first_user).strip().replace("\n", " ")[:60],
+            "snippet": snippet, "matchRole": match_role,
+        }
+        if isinstance(meta, dict):
+            thread_id = str(meta.get("threadId", "") or "").strip()
+            expert_id = str(meta.get("expertId", "") or "").strip()
+            expert_label = str(meta.get("expertLabel", "") or "").strip()
+            if thread_id:
+                item["threadId"] = thread_id
+            if expert_id:
+                item["expertId"] = expert_id
+            if expert_label:
+                item["expertLabel"] = expert_label
+        results.append(item)
+        if len(results) >= limit:
+            break
+    return results
 
 
 def _session_detail(session_id: str) -> dict | None:
@@ -70,7 +147,7 @@ def _session_detail(session_id: str) -> dict | None:
     path = Path(SESSIONS_DIR) / f"{session_id}.json"
     if not path.exists() or not path.is_file():
         return None
-    messages, token_usage = read_session_file(path)
+    messages, token_usage, meta = read_session_file(path)
     if not isinstance(messages, list):
         messages = []
     clean_messages = []
@@ -93,12 +170,37 @@ def _session_detail(session_id: str) -> dict | None:
     }
     if token_usage:
         detail["tokenUsage"] = token_usage
+    if isinstance(meta, dict):
+        thread_id = str(meta.get("threadId", "") or "").strip()
+        expert_id = str(meta.get("expertId", "") or "").strip()
+        expert_label = str(meta.get("expertLabel", "") or "").strip()
+        if thread_id:
+            detail["threadId"] = thread_id
+        if expert_id:
+            detail["expertId"] = expert_id
+        if expert_label:
+            detail["expertLabel"] = expert_label
     return detail
+
+
+def _session_meta_from_payload(payload: dict) -> dict[str, str]:
+    meta: dict[str, str] = {}
+    expert_id = str(payload.get("expertId", "") or "").strip()
+    expert_label = str(payload.get("expertLabel", "") or "").strip()
+    if expert_id and re.fullmatch(r"[A-Za-z0-9_-]{1,64}", expert_id):
+        meta["expertId"] = expert_id
+    if expert_label:
+        meta["expertLabel"] = expert_label[:64]
+    thread_id = str(payload.get("threadId", "") or "").strip()
+    if thread_id and re.fullmatch(r"[A-Za-z0-9_-]{1,96}", thread_id):
+        meta["threadId"] = thread_id
+    return meta
 
 
 def _save_session(payload: dict) -> dict:
     from core.session import SESSIONS_DIR
     from core.session_store import dump_session_file
+    from core.thread_store import add_session_to_thread, create_thread, get_thread
     from core.token_usage import session_usage_for_file
     messages = _clean_session_messages(payload.get("messages"))
     sessions_dir = Path(SESSIONS_DIR)
@@ -109,16 +211,32 @@ def _save_session(payload: dict) -> dict:
     while path.exists():
         path = sessions_dir / f"{session_id}_{counter}.json"
         counter += 1
+    meta = _session_meta_from_payload(payload)
+    thread_id = str(meta.get("threadId", "") or "").strip()
+    if thread_id and not get_thread(thread_id):
+        thread_id = ""
+        meta.pop("threadId", None)
+    if not thread_id:
+        thread = create_thread(messages, path.stem)
+        thread_id = thread["id"]
+        meta["threadId"] = thread_id
+    else:
+        add_session_to_thread(thread_id, path.stem, messages)
     path.write_text(
-        dump_session_file(messages, token_usage=session_usage_for_file()),
+        dump_session_file(
+            messages,
+            token_usage=session_usage_for_file(),
+            meta=meta or None,
+        ),
         encoding="utf-8",
     )
-    return {"id": path.stem, "path": str(path), "messages": len(messages)}
+    return {"id": path.stem, "path": str(path), "messages": len(messages), "threadId": thread_id}
 
 
 def _append_session(session_id: str, payload: dict) -> dict:
     from core.session import SESSIONS_DIR
     from core.session_store import dump_session_file, read_session_file
+    from core.thread_store import add_session_to_thread, create_thread
     if not _valid_session_id(session_id):
         raise ValueError("invalid session id")
     new_messages = _clean_session_messages(payload.get("messages"))
@@ -129,15 +247,61 @@ def _append_session(session_id: str, payload: dict) -> dict:
     path = Path(SESSIONS_DIR) / f"{session_id}.json"
     if not path.exists() or not path.is_file():
         raise FileNotFoundError(f"session not found: {session_id}")
-    existing, token_usage = read_session_file(path)
+    existing, token_usage, meta = read_session_file(path)
     if not isinstance(existing, list):
         existing = []
     existing.extend(new_messages)
+    if not isinstance(meta, dict):
+        meta = {}
+    thread_id = str(meta.get("threadId", "") or "").strip()
+    if thread_id:
+        add_session_to_thread(thread_id, session_id, existing)
+    else:
+        thread = create_thread(existing, session_id)
+        thread_id = thread["id"]
+        meta["threadId"] = thread_id
     path.write_text(
-        dump_session_file(existing, token_usage=token_usage),
+        dump_session_file(existing, token_usage=token_usage, meta=meta),
         encoding="utf-8",
     )
-    return {"id": session_id, "path": str(path), "messages": len(existing), "appended": len(new_messages)}
+    return {"id": session_id, "path": str(path), "messages": len(existing), "appended": len(new_messages), "threadId": thread_id}
+
+
+def _threads() -> list[dict]:
+    from core.thread_store import read_threads
+    return read_threads()
+
+
+def _thread_detail(thread_id: str) -> dict | None:
+    from core.thread_store import get_thread
+    return get_thread(thread_id)
+
+
+def _create_thread(payload: dict) -> dict:
+    from core.thread_store import create_thread
+    messages = _clean_session_messages(payload.get("messages"))
+    thread = create_thread(messages)
+    if isinstance(payload.get("title"), str) and payload["title"].strip():
+        from core.thread_store import update_thread
+        return update_thread(thread["id"], {"title": payload["title"]}) or thread
+    return thread
+
+
+def _update_thread(thread_id: str, payload: dict) -> dict:
+    from core.thread_store import update_thread
+    updated = update_thread(thread_id, payload)
+    if updated is None:
+        raise FileNotFoundError(f"thread not found: {thread_id}")
+    return updated
+
+
+def _add_thread_session(thread_id: str, payload: dict) -> dict:
+    from core.thread_store import add_session_to_thread
+    session_id = str(payload.get("sessionId", "") or "").strip()
+    updated = add_session_to_thread(thread_id, session_id)
+    if updated is None:
+        raise FileNotFoundError(f"thread not found: {thread_id}")
+    return updated
 
 
 # ---------------------------------------------------------------------------
@@ -170,6 +334,14 @@ def _clean_job_record(raw: object) -> dict | None:
     }
     if raw.get("error"):
         job["error"] = str(raw.get("error"))
+    if raw.get("failureKeyword"):
+        job["failureKeyword"] = str(raw.get("failureKeyword"))
+    stale_seconds = _clean_job_stale_seconds(raw.get("staleSeconds"))
+    if stale_seconds is not None:
+        job["staleSeconds"] = stale_seconds
+    vault_args = raw.get("vaultArgs")
+    if isinstance(vault_args, dict) and vault_args:
+        job["vaultArgs"] = vault_args
     if status in {"running", "waiting_approval"}:
         job["status"] = "failed"
         job["error"] = "job interrupted by API restart"
@@ -183,6 +355,16 @@ def _clean_job_timeout(value: object) -> int:
     except (TypeError, ValueError):
         timeout = DEFAULT_BACKGROUND_JOB_TIMEOUT_SECONDS
     return max(1, min(timeout, 3600))
+
+
+def _clean_job_stale_seconds(value: object) -> int | None:
+    if value is None:
+        return None
+    try:
+        stale_seconds = int(value)
+    except (TypeError, ValueError):
+        return None
+    return max(1, min(stale_seconds, 24 * 60 * 60))
 
 
 def _load_jobs_locked() -> None:
@@ -228,6 +410,39 @@ def _persist_jobs_locked() -> None:
     tmp_path.replace(BACKGROUND_JOBS_PATH)
 
 
+def _parse_job_datetime(value: object) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        return datetime.fromisoformat(text.replace("Z", "+00:00")).replace(tzinfo=None)
+    except ValueError:
+        return None
+
+
+def _mark_stale_jobs_locked() -> bool:
+    now = datetime.now()
+    changed = False
+    for job in BACKGROUND_JOBS.values():
+        if job.get("status") not in {"queued", "running", "waiting_approval"}:
+            continue
+        updated_at = _parse_job_datetime(job.get("updatedAt"))
+        if updated_at is None:
+            continue
+        stale_seconds = max(1, int(job.get("staleSeconds") or BACKGROUND_JOB_STALE_SECONDS))
+        elapsed = (now - updated_at).total_seconds()
+        if elapsed <= stale_seconds:
+            continue
+        job["status"] = "cancelled"
+        job["stale"] = True
+        job["error"] = f"job stale: no progress for {int(elapsed)}s"
+        job["updatedAt"] = now.isoformat()
+        changed = True
+    if changed:
+        _persist_jobs_locked()
+    return changed
+
+
 def _create_job(payload: dict) -> dict:
     from uuid import uuid4
 
@@ -237,6 +452,7 @@ def _create_job(payload: dict) -> dict:
     if not title or not prompt:
         raise ValueError("title and prompt are required")
     timeout_seconds = _clean_job_timeout(payload.get("timeoutSeconds"))
+    stale_seconds = _clean_job_stale_seconds(payload.get("staleSeconds"))
     parent_job_id = str(payload.get("parentJobId", "")).strip() or None
 
     job_id = f"job-{uuid4().hex[:8]}"
@@ -252,6 +468,11 @@ def _create_job(payload: dict) -> dict:
         "updatedAt": created_at,
         "timeoutSeconds": timeout_seconds,
     }
+    if stale_seconds is not None:
+        job["staleSeconds"] = stale_seconds
+    vault_args = payload.get("vaultArgs")
+    if isinstance(vault_args, dict) and vault_args:
+        job["vaultArgs"] = vault_args
 
     with BACKGROUND_JOB_LOCK:
         _load_jobs_locked()
@@ -277,6 +498,7 @@ def _create_job(payload: dict) -> dict:
 def _list_jobs() -> dict:
     with BACKGROUND_JOB_LOCK:
         _load_jobs_locked()
+        _mark_stale_jobs_locked()
         jobs = [dict(job) for job in BACKGROUND_JOBS.values()]
     jobs.sort(key=lambda job: str(job.get("createdAt", "")), reverse=True)
     return {"ok": True, "jobs": jobs}
@@ -285,6 +507,7 @@ def _list_jobs() -> dict:
 def _job_detail(job_id: str) -> dict | None:
     with BACKGROUND_JOB_LOCK:
         _load_jobs_locked()
+        _mark_stale_jobs_locked()
         job = BACKGROUND_JOBS.get(job_id)
         if not job:
             return None
@@ -322,7 +545,14 @@ def _update_job(job_id: str, **updates: object) -> None:
         _persist_jobs_locked()
 
 
+def _job_failure_keyword(error: object, *, stage: str) -> str:
+    exc = error if isinstance(error, Exception) else RuntimeError(str(error or "unknown error"))
+    hint = _failure_hint_event(exc, stage=stage)
+    return str(hint.get("keyword") or "runtime_failure")
+
+
 def _active_child_job_count_locked() -> int:
+    _mark_stale_jobs_locked()
     return sum(
         1
         for job in BACKGROUND_JOBS.values()
@@ -421,7 +651,7 @@ def _run_isolated_child_job_chat(prompt: str, job: dict) -> dict:
             except Exception as exc:
                 tool_parts.append(f"[web_search] 失败: {exc}")
         elif skill_name == "web_fetch":
-            url_match = re.search(r'https?://[^\s）+）"]+', prompt)
+            url_match = re.search(r'https?://[^\s）)>"\'<\]]+', prompt)
             if url_match:
                 target_url = url_match.group(0).rstrip(".。，,;；")
                 try:
@@ -480,8 +710,26 @@ def _run_job_chat_with_tools(prompt: str, job_id: str) -> dict:
 
     # ── 1. Memory retrieval (conservative mode, limit 5) ──
     try:
+        from core.experts import active_expert, expert_memory_tags, format_expert_block
         from memory.retrieve import for_context, format_for_prompt
-        core, related = for_context(prompt, limit=5, intent=intent_info.get("intent", ""))
+
+        expert = active_expert(config)
+        expert_block = format_expert_block(expert)
+        if expert_block:
+            system_context.append(expert_block)
+
+        retrieval_kwargs = {
+            "limit": 5,
+            "intent": intent_info.get("intent", ""),
+            "tag_hints": expert_memory_tags(expert) or None,
+        }
+        try:
+            core, related = for_context(prompt, **retrieval_kwargs)
+        except TypeError as exc:
+            if "tag_hints" not in str(exc):
+                raise
+            retrieval_kwargs.pop("tag_hints", None)
+            core, related = for_context(prompt, **retrieval_kwargs)
         mem_ctx = format_for_prompt(core, related)
         if mem_ctx:
             system_context.append(
@@ -504,7 +752,7 @@ def _run_job_chat_with_tools(prompt: str, job_id: str) -> dict:
             tool_parts.append(f"[web_search] 失败: {exc}")
 
     if "web_fetch" in selected_skills:
-        url_match = __import__("re").search(r'https?://[^\s）+）"]+', prompt)
+        url_match = __import__("re").search(r'https?://[^\s）)>"\'<\]]+', prompt)
         if url_match:
             target_url = url_match.group(0).rstrip('.。，,;；')
             try:
@@ -543,23 +791,79 @@ def _run_job(job_id: str) -> None:
         return
     _update_job(job_id, status="running")
     result_holder: dict[str, object] = {}
+    cancel_flag = {"cancelled": False}  # 共享标志，超时后置 True，_execute_chat 内部检查
 
     def _execute_chat() -> None:
         try:
+            if cancel_flag["cancelled"]:
+                return  # 超时后不再发起 LLM 调用，避免泄漏 API 配额
             prompt = str(job.get("prompt", ""))
             response = _run_job_chat_with_tools(prompt, job_id)
+            if cancel_flag["cancelled"]:
+                return  # LLM 返回后再次检查，避免向已超时任务写入结果
             result_holder["ok"] = True
             result_holder["text"] = str(response.get("text", "")).strip()
         except Exception as exc:
-            result_holder["ok"] = False
-            result_holder["error"] = str(exc)
+            if not cancel_flag["cancelled"]:
+                result_holder["ok"] = False
+                result_holder["error"] = str(exc)
+
+    def _execute_vault_reflection() -> None:
+        """后台执行 vault_reflection，不走 LLM 对话链路。"""
+        try:
+            if cancel_flag["cancelled"]:
+                return
+            from workflows.vault_reflection import reflect_on_recent, reflect_on_note
+            args = job.get("vaultArgs") or {}
+            progress_log: list[dict] = []
+            def _on_progress(p: dict) -> None:
+                progress_log.append(p)
+                # 实时更新 job 的 progress 字段，供前端轮询
+                try:
+                    with BACKGROUND_JOB_LOCK:
+                        j = BACKGROUND_JOBS.get(job_id)
+                        if j and j.get("status") == "running":
+                            j["progress"] = progress_log.copy()
+                            j["updatedAt"] = datetime.now().isoformat()
+                            _persist_jobs_locked()
+                except Exception:
+                    pass
+            if args.get("note_path"):
+                result = reflect_on_note(
+                    str(args["note_path"]),
+                    force=bool(args.get("force", False)),
+                )
+            else:
+                result = reflect_on_recent(
+                    days=int(args.get("days", 7)),
+                    max_notes=int(args.get("maxNotes", 5)),
+                    force=bool(args.get("force", False)),
+                    progress_callback=_on_progress,
+                )
+            if cancel_flag["cancelled"]:
+                return
+            result_holder["ok"] = bool(result.get("ok"))
+            result_holder["text"] = json.dumps(result, ensure_ascii=False)
+        except Exception as exc:
+            if not cancel_flag["cancelled"]:
+                result_holder["ok"] = False
+                result_holder["error"] = str(exc)
+
+    # 按 kind 分派
+    job_kind = str(job.get("kind", ""))
+    if job_kind == "vault_reflection":
+        execute_fn = _execute_vault_reflection
+    else:
+        execute_fn = _execute_chat
 
     timeout_seconds = _clean_job_timeout(job.get("timeoutSeconds"))
-    chat_thread = threading.Thread(target=_execute_chat, daemon=True)
+    chat_thread = threading.Thread(target=execute_fn, daemon=True)
     chat_thread.start()
     chat_thread.join(timeout=timeout_seconds)
 
     if chat_thread.is_alive():
+        # 超时：设置取消标志，通知 _execute_chat 不再写入结果
+        cancel_flag["cancelled"] = True
         with BACKGROUND_JOB_LOCK:
             current_status = str(BACKGROUND_JOBS.get(job_id, {}).get("status", ""))
         if current_status == "cancelled":
@@ -569,6 +873,7 @@ def _run_job(job_id: str) -> None:
             status="failed",
             result="",
             error=f"job timed out after {timeout_seconds}s",
+            failureKeyword="command_timeout",
         )
         return
 
@@ -580,13 +885,26 @@ def _run_job(job_id: str) -> None:
         if result_holder.get("ok") is True:
             _update_job(job_id, status="complete", result=str(result_holder.get("text", "")))
         else:
-            _update_job(job_id, status="failed", result="", error=str(result_holder.get("error", "unknown error")))
+            error = str(result_holder.get("error", "unknown error"))
+            _update_job(
+                job_id,
+                status="failed",
+                result="",
+                error=error,
+                failureKeyword=_job_failure_keyword(error, stage="background_job"),
+            )
     except Exception as exc:
         with BACKGROUND_JOB_LOCK:
             current_status = str(BACKGROUND_JOBS.get(job_id, {}).get("status", ""))
         if current_status == "cancelled":
             return
-        _update_job(job_id, status="failed", result="", error=str(exc))
+        _update_job(
+            job_id,
+            status="failed",
+            result="",
+            error=str(exc),
+            failureKeyword=_job_failure_keyword(exc, stage="background_job"),
+        )
 
     parent_id = job.get("parentJobId")
     if parent_id:
@@ -651,6 +969,7 @@ def _approve_job_tool(job_id: str, payload: dict) -> dict:
     if decision not in ("approved", "denied"):
         return {"ok": False, "error": "decision must be approved or denied", "id": job_id}
 
+    # 锁内：读取 pending_tool 并标记为 running，避免长时间持锁阻塞其他任务操作
     with BACKGROUND_JOB_LOCK:
         _load_jobs_locked()
         job = BACKGROUND_JOBS.get(job_id)
@@ -672,44 +991,61 @@ def _approve_job_tool(job_id: str, payload: dict) -> dict:
             _persist_jobs_locked()
             return {"ok": True, "job": dict(job), "message": "tool denied, job marked failed"}
 
-        # Approved: execute the tool
+        # Approved: 标记为 running，锁外执行工具
         tool_name = str(pending_tool.get("toolName", ""))
         draft = pending_tool.get("draft") or {}
-        try:
-            if tool_name == "shell.execute":
-                from terminal.api._tools import _execute_shell_command
-                output = _execute_shell_command(draft)
-                job["result"] = f"[shell] {output[:500]}"
-            elif tool_name == "obsidian_write":
-                from terminal.api._tools import _append_obsidian_draft
-                target = _append_obsidian_draft(draft)
-                job["result"] = f"[obsidian_write] 已写入: {target}"
-            elif tool_name == "github":
-                from terminal.api._tools import _execute_github_operation
-                output = _execute_github_operation(draft)
-                job["result"] = f"[github] {output[:500]}"
-            elif tool_name == "hugo_blog":
-                # For hugo_blog, execute deploy action
-                action = str((draft.get("args") or {}).get("action", ""))
-                if action == "deploy":
-                    from skills.hugo_blog import run as hugo_blog_run
-                    output = hugo_blog_run(draft.get("args") or {})
-                    job["result"] = f"[hugo_blog] {str(output)[:500]}"
-                else:
-                    job["result"] = f"[hugo_blog] action={action} approved, check tool output"
-            elif tool_name == "file_ops":
-                # file_ops: write or create file
-                from skills.file_ops import run as file_ops_run
-                output = file_ops_run(draft.get("args") or {})
-                job["result"] = f"[file_ops] {str(output)[:500]}"
+        job["status"] = "running"
+        job["updatedAt"] = datetime.now().isoformat()
+        _persist_jobs_locked()
+
+    # 锁外执行工具：避免 shell/GitHub/Hugo/文件操作长时间阻塞 BACKGROUND_JOB_LOCK
+    result_text = ""
+    error_text = ""
+    try:
+        if tool_name == "shell.execute":
+            from terminal.api._tools import _execute_shell_command
+            output = _execute_shell_command(draft)
+            result_text = f"[shell] {output[:500]}"
+        elif tool_name == "obsidian_write":
+            from terminal.api._tools import _append_obsidian_draft
+            target = _append_obsidian_draft(draft)
+            result_text = f"[obsidian_write] 已写入: {target}"
+        elif tool_name == "github":
+            from terminal.api._tools import _execute_github_operation
+            output = _execute_github_operation(draft)
+            result_text = f"[github] {output[:500]}"
+        elif tool_name == "hugo_blog":
+            # For hugo_blog, execute deploy action
+            action = str((draft.get("args") or {}).get("action", ""))
+            if action == "deploy":
+                from skills.hugo_blog import run as hugo_blog_run
+                output = hugo_blog_run(draft.get("args") or {})
+                result_text = f"[hugo_blog] {str(output)[:500]}"
             else:
-                job["result"] = f"[{tool_name}] tool approved (no auto-executor for this tool type)"
-            job["status"] = "complete"
-        except Exception as exc:
+                result_text = f"[hugo_blog] action={action} approved, check tool output"
+        elif tool_name == "file_ops":
+            # file_ops: write or create file
+            from skills.file_ops import run as file_ops_run
+            output = file_ops_run(draft.get("args") or {})
+            result_text = f"[file_ops] {str(output)[:500]}"
+        else:
+            result_text = f"[{tool_name}] tool approved (no auto-executor for this tool type)"
+    except Exception as exc:
+        error_text = f"tool execution failed: {exc}"
+
+    # 锁内：更新最终结果
+    with BACKGROUND_JOB_LOCK:
+        job = BACKGROUND_JOBS.get(job_id)
+        if job is None:
+            # 任务在执行期间被取消/删除
+            return {"ok": False, "error": "job_not_found", "id": job_id}
+        if error_text:
             job["status"] = "failed"
             job["result"] = ""
-            job["error"] = f"tool execution failed: {exc}"
-
+            job["error"] = error_text
+        else:
+            job["status"] = "complete"
+            job["result"] = result_text
         job.pop("pendingTool", None)
         job["updatedAt"] = datetime.now().isoformat()
         _persist_jobs_locked()
@@ -813,6 +1149,7 @@ def _memory(limit: int = 50, include_rejected: bool = False) -> list[dict]:
             "content": item.get("content", ""),
             "confidence": f"{float(item.get('confidence') or 0):.2f}",
             "source": item.get("source", ""),
+            "sessionId": item.get("session_id", "") or "",
             "depth": int(item.get("depth") or item.get("importance") or 3),
             "blockType": item.get("block_type", "insight"),
             "label": item.get("label", ""),
@@ -841,6 +1178,174 @@ def _resolve_pending_memory(memory_id: str, accepted: bool) -> dict:
         return {"ok": True, "id": int(memory_id), "accepted": True, "writtenIds": written_ids}
     deleted = reject_pending(int(memory_id))
     return {"ok": bool(deleted), "id": int(memory_id), "accepted": False, "deleted": deleted}
+
+
+def _hypotheses(limit: int = 50, status: str = "active") -> dict:
+    from memory.hypothesis_tracker import list_hypotheses
+    from memory.store import init_db
+
+    init_db()
+    return {"ok": True, "hypotheses": list_hypotheses(status=status, limit=limit)}
+
+
+def _create_hypothesis(payload: dict) -> dict:
+    from memory.hypothesis_tracker import create_hypothesis, get_hypothesis
+    from memory.store import init_db
+
+    init_db()
+    title = str(payload.get("title", "") or "").strip()
+    statement = str(payload.get("statement", "") or "").strip()
+    if not title:
+        raise ValueError("title is required")
+    if not statement:
+        raise ValueError("statement is required")
+
+    hypothesis_id = create_hypothesis(
+        title,
+        statement,
+        source="manual",
+        trigger_type=str(payload.get("triggerType", "") or "").strip(),
+        confidence=payload.get("confidence", 0.7),
+        validate_after_days=payload.get("validateAfterDays", 14),
+        session_id=str(payload.get("sessionId", "") or "").strip() or None,
+    )
+    return {"ok": True, "id": hypothesis_id, "hypothesis": get_hypothesis(hypothesis_id)}
+
+
+def _import_obsidian_hypotheses(payload: dict, cfg: dict) -> dict:
+    from memory.hypothesis_tracker import import_hypotheses_from_obsidian
+    from memory.store import init_db
+
+    init_db()
+    vault_path = cfg.get("obsidian", {}).get("vault_path", "")
+    return import_hypotheses_from_obsidian(
+        vault_path,
+        days=payload.get("days", 30),
+        validate_after_days=payload.get("validateAfterDays", 14),
+        limit=payload.get("limit", 20),
+    )
+
+
+def _vault_reflection(payload: dict) -> dict:
+    """触发 Vault Bridge 笔记结晶（Phase 2）。
+
+    支持两种模式：
+    - path: 对单篇笔记做结晶
+    - days: 扫描最近 N 天修改的笔记批量结晶
+
+    当 background=true 时，创建 kind=vault_reflection 的后台 job，立即返回 jobId。
+    """
+    note_path = (payload.get("path") or "").strip()
+    days = payload.get("days")
+    force = bool(payload.get("force", False))
+    background = bool(payload.get("background", False))
+
+    if background:
+        # 后台 job 化：把参数打包进 vaultArgs，由 _run_job 分派到 _execute_vault_reflection
+        vault_args: dict = {"force": force}
+        if note_path:
+            vault_args["note_path"] = note_path
+            title = f"Vault 结晶：{Path(note_path).name}"
+        elif days is not None:
+            try:
+                days_int = int(days)
+            except (TypeError, ValueError):
+                days_int = 7
+            try:
+                max_notes = int(payload.get("maxNotes", 5))
+            except (TypeError, ValueError):
+                max_notes = 5
+            vault_args["days"] = days_int
+            vault_args["maxNotes"] = max_notes
+            title = f"Vault 结晶：最近 {days_int} 天"
+        else:
+            return {"ok": False, "error": "需要 path（单篇笔记）或 days（扫描最近 N 天）参数"}
+
+        create_payload = {
+            "title": title,
+            "kind": "vault_reflection",
+            "prompt": title,  # prompt 必填，vault_reflection 不使用但需通过校验
+            "vaultArgs": vault_args,
+            "timeoutSeconds": int(payload.get("timeoutSeconds", 600)),
+        }
+        created = _create_job(create_payload)
+        return {"ok": True, "background": True, "job": created.get("job", {})}
+
+    # 同步执行
+    from workflows.vault_reflection import reflect_on_note, reflect_on_recent
+
+    if note_path:
+        result = reflect_on_note(note_path, force=force)
+    elif days is not None:
+        try:
+            days_int = int(days)
+        except (TypeError, ValueError):
+            days_int = 7
+        try:
+            max_notes = int(payload.get("maxNotes", 5))
+        except (TypeError, ValueError):
+            max_notes = 5
+        # 进度回调：记录到日志，便于排查长时间阻塞
+        progress_log: list[dict] = []
+        def _on_progress(p: dict) -> None:
+            progress_log.append(p)
+            print(f"[vault_reflection] {p['done']}/{p['total']} {p['note_path']} ok={p['ok']}")
+        result = reflect_on_recent(
+            days=days_int, max_notes=max_notes, force=force,
+            progress_callback=_on_progress,
+        )
+        result["progress"] = progress_log
+    else:
+        return {"ok": False, "error": "需要 path（单篇笔记）或 days（扫描最近 N 天）参数"}
+
+    return result
+
+
+def _list_recent_reflections(limit: int = 20) -> dict:
+    """返回最近的 vault_reflection 结晶记录。"""
+    from workflows.vault_reflection import list_recent_reflections
+
+    return {"ok": True, "reflections": list_recent_reflections(limit)}
+
+
+def _vault_refresh_index(force: bool = False) -> dict:
+    """刷新 vault 笔记索引。"""
+    from knowledge.vault_sensor import refresh_index
+
+    return refresh_index(force=force)
+
+
+def _vault_current_focus(detect: bool = False) -> dict:
+    """获取/检测当前 focus 的笔记。
+
+    detect=True 时主动调用 detect_current_focus()；
+    否则返回上次缓存的 focus 状态。
+    """
+    from knowledge.vault_sensor import get_current_focus, detect_current_focus
+
+    if detect:
+        return detect_current_focus()
+    return get_current_focus()
+
+
+def _sensor_obsidian_focus(payload: dict) -> dict:
+    """Receive an explicit focus event from an Obsidian sensor/plugin."""
+    from knowledge.vault_sensor import ingest_focus_event
+
+    return ingest_focus_event(payload)
+
+
+def _sensors_status() -> dict:
+    from knowledge.vault_sensor import get_current_focus
+
+    return {"ok": True, "obsidian": get_current_focus()}
+
+
+def _vault_search_index(keyword: str = "", limit: int = 20) -> dict:
+    """从索引搜索笔记（不读文件）。"""
+    from knowledge.vault_sensor import search_indexed_notes
+
+    return {"ok": True, "notes": search_indexed_notes(keyword=keyword, limit=limit)}
 
 
 def _batch_resolve_pending(accepted: bool) -> dict:
@@ -983,7 +1488,7 @@ def _mode_label_from_file(path: Path, fallback: str) -> str:
         first_line = path.read_text(encoding="utf-8").splitlines()[0].strip()
     except Exception:
         return fallback
-    match = re.search(r"[模式：:]\s*([^\\]）\]]+)", first_line)
+    match = re.search(r"[模式：:]\s*([^）\]]+)", first_line)
     return match.group(1).strip() if match else fallback
 
 
@@ -995,13 +1500,24 @@ def _available_modes(cfg: dict) -> dict:
     default = persona.get("default_mode", "listener")
     raw_modes = persona.get("modes", {})
     toml_modes = raw_modes if isinstance(raw_modes, dict) else {}
-    modes_dir = Path(str(persona.get("modes_dir", ""))).expanduser()
+    modes_dir_raw = str(persona.get("modes_dir", "") or "").strip()
+    modes_dir = Path(modes_dir_raw).expanduser() if modes_dir_raw else None
+    try:
+        from core.orchestrator import _MODE_LABELS, _VALID_MODES
+    except Exception:
+        _VALID_MODES = {
+            "coach", "mirror", "listener", "questioner", "philosopher", "writer",
+            "therapist", "witness", "ritualist", "critic", "builder", "operator",
+        }
+        _MODE_LABELS = {mode: mode for mode in _VALID_MODES}
 
     items: list[dict] = []
     seen: set[str] = set()
-    if modes_dir.is_dir():
+    if modes_dir and modes_dir.is_dir():
         for path in sorted(modes_dir.glob("*.md")):
             mode_id = path.stem
+            if mode_id not in _VALID_MODES and mode_id not in toml_modes:
+                continue
             seen.add(mode_id)
             items.append({
                 "id": mode_id,
@@ -1013,6 +1529,7 @@ def _available_modes(cfg: dict) -> dict:
     for mode_id, meta in sorted(toml_modes.items()):
         if mode_id in seen:
             continue
+        seen.add(mode_id)
         label = meta.get("name", mode_id) if isinstance(meta, dict) else mode_id
         items.append({
             "id": mode_id,
@@ -1021,35 +1538,141 @@ def _available_modes(cfg: dict) -> dict:
             "active": (not mode_auto) and mode_id == locked,
         })
 
+    for mode_id in sorted(_VALID_MODES):
+        if mode_id in seen:
+            continue
+        items.append({
+            "id": mode_id,
+            "label": _MODE_LABELS.get(mode_id, mode_id),
+            "source": "builtin",
+            "active": (not mode_auto) and mode_id == locked,
+        })
+
     return {"current": current, "default": default, "modes": items, "modeAuto": mode_auto}
 
 
 def _persist_current_mode(mode: str) -> None:
-    text = CONFIG_PATH.read_text(encoding="utf-8")
-    new_line = f'current_mode = "{mode}"'
-    if re.search(r'^current_mode\s*=', text, re.MULTILINE):
-        text = re.sub(r'^current_mode\s*=.*$', new_line, text, flags=re.MULTILINE)
-    elif re.search(r'^default_mode\s*=', text, re.MULTILINE):
-        text = re.sub(r'^(default_mode\s*=.*)$', rf'\1\n{new_line}', text, flags=re.MULTILINE)
-    elif "[persona]" in text:
-        text = re.sub(r'^\[persona\]\s*$', f"[persona]\n{new_line}", text, count=1, flags=re.MULTILINE)
-    else:
-        text = text.rstrip() + f'\n\n[persona]\n{new_line}\n'
-    CONFIG_PATH.write_text(text, encoding="utf-8")
+    def _mutate(text: str) -> str:
+        new_line = f'current_mode = "{mode}"'
+        if re.search(r'^current_mode\s*=', text, re.MULTILINE):
+            return re.sub(r'^current_mode\s*=.*$', new_line, text, flags=re.MULTILINE)
+        if re.search(r'^default_mode\s*=', text, re.MULTILINE):
+            return re.sub(r'^(default_mode\s*=.*)$', rf'\1\n{new_line}', text, flags=re.MULTILINE)
+        if "[persona]" in text:
+            return re.sub(r'^\[persona\]\s*$', f"[persona]\n{new_line}", text, count=1, flags=re.MULTILINE)
+        return text.rstrip() + f'\n\n[persona]\n{new_line}\n'
+
+    mutate_config_text(_mutate)
 
 
 def _persist_mode_auto(flag: bool) -> None:
-    text = CONFIG_PATH.read_text(encoding="utf-8")
-    new_line = f'mode_auto = {"true" if flag else "false"}'
-    if re.search(r'^mode_auto\s*=', text, re.MULTILINE):
-        text = re.sub(r'^mode_auto\s*=.*$', new_line, text, flags=re.MULTILINE)
-    elif re.search(r'^default_mode\s*=', text, re.MULTILINE):
-        text = re.sub(r'^(default_mode\s*=.*)$', rf'\1\n{new_line}', text, flags=re.MULTILINE)
-    elif "[persona]" in text:
-        text = re.sub(r'^\[persona\]\s*$', f"[persona]\n{new_line}", text, count=1, flags=re.MULTILINE)
-    else:
-        text = text.rstrip() + f'\n\n[persona]\n{new_line}\n'
-    CONFIG_PATH.write_text(text, encoding="utf-8")
+    def _mutate(text: str) -> str:
+        new_line = f'mode_auto = {"true" if flag else "false"}'
+        if re.search(r'^mode_auto\s*=', text, re.MULTILINE):
+            return re.sub(r'^mode_auto\s*=.*$', new_line, text, flags=re.MULTILINE)
+        if re.search(r'^default_mode\s*=', text, re.MULTILINE):
+            return re.sub(r'^(default_mode\s*=.*)$', rf'\1\n{new_line}', text, flags=re.MULTILINE)
+        if "[persona]" in text:
+            return re.sub(r'^\[persona\]\s*$', f"[persona]\n{new_line}", text, count=1, flags=re.MULTILINE)
+        return text.rstrip() + f'\n\n[persona]\n{new_line}\n'
+
+    mutate_config_text(_mutate)
+
+
+def _persist_current_expert(expert_id: str) -> None:
+    def _mutate(text: str) -> str:
+        new_line = f'current_expert = "{expert_id}"'
+        if re.search(r"^current_expert\s*=", text, re.MULTILINE):
+            return re.sub(r"^current_expert\s*=.*$", new_line, text, flags=re.MULTILINE)
+        if re.search(r"^default_mode\s*=", text, re.MULTILINE):
+            return re.sub(r"^(default_mode\s*=.*)$", rf"\1\n{new_line}", text, flags=re.MULTILINE)
+        if "[persona]" in text:
+            return re.sub(r"^\[persona\]\s*$", f"[persona]\n{new_line}", text, count=1, flags=re.MULTILINE)
+        return text.rstrip() + f"\n\n[persona]\n{new_line}\n"
+
+    mutate_config_text(_mutate)
+
+
+def _persist_active_profile(profile_id: str) -> None:
+    def _mutate(text: str) -> str:
+        new_line = f'active_profile = "{profile_id}"'
+        if re.search(r"^active_profile\s*=", text, re.MULTILINE):
+            return re.sub(r"^active_profile\s*=.*$", new_line, text, flags=re.MULTILINE)
+        if re.search(r"^model\s*=", text, re.MULTILINE):
+            return re.sub(r"^(model\s*=.*)$", rf"\1\n{new_line}", text, flags=re.MULTILINE, count=1)
+        if "[api]" in text:
+            return re.sub(r"^\[api\]\s*$", f"[api]\n{new_line}", text, count=1, flags=re.MULTILINE)
+        return text.rstrip() + f"\n\n[api]\n{new_line}\n"
+
+    mutate_config_text(_mutate)
+
+
+def _expert_catalog_items(cfg: dict) -> list[dict]:
+    from core.experts import (
+        BUILTIN_EXPERT_IDS,
+        expert_ids,
+        expert_model_configured,
+        expert_model_profile_id,
+        expert_skill_allowlist,
+        expert_starters,
+        experts,
+    )
+
+    catalog = experts(cfg)
+    items = []
+    for expert_id in expert_ids(cfg):
+        expert = catalog[expert_id]
+        allowlist = expert_skill_allowlist(expert)
+        source = str(expert.get("source", "builtin") or "builtin")
+        items.append({
+            "id": expert_id,
+            "label": str(expert.get("label", expert_id)),
+            "note": str(expert.get("note", "")),
+            "modelProfile": expert_model_profile_id(expert),
+            "skillCount": len(allowlist) if allowlist else 0,
+            "configured": True,
+            "modelConfigured": expert_model_configured(cfg, expert),
+            "starters": expert_starters(expert),
+            "source": source,
+            "custom": expert_id not in BUILTIN_EXPERT_IDS,
+        })
+    return items
+
+
+def _available_experts(cfg: dict) -> dict:
+    from core.experts import active_expert_id
+
+    return {"current": active_expert_id(cfg), "experts": _expert_catalog_items(cfg)}
+
+
+def _switch_current_expert(payload: dict, cfg: dict) -> dict:
+    from core.experts import (
+        active_expert_id,
+        expert_ids,
+        expert_model_profile_id,
+        experts,
+    )
+
+    expert_id = str(payload.get("expert", "")).strip()
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", expert_id):
+        raise ValueError("expert must be a short identifier")
+    if expert_id not in expert_ids(cfg):
+        raise ValueError(f"unknown expert: {expert_id}")
+
+    catalog = experts(cfg)
+    expert = catalog[expert_id]
+    model_profile = expert_model_profile_id(expert)
+
+    _persist_current_expert(expert_id)
+    label = str(expert.get("label", expert_id))
+    return {
+        "ok": True,
+        "current": expert_id,
+        "label": label,
+        "modelProfile": model_profile,
+        "recommendedModelProfile": model_profile,
+        "previous": active_expert_id(cfg),
+    }
 
 
 def _switch_current_mode(payload: dict, cfg: dict) -> dict:
@@ -1100,6 +1723,10 @@ def _soul_profile_summary(cfg: dict) -> dict:
         "life_themes",
         "creative_identity",
         "current_life_stage",
+        "rhythm",
+        "narrative",
+        "tensions",
+        "patterns",
     ]
     sections = [
         {
@@ -1149,11 +1776,29 @@ def _journal_review(cfg: dict, days: int) -> dict:
 
 
 def _settings(cfg: dict) -> dict:
-    api = cfg.get("api", {})
+    from core.experts import active_expert_id
+    from core.model_profiles import active_api_config, active_model_profile_id, model_profiles
+    api = active_api_config(cfg)
+    profiles = model_profiles(cfg)
     memory = cfg.get("memory", {})
     paths = cfg.get("paths", {})
     return {
-        "provider": "OpenAI-compatible",
+        "activeProfile": active_model_profile_id(cfg),
+        "activeExpert": active_expert_id(cfg),
+        "experts": _expert_catalog_items(cfg),
+        "modelProfiles": [
+            {
+                "id": profile_id,
+                "label": str(profile.get("label", profile_id)),
+                "provider": str(profile.get("provider", "")),
+                "baseUrl": str(profile.get("base_url", "")),
+                "model": str(profile.get("model", "")),
+                "apiKeyPreview": _mask_key(str(profile.get("api_key", ""))),
+                "configured": bool(profile.get("base_url") and profile.get("model") and profile.get("api_key")),
+            }
+            for profile_id, profile in profiles.items()
+        ],
+        "provider": api.get("provider", "OpenAI-compatible"),
         "baseUrl": api.get("base_url", ""),
         "model": api.get("model", ""),
         "apiKeyPreview": _mask_key(api.get("api_key", "")),
@@ -1185,9 +1830,15 @@ def _validate_settings_draft(payload: dict) -> dict:
     base_url = allowed.get("baseUrl", "")
     if base_url and not re.fullmatch(r"https?://[^\s]+", base_url):
         errors.append("baseUrl must start with http:// or https://")
+    active_profile = allowed.get("activeProfile", "")
+    if active_profile and active_profile not in ("lite", "pro", "max"):
+        errors.append("activeProfile must be lite, pro, or max")
     model = allowed.get("model", "")
     if model and not re.fullmatch(r"[A-Za-z0-9._:/@+-]{1,160}", model):
         errors.append("model contains unsupported characters")
+    api_key = allowed.get("apiKey", "")
+    if api_key and ("\n" in api_key or "\r" in api_key):
+        errors.append("apiKey must be a single line")
     for key in ("configPath", "memoryDbPath", "sessionsPath"):
         value = allowed.get(key, "")
         if "\x00" in value:
@@ -1226,15 +1877,28 @@ def _save_settings_draft(payload: dict) -> dict:
         cfg = _load_config()
         if "api" not in cfg:
             cfg["api"] = {}
+        if not isinstance(cfg.get("model_profiles"), dict):
+            cfg["model_profiles"] = {}
         if "memory" not in cfg:
             cfg["memory"] = {}
         if "paths" not in cfg:
             cfg["paths"] = {}
+        active_profile = draft.get("activeProfile", cfg["api"].get("active_profile", "lite")) or "lite"
+        cfg["api"]["active_profile"] = active_profile
+        profile_cfg = cfg["model_profiles"].setdefault(active_profile, {})
+        profile_cfg["provider"] = draft.get("provider", profile_cfg.get("provider", ""))
+        profile_cfg["base_url"] = draft.get("baseUrl", profile_cfg.get("base_url", ""))
+        profile_cfg["model"] = draft.get("model", profile_cfg.get("model", ""))
+        api_key = str(draft.get("apiKey", "") or "").strip()
+        if api_key:
+            profile_cfg["api_key"] = api_key
         cfg["api"]["base_url"] = draft.get("baseUrl", cfg["api"].get("base_url", ""))
         cfg["api"]["model"] = draft.get("model", cfg["api"].get("model", ""))
+        if api_key:
+            cfg["api"]["api_key"] = api_key
         cfg["memory"]["db_path"] = draft.get("memoryDbPath", cfg["memory"].get("db_path", ""))
         cfg["paths"]["sessions_dir"] = draft.get("sessionsPath", cfg["paths"].get("sessions_dir", ""))
-        CONFIG_PATH.write_bytes(tomli_w.dumps(cfg))
+        write_config_text(tomli_w.dumps(cfg))
         try:
             _load_config()
         except Exception as parse_exc:
@@ -1272,6 +1936,288 @@ def _save_settings_draft(payload: dict) -> dict:
                 pass
 
 
+def _save_profile_settings(payload: dict) -> dict:
+    """独立保存单个 model profile 的配置，不影响其他 profile。
+
+    payload 结构：
+    {
+        "profileId": "lite" | "pro" | "max",
+        "provider": "...",
+        "baseUrl": "...",
+        "model": "...",
+        "apiKey": "..."  # 空字符串表示不更新 key
+    }
+    """
+    from core.model_profiles import MODEL_PROFILE_IDS
+
+    profile_id = str(payload.get("profileId", "") or "").strip().lower()
+    if profile_id not in MODEL_PROFILE_IDS:
+        return {"ok": False, "error": f"无效的 profileId: {profile_id}"}
+
+    backup_path = CONFIG_PATH.with_suffix(".toml.bak")
+    if CONFIG_PATH.exists():
+        backup_path.write_bytes(CONFIG_PATH.read_bytes())
+    try:
+        cfg = _load_config()
+        if not isinstance(cfg.get("model_profiles"), dict):
+            cfg["model_profiles"] = {}
+        profile_cfg = cfg["model_profiles"].setdefault(profile_id, {})
+
+        # 只更新非空字段，空字段保留原值（避免清空已有配置）
+        provider = str(payload.get("provider", "") or "").strip()
+        base_url = str(payload.get("baseUrl", "") or "").strip()
+        model = str(payload.get("model", "") or "").strip()
+        api_key = str(payload.get("apiKey", "") or "").strip()
+
+        if provider:
+            profile_cfg["provider"] = provider
+        if base_url:
+            profile_cfg["base_url"] = base_url
+        if model:
+            profile_cfg["model"] = model
+        if api_key:
+            profile_cfg["api_key"] = api_key
+
+        # 如果保存的是当前 active profile，同步更新 [api] 段
+        active_profile = str(cfg.get("api", {}).get("active_profile", "lite"))
+        if active_profile == profile_id:
+            if base_url:
+                cfg["api"]["base_url"] = base_url
+            if model:
+                cfg["api"]["model"] = model
+            if api_key:
+                cfg["api"]["api_key"] = api_key
+
+        write_config_text(tomli_w.dumps(cfg))
+        try:
+            _load_config()
+        except Exception as parse_exc:
+            if backup_path.exists():
+                CONFIG_PATH.write_bytes(backup_path.read_bytes())
+            return {
+                "ok": False,
+                "error": f"写入后配置文件损坏：{parse_exc}，已回滚",
+            }
+        return {
+            "ok": True,
+            "profileId": profile_id,
+            "message": f"已保存 {profile_id} 配置",
+        }
+    except Exception as exc:
+        if backup_path.exists():
+            CONFIG_PATH.write_bytes(backup_path.read_bytes())
+        return {"ok": False, "error": f"保存失败：{exc}，已回滚"}
+    finally:
+        if backup_path.exists() and CONFIG_PATH.exists():
+            try:
+                if backup_path.read_bytes() == CONFIG_PATH.read_bytes():
+                    backup_path.unlink()
+            except Exception:
+                pass
+
+
+def _switch_active_profile(payload: dict) -> dict:
+    """只切换 active_profile，不修改任何 profile 的配置。
+
+    会从目标 profile 同步 base_url/model/api_key 到 [api] 段（仅当 profile 中存在该字段时），
+    确保 legacy 代码读取 [api] 段时拿到的是新 profile 的配置。
+    不会删除或覆盖任何 [model_profiles.*] 段的内容。
+    """
+    from core.model_profiles import MODEL_PROFILE_IDS, model_profiles
+
+    profile_id = str(payload.get("profileId", "") or "").strip().lower()
+    if profile_id not in MODEL_PROFILE_IDS:
+        return {"ok": False, "error": f"无效的 profileId: {profile_id}"}
+
+    backup_path = CONFIG_PATH.with_suffix(".toml.bak")
+    if CONFIG_PATH.exists():
+        backup_path.write_bytes(CONFIG_PATH.read_bytes())
+    try:
+        cfg = _load_config()
+        if "api" not in cfg or not isinstance(cfg.get("api"), dict):
+            cfg["api"] = {}
+        cfg["api"]["active_profile"] = profile_id
+
+        # 从已解析的 profile 同步字段到 [api] 段（仅当 profile 有该字段且非空时）
+        profiles = model_profiles(cfg)
+        target = profiles.get(profile_id, {})
+        for key in ("provider", "base_url", "model", "api_key", "vision_model"):
+            val = target.get(key)
+            if val not in ("", None):
+                cfg["api"][key] = val
+
+        write_config_text(tomli_w.dumps(cfg))
+        try:
+            _load_config()
+        except Exception as parse_exc:
+            if backup_path.exists():
+                CONFIG_PATH.write_bytes(backup_path.read_bytes())
+            return {"ok": False, "error": f"写入后配置文件损坏：{parse_exc}，已回滚"}
+        return {
+            "ok": True,
+            "profileId": profile_id,
+            "activeProfile": profile_id,
+            "message": f"已切换到 {profile_id}",
+        }
+    except Exception as exc:
+        if backup_path.exists():
+            CONFIG_PATH.write_bytes(backup_path.read_bytes())
+        return {"ok": False, "error": f"切换失败：{exc}，已回滚"}
+    finally:
+        if backup_path.exists() and CONFIG_PATH.exists():
+            try:
+                if backup_path.read_bytes() == CONFIG_PATH.read_bytes():
+                    backup_path.unlink()
+            except Exception:
+                pass
+
+
+def _model_test_config_from_draft(payload: dict, cfg: dict) -> dict:
+    from core.model_profiles import active_api_config, active_model_profile_id, cfg_with_active_api
+
+    draft = payload.get("settings")
+    if not isinstance(draft, dict):
+        raise ValueError("settings must be an object")
+    validation = _validate_settings_draft(payload)
+    if not validation["ok"]:
+        return {"ok": False, "errors": validation["errors"]}
+
+    test_cfg = dict(cfg)
+    api = dict(test_cfg.get("api", {}) if isinstance(test_cfg.get("api"), dict) else {})
+    active_profile = str(draft.get("activeProfile") or api.get("active_profile") or "lite")
+    api["active_profile"] = active_profile
+    test_cfg["api"] = api
+
+    current_profile = active_model_profile_id(cfg)
+    current_api = active_api_config(cfg)
+    profiles = dict(test_cfg.get("model_profiles", {}) if isinstance(test_cfg.get("model_profiles"), dict) else {})
+    profile = dict(profiles.get(active_profile, {}) if isinstance(profiles.get(active_profile), dict) else {})
+    draft_profiles = draft.get("modelProfiles")
+    if isinstance(draft_profiles, list):
+        for item in draft_profiles:
+            if not isinstance(item, dict) or str(item.get("id", "")).strip().lower() != active_profile:
+                continue
+            for draft_key, profile_key in (("provider", "provider"), ("baseUrl", "base_url"), ("model", "model")):
+                value = str(item.get(draft_key, "") or "").strip()
+                if value:
+                    profile[profile_key] = value
+            break
+    for draft_key, profile_key in (("provider", "provider"), ("baseUrl", "base_url"), ("model", "model"), ("apiKey", "api_key")):
+        value = str(draft.get(draft_key, "") or "").strip()
+        if value:
+            if (
+                profile_key != "api_key"
+                and active_profile != current_profile
+                and value == str(current_api.get(profile_key, "") or "").strip()
+            ):
+                continue
+            profile[profile_key] = value
+    profiles[active_profile] = profile
+    test_cfg["model_profiles"] = profiles
+    return cfg_with_active_api(test_cfg)
+
+
+def _test_model_profile(payload: dict, cfg: dict) -> dict:
+    test_cfg = _model_test_config_from_draft(payload, cfg)
+    if test_cfg.get("ok") is False:
+        return {
+            "ok": False,
+            "profile": "",
+            "provider": "",
+            "model": "",
+            "baseUrl": "",
+            "latencyMs": 0,
+            "message": "模型配置校验失败",
+            "errors": test_cfg.get("errors", []),
+        }
+
+    api = test_cfg["api"]
+    profile = str(api.get("active_profile", "lite"))
+    provider = str(api.get("provider", ""))
+    base_url = str(api.get("base_url", ""))
+    model = str(api.get("model", ""))
+    api_key = str(api.get("api_key", ""))
+    missing = [
+        name
+        for name, value in (("baseUrl", base_url), ("model", model), ("apiKey", api_key))
+        if not value
+    ]
+    if missing:
+        return {
+            "ok": False,
+            "profile": profile,
+            "provider": provider,
+            "model": model,
+            "baseUrl": base_url,
+            "latencyMs": 0,
+            "message": f"缺少字段：{', '.join(missing)}",
+            "errors": [f"missing {name}" for name in missing],
+        }
+
+    try:
+        from openai import APIConnectionError, APIStatusError, APITimeoutError, OpenAI
+    except Exception as exc:
+        return {
+            "ok": False,
+            "profile": profile,
+            "provider": provider,
+            "model": model,
+            "baseUrl": base_url,
+            "latencyMs": 0,
+            "message": f"OpenAI SDK 不可用：{exc}",
+            "errors": [str(exc)],
+        }
+
+    started = time.perf_counter()
+    try:
+        client = OpenAI(api_key=api_key, base_url=base_url, timeout=20, max_retries=0)
+        temperature = 1 if "moonshot." in base_url.lower() else 0
+        response = client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": "ping"}],
+            max_tokens=4,
+            temperature=temperature,
+            stream=False,
+        )
+        latency_ms = int((time.perf_counter() - started) * 1000)
+        content = response.choices[0].message.content if response.choices else ""
+        return {
+            "ok": True,
+            "profile": profile,
+            "provider": provider,
+            "model": model,
+            "baseUrl": base_url,
+            "latencyMs": latency_ms,
+            "message": "模型连接测试通过",
+            "sample": (content or "").strip()[:40],
+            "errors": [],
+        }
+    except (APIConnectionError, APITimeoutError, APIStatusError) as exc:
+        latency_ms = int((time.perf_counter() - started) * 1000)
+        return {
+            "ok": False,
+            "profile": profile,
+            "provider": provider,
+            "model": model,
+            "baseUrl": base_url,
+            "latencyMs": latency_ms,
+            "message": f"模型连接测试失败：{exc.__class__.__name__}",
+            "errors": [str(exc)[:500]],
+        }
+    except Exception as exc:
+        latency_ms = int((time.perf_counter() - started) * 1000)
+        return {
+            "ok": False,
+            "profile": profile,
+            "provider": provider,
+            "model": model,
+            "baseUrl": base_url,
+            "latencyMs": latency_ms,
+            "message": "模型连接测试失败",
+            "errors": [str(exc)[:500]],
+        }
+
+
 # ---------------------------------------------------------------------------
 # Status route
 # ---------------------------------------------------------------------------
@@ -1287,12 +2233,18 @@ def _status(cfg: dict) -> dict:
     persona = cfg.get("persona", {})
     mode_auto = persona.get("mode_auto", True) is not False
     mode = "auto" if mode_auto else persona.get("current_mode", persona.get("default_mode", "listener"))
+    from core.experts import active_expert, active_expert_id
     from core.model_select import status_model_label
+    from core.model_profiles import active_model_profile_id
     from core.token_usage import status_payload
     token_limit = int(cfg.get("context", {}).get("token_limit", 1_000_000))
+    expert = active_expert(cfg)
     return {
         "adapter": "local",
         "model": status_model_label(cfg),
+        "modelProfile": active_model_profile_id(cfg),
+        "expertId": active_expert_id(cfg),
+        "expertLabel": str(expert.get("label", "")),
         "mode": mode,
         "memoryCount": confirmed,
         "pendingMemoryCount": pending,
@@ -1321,9 +2273,186 @@ def _proactive_touch(cfg: dict) -> dict:
     }
 
 
+def _initiative_shadow(path: str) -> dict:
+    def _build() -> dict:
+        import memory.store as store
+        from core.initiative_shadow import is_global_throttle_active, list_shadow_logs
+        from core.presence import get_presence_state
+
+        limit_match = re.search(r"(?:\?|&)limit=([0-9]+)", path)
+        try:
+            limit = int(limit_match.group(1)) if limit_match else 20
+        except Exception:
+            limit = 20
+        limit = max(1, min(limit, 100))
+        store.init_db()
+        return {
+            "ok": True,
+            "shadow": True,
+            "delivered": False,
+            "limit": limit,
+            "globalThrottleActive": is_global_throttle_active(store.DB_PATH),
+            "presenceState": get_presence_state(store.DB_PATH),
+            "items": list_shadow_logs(store.DB_PATH, limit=limit),
+        }
+
+    return _safe_initiative_shadow("list", _build)
+
+
+def _initiative_shadow_failure(exc: Exception, *, operation: str) -> dict:
+    hint = _failure_hint_event(exc, stage=f"initiative_shadow.{operation}")
+    return {
+        "ok": False,
+        "shadow": True,
+        "delivered": False,
+        "stage": f"initiative_shadow.{operation}",
+        "error": str(exc) or type(exc).__name__,
+        "failureKeyword": hint.get("keyword", "runtime_failure"),
+        "failureHint": hint,
+    }
+
+
+def _safe_initiative_shadow(operation: str, producer) -> dict:
+    try:
+        return producer()
+    except Exception as exc:
+        return _initiative_shadow_failure(exc, operation=operation)
+
+
+def _initiative_shadow_report() -> dict:
+    def _build() -> dict:
+        import memory.store as store
+        from core.initiative_shadow import list_shadow_logs
+        from core.shadow_validation import evaluate_shadow_validation
+
+        store.init_db()
+        report = evaluate_shadow_validation(list_shadow_logs(store.DB_PATH, limit=100))
+        return {"ok": True, "shadow": True, "report": report.to_dict()}
+
+    return _safe_initiative_shadow("report", _build)
+
+
+def _initiative_shadow_long_term_report() -> dict:
+    def _build() -> dict:
+        import memory.store as store
+        from core.initiative_shadow import list_shadow_logs
+        from core.shadow_validation import evaluate_long_term_validation
+
+        store.init_db()
+        report = evaluate_long_term_validation(list_shadow_logs(store.DB_PATH, limit=500))
+        return {"ok": True, "shadow": True, "report": report.to_dict()}
+
+    return _safe_initiative_shadow("long_term_report", _build)
+
+
+def _initiative_shadow_delivery_gate() -> dict:
+    def _build() -> dict:
+        import memory.store as store
+        from core.delivery_opt_in import get_delivery_opt_in
+        from core.initiative_shadow import list_shadow_logs
+        from core.shadow_validation import evaluate_delivery_gate, evaluate_long_term_validation, evaluate_shadow_validation
+
+        store.init_db()
+        logs = list_shadow_logs(store.DB_PATH, limit=500)
+        manual_report = evaluate_shadow_validation(logs)
+        long_term_report = evaluate_long_term_validation(logs)
+        opt_in = get_delivery_opt_in(store.DB_PATH)
+        gate = evaluate_delivery_gate(manual_report, long_term_report, explicit_opt_in=opt_in.enabled)
+        return {"ok": True, "shadow": True, "optIn": opt_in.to_dict(), "gate": gate.to_dict()}
+
+    return _safe_initiative_shadow("delivery_gate", _build)
+
+
+def _initiative_shadow_review_packet() -> dict:
+    def _build() -> dict:
+        import memory.store as store
+        from core.delivery_opt_in import get_delivery_opt_in
+        from core.initiative_shadow import list_shadow_logs
+        from core.shadow_validation import evaluate_delivery_gate, evaluate_long_term_validation, evaluate_shadow_validation
+
+        store.init_db()
+        logs = list_shadow_logs(store.DB_PATH, limit=500)
+        manual_report = evaluate_shadow_validation(logs)
+        long_term_report = evaluate_long_term_validation(logs)
+        opt_in = get_delivery_opt_in(store.DB_PATH)
+        delivery_gate = evaluate_delivery_gate(manual_report, long_term_report, explicit_opt_in=opt_in.enabled)
+        recommended_action = "manual_opt_in_available" if delivery_gate.can_enable_delivery else "keep_shadow"
+        return {
+            "ok": True,
+            "shadow": True,
+            "optIn": opt_in.to_dict(),
+            "recommendedAction": recommended_action,
+            "manualReport": manual_report.to_dict(),
+            "longTermReport": long_term_report.to_dict(),
+            "deliveryGate": delivery_gate.to_dict(),
+        }
+
+    return _safe_initiative_shadow("review_packet", _build)
+
+
+def _initiative_shadow_feedback(log_id: str, payload: dict) -> tuple[int, dict]:
+    import memory.store as store
+    from core.initiative_shadow import record_shadow_feedback
+
+    feedback = str(payload.get("feedback") or "").strip()
+    if feedback not in {"acknowledged", "too_frequent"}:
+        return 400, {"ok": False, "error": "feedback must be acknowledged or too_frequent"}
+    try:
+        numeric_id = int(log_id)
+    except ValueError:
+        return 400, {"ok": False, "error": "invalid initiative id"}
+    ok = record_shadow_feedback(db_path=store.DB_PATH, log_id=numeric_id, feedback=feedback)
+    return (200, {"ok": True, "id": numeric_id, "feedback": feedback}) if ok else (404, {"ok": False, "error": "initiative not found"})
+
+
+def _initiative_presence(payload: dict) -> tuple[int, dict]:
+    import memory.store as store
+    from core.presence import set_presence_state
+
+    state = str(payload.get("state") or "").strip()
+    if state not in {"idle", "muted", "engaged"}:
+        return 400, {"ok": False, "error": "state must be idle, engaged, or muted"}
+    result = set_presence_state(store.DB_PATH, state)
+    return 200, {"ok": True, "state": result.state, "reason": result.reason}
+
+
+def _initiative_delivery_opt_in(payload: dict) -> tuple[int, dict]:
+    import memory.store as store
+    from core.delivery_opt_in import set_delivery_opt_in
+    from core.initiative_shadow import list_shadow_logs
+    from core.shadow_validation import evaluate_delivery_gate, evaluate_long_term_validation, evaluate_shadow_validation
+
+    if "enabled" not in payload or not isinstance(payload.get("enabled"), bool):
+        return 400, {"ok": False, "error": "enabled must be a boolean"}
+    opt_in = set_delivery_opt_in(
+        store.DB_PATH,
+        enabled=bool(payload.get("enabled")),
+        reason=str(payload.get("reason") or ""),
+    )
+    logs = list_shadow_logs(store.DB_PATH, limit=500)
+    manual_report = evaluate_shadow_validation(logs)
+    long_term_report = evaluate_long_term_validation(logs)
+    gate = evaluate_delivery_gate(manual_report, long_term_report, explicit_opt_in=opt_in.enabled)
+    return 200, {"ok": True, "shadow": True, "optIn": opt_in.to_dict(), "gate": gate.to_dict()}
+
+
 # ---------------------------------------------------------------------------
 # Tool approval route
 # ---------------------------------------------------------------------------
+
+def _run_hugo_deploy_followup(*, title: str, deploy_args: dict) -> tuple[str, str]:
+    workflow_events, workflow_summary = _run_hugo_publish_workflow(
+        title=title,
+        actions=[("deploy", deploy_args)],
+    )
+    deploy_output = ""
+    for event in reversed(workflow_events):
+        tool_event = event.get("toolEvent", {})
+        if tool_event.get("name") == "hugo_blog":
+            deploy_output = str(tool_event.get("detail") or "")
+            break
+    return deploy_output, workflow_summary
+
 
 def _tool_approval(payload: dict) -> dict:
     event_id = str(payload.get("eventId", "")).strip()
@@ -1332,6 +2461,11 @@ def _tool_approval(payload: dict) -> dict:
         raise ValueError("eventId is required")
     if decision not in ("approved", "denied"):
         raise ValueError("decision must be approved or denied")
+
+    cached_result = get_tool_result(event_id)
+    if cached_result:
+        cached_result["reused"] = True
+        return cached_result
 
     draft = get_tool_draft(event_id)
     if not draft and event_id.startswith("hugo-blog-deploy-"):
@@ -1349,8 +2483,34 @@ def _tool_approval(payload: dict) -> dict:
         )
     if draft:
         pop_tool_draft(event_id)
+        request_fingerprint = ""
+        if draft.get("kind") == "tool_request" and draft.get("skillName") in IDEMPOTENT_TOOL_SKILLS:
+            request_fingerprint = tool_request_fingerprint(
+                str(draft.get("skillName", "")),
+                draft.get("args") if isinstance(draft.get("args"), dict) else {},
+            )
+            if decision == "approved":
+                cached_by_fingerprint = get_tool_fingerprint_result(request_fingerprint)
+                if cached_by_fingerprint:
+                    cached_by_fingerprint["eventId"] = event_id
+                    cached_by_fingerprint["reused"] = True
+                    cached_by_fingerprint["fingerprint"] = request_fingerprint
+                    cached_by_fingerprint["idempotencyReason"] = "same_fingerprint"
+                    cached_by_fingerprint["permissionLevel"] = permission_level_for_tool(
+                        str(draft.get("skillName", "")),
+                        draft.get("args") if isinstance(draft.get("args"), dict) else {},
+                    )
+                    record_tool_approval_audit(
+                        event_id=event_id,
+                        decision=decision,
+                        draft=draft,
+                        response=cached_by_fingerprint,
+                    )
+                    set_tool_result(event_id, cached_by_fingerprint)
+                    return cached_by_fingerprint
         executed = False
         result_output = ""
+        work_receipt = None
         if decision == "approved":
             if draft.get("kind") == "tool_request":
                 from core.api_tool_service import execute_tool_request
@@ -1358,6 +2518,9 @@ def _tool_approval(payload: dict) -> dict:
                 result = execute_tool_request(draft, load_skills(), cfg=_load_config())
                 executed = bool(result.get("executed"))
                 result_output = str(result.get("output", ""))
+                maybe_receipt = result.get("workReceipt")
+                if isinstance(maybe_receipt, dict):
+                    work_receipt = maybe_receipt
                 message = result.get("summary") or (
                     "tool executed" if executed else "tool execution failed"
                 )
@@ -1366,16 +2529,28 @@ def _tool_approval(payload: dict) -> dict:
                     action = str(args.get("action", ""))
                     if action == "new":
                         try:
-                            from skills.hugo_blog import run as hugo_run
                             deploy_args = {"action": "deploy"}
-                            created_file = re.search(r"文章已创建：(.+?\.md)", result_output)
-                            if created_file:
-                                deploy_args["filename"] = Path(created_file.group(1)).name
-                            elif args.get("slug"):
+                            metadata = result.get("metadata") if isinstance(result.get("metadata"), dict) else {}
+                            filename = str(metadata.get("filename") or "").strip()
+                            created_file_path = str(metadata.get("createdFile") or "").strip()
+                            if filename:
+                                deploy_args["filename"] = Path(filename).name
+                            elif created_file_path:
+                                deploy_args["filename"] = Path(created_file_path).name
+                            else:
+                                created_file = re.search(r"文章已创建：(.+?\.md)", result_output)
+                                if created_file:
+                                    deploy_args["filename"] = Path(created_file.group(1)).name
+                            if "filename" not in deploy_args and args.get("slug"):
                                 deploy_args["slug"] = args.get("slug")
-                            deploy_result = hugo_run(deploy_args)
+                            deploy_result, workflow_summary = _run_hugo_deploy_followup(
+                                title=str(args.get("title") or "博客文章"),
+                                deploy_args=deploy_args,
+                            )
                             result_output += "\n\n" + str(deploy_result)
-                            if "单页验证成功" in str(deploy_result):
+                            if workflow_summary and workflow_summary not in result_output:
+                                result_output += "\n\n" + workflow_summary
+                            if "单页验证成功" in str(deploy_result) or "验证：" in workflow_summary:
                                 message += " | hugo deploy 已自动执行并验证单页可访问"
                             elif "部署成功" in str(deploy_result):
                                 message += " | hugo deploy 已自动执行"
@@ -1390,10 +2565,14 @@ def _tool_approval(payload: dict) -> dict:
                     target_path = str(args.get("path", ""))
                     if "/yivxer-blog/content/posts/" in target_path and args.get("action") == "write":
                         try:
-                            from skills.hugo_blog import run as hugo_run
-                            deploy_result = hugo_run({"action": "deploy", "filename": Path(target_path).name})
+                            deploy_result, workflow_summary = _run_hugo_deploy_followup(
+                                title=Path(target_path).stem or "博客文章",
+                                deploy_args={"action": "deploy", "filename": Path(target_path).name},
+                            )
                             result_output += "\n\n" + str(deploy_result)
-                            if "单页验证成功" in str(deploy_result):
+                            if workflow_summary and workflow_summary not in result_output:
+                                result_output += "\n\n" + workflow_summary
+                            if "单页验证成功" in str(deploy_result) or "验证：" in workflow_summary:
                                 message += " | hugo deploy 已自动执行并验证单页可访问"
                             else:
                                 message += " | hugo deploy 已自动执行"
@@ -1415,10 +2594,28 @@ def _tool_approval(payload: dict) -> dict:
                 message = "github operation executed"
         else:
             message = "draft denied and discarded"
-        return {
+        response = {
             "ok": True, "eventId": event_id, "decision": decision,
             "executed": executed, "output": result_output, "message": message,
         }
+        if isinstance(work_receipt, dict):
+            response["workReceipt"] = work_receipt
+            response["receipt"] = work_receipt
+        if draft.get("kind") == "tool_request":
+            response["permissionLevel"] = permission_level_for_tool(
+                str(draft.get("skillName", "")),
+                draft.get("args") if isinstance(draft.get("args"), dict) else {},
+            )
+        if request_fingerprint:
+            response["fingerprint"] = request_fingerprint
+        trace_id = str(draft.get("traceId") or "").strip()
+        if trace_id:
+            response["traceId"] = trace_id
+        record_tool_approval_audit(event_id=event_id, decision=decision, draft=draft, response=response)
+        set_tool_result(event_id, response)
+        if request_fingerprint and decision == "approved" and executed:
+            set_tool_fingerprint_result(request_fingerprint, response)
+        return response
 
     return {
         "ok": True, "eventId": event_id, "decision": decision,
@@ -1436,23 +2633,23 @@ def _tool_approval(payload: dict) -> dict:
 
 def _list_schedules() -> dict:
     from core.scheduler import SCHEDULES_JSON_PATH, format_task, list_tasks, sync_schedules_json
-    from memory.store import init_db
+    import memory.store as store
 
-    init_db()
-    sync_schedules_json()
+    store.init_db()
+    sync_schedules_json(db_path=store.DB_PATH)
     return {
         "ok": True,
         "jsonPath": str(SCHEDULES_JSON_PATH),
-        "tasks": [format_task(t) for t in list_tasks()],
+        "tasks": [format_task(t) for t in list_tasks(db_path=store.DB_PATH)],
     }
 
 
 def _add_schedule(payload: dict) -> tuple[int, dict]:
     from core.scheduler import add_task, format_task, get_task, parse_interval
-    from memory.store import init_db
+    import memory.store as store
     from skills.loader import register_all_skills
 
-    init_db()
+    store.init_db()
     skill_name = str(payload.get("skillName") or payload.get("skill_name") or "").strip()
     interval = str(payload.get("interval") or payload.get("intervalSpec") or "").strip()
     label = str(payload.get("label") or "").strip()
@@ -1471,8 +2668,8 @@ def _add_schedule(payload: dict) -> tuple[int, dict]:
     except ValueError as exc:
         return 400, {"ok": False, "error": str(exc)}
 
-    task_id = add_task(skill_name, interval, label, args=args, catchup=catchup)
-    task = get_task(task_id)
+    task_id = add_task(skill_name, interval, label, args=args, catchup=catchup, db_path=store.DB_PATH)
+    task = get_task(task_id, db_path=store.DB_PATH)
     return 200, {"ok": True, "task": format_task(task)}
 
 
@@ -1484,36 +2681,36 @@ def _schedule_action(task_id: str, action: str, payload: dict | None = None) -> 
         run_task_by_id,
         set_enabled,
     )
-    from memory.store import init_db
+    import memory.store as store
     from skills.loader import register_all_skills
 
     if not re.fullmatch(r"[0-9]+", task_id):
         return 400, {"ok": False, "error": "task id must be numeric"}
 
-    init_db()
+    store.init_db()
     tid = int(task_id)
-    task = get_task(tid)
+    task = get_task(tid, db_path=store.DB_PATH)
     if task is None and action != "remove":
         return 404, {"ok": False, "error": "task_not_found", "id": tid}
 
     if action == "remove":
-        ok = remove_task(tid)
+        ok = remove_task(tid, db_path=store.DB_PATH)
         return (200 if ok else 404), {"ok": ok, "id": tid}
 
     if action == "enable":
-        ok = set_enabled(tid, True)
-        task = get_task(tid)
+        ok = set_enabled(tid, True, db_path=store.DB_PATH)
+        task = get_task(tid, db_path=store.DB_PATH)
         return 200, {"ok": ok, "task": format_task(task) if task else None}
 
     if action == "disable":
-        ok = set_enabled(tid, False)
-        task = get_task(tid)
+        ok = set_enabled(tid, False, db_path=store.DB_PATH)
+        task = get_task(tid, db_path=store.DB_PATH)
         return 200, {"ok": ok, "task": format_task(task) if task else None}
 
     if action == "run":
         skills = register_all_skills()
-        tr = run_task_by_id(tid, skills)
-        task = get_task(tid)
+        tr = run_task_by_id(tid, skills, db_path=store.DB_PATH)
+        task = get_task(tid, db_path=store.DB_PATH)
         if tr is None and task is None:
             return 404, {"ok": False, "error": "task_not_found", "id": tid}
         if tr is None:
@@ -1539,11 +2736,28 @@ def _schedule_action(task_id: str, action: str, payload: dict | None = None) -> 
 
 def payload_get(path: str) -> tuple[int, dict | list]:
     """Handle GET request routing."""
+    if path == "/health":
+        return 200, {"ok": True}
+    if path == "/ready":
+        return 200, {"ok": True, "ready": True, "runtime": "legacy"}
     cfg = _load_config()
     if path == "/status":
         return 200, _status(cfg)
     if path == "/sessions":
         return 200, _sessions()
+    if path == "/threads":
+        return 200, _threads()
+    if path.startswith("/threads/"):
+        thread_id = path.removeprefix("/threads/")
+        detail = _thread_detail(thread_id)
+        if detail is None:
+            return 404, {"error": "thread_not_found", "id": thread_id}
+        return 200, detail
+    if path.startswith("/sessions/search"):
+        match = re.search(r"(?:\?|&)q=([^&]*)", path)
+        query = match.group(1) if match else ""
+        query = urllib.parse.unquote(query)
+        return 200, _sessions_search(query)
     if path.startswith("/sessions/"):
         session_id = path.removeprefix("/sessions/")
         detail = _session_detail(session_id)
@@ -1553,12 +2767,46 @@ def payload_get(path: str) -> tuple[int, dict | list]:
     if path == "/memory" or path.startswith("/memory?"):
         include_rejected = "include_rejected=true" in path or "include_rejected=1" in path
         return 200, _memory(include_rejected=include_rejected)
+    if path == "/hypotheses" or path.startswith("/hypotheses?"):
+        status = "all" if "status=all" in path else "active"
+        limit_match = re.search(r"(?:\?|&)limit=([0-9]+)", path)
+        limit = int(limit_match.group(1)) if limit_match else 50
+        return 200, _hypotheses(limit=limit, status=status)
+    if path == "/vault/reflection/recent" or path.startswith("/vault/reflection/recent?"):
+        limit_match = re.search(r"(?:\?|&)limit=([0-9]+)", path)
+        limit = int(limit_match.group(1)) if limit_match else 20
+        return 200, _list_recent_reflections(limit)
+    if path == "/vault/current-focus" or path.startswith("/vault/current-focus?"):
+        detect = "detect=1" in path or "detect=true" in path.lower()
+        return 200, _vault_current_focus(detect=detect)
+    if path == "/sensors/status":
+        return 200, _sensors_status()
+    if path == "/vault/search" or path.startswith("/vault/search?"):
+        kw_match = re.search(r"(?:\?|&)q=([^&]+)", path)
+        keyword = kw_match.group(1) if kw_match else ""
+        from urllib.parse import unquote
+        keyword = unquote(keyword)
+        limit_match = re.search(r"(?:\?|&)limit=([0-9]+)", path)
+        limit = int(limit_match.group(1)) if limit_match else 20
+        return 200, _vault_search_index(keyword=keyword, limit=limit)
     if path == "/skills":
         return 200, _skills()
     if path == "/modes":
         return 200, _available_modes(cfg)
+    if path == "/experts":
+        return 200, _available_experts(cfg)
     if path == "/proactive-touch":
         return 200, _proactive_touch(cfg)
+    if path == "/initiative-shadow/long-term-report":
+        return 200, _initiative_shadow_long_term_report()
+    if path == "/initiative-shadow/delivery-gate":
+        return 200, _initiative_shadow_delivery_gate()
+    if path == "/initiative-shadow/review-packet":
+        return 200, _initiative_shadow_review_packet()
+    if path == "/initiative-shadow/report":
+        return 200, _initiative_shadow_report()
+    if path == "/initiative-shadow" or path.startswith("/initiative-shadow?"):
+        return 200, _initiative_shadow(path)
     if path == "/reviews" or path.startswith("/reviews?"):
         match = re.search(r"(?:\?|&)period=([^&]+)", path)
         period = match.group(1) if match else "weekly"
@@ -1619,8 +2867,13 @@ def payload_get(path: str) -> tuple[int, dict | list]:
         return 200, _soul_profile_summary(cfg)
     if path == "/settings":
         return 200, _settings(cfg)
-    if path == "/health":
-        return 200, {"ok": True}
+    if path == "/config/doctor":
+        from core.doctor import run_config_doctor
+        return 200, run_config_doctor(cfg, config_path=CONFIG_PATH)
+    if path.startswith("/tool-approval-audit"):
+        limit_match = re.search(r"(?:\?|&)limit=([0-9]+)", path)
+        limit = int(limit_match.group(1)) if limit_match else 20
+        return 200, read_tool_approval_audit(limit)
     if path == "/jobs":
         return 200, _list_jobs()
     if path == "/schedules":
@@ -1636,6 +2889,13 @@ def payload_get(path: str) -> tuple[int, dict | list]:
 
 def payload_post(path: str, payload: dict) -> tuple[int, dict | list]:
     """Handle POST request routing."""
+    initiative_feedback = re.fullmatch(r"/initiative-shadow/([0-9]+)/feedback", path)
+    if initiative_feedback:
+        return _initiative_shadow_feedback(initiative_feedback.group(1), payload)
+    if path == "/initiative-shadow/presence":
+        return _initiative_presence(payload)
+    if path == "/initiative-shadow/opt-in":
+        return _initiative_delivery_opt_in(payload)
     if path == "/jobs":
         return 200, _create_job(payload)
     if path == "/schedules":
@@ -1667,17 +2927,49 @@ def payload_post(path: str, payload: dict) -> tuple[int, dict | list]:
         return 200, _tool_approval(payload)
     if path == "/sessions":
         return 200, _save_session(payload)
+    if path == "/threads":
+        return 200, _create_thread(payload)
+    thread_add_session = re.fullmatch(r"/threads/([^/]+)/sessions", path)
+    if thread_add_session:
+        return 200, _add_thread_session(thread_add_session.group(1), payload)
+    thread_update = re.fullmatch(r"/threads/([^/]+)", path)
+    if thread_update:
+        return 200, _update_thread(thread_update.group(1), payload)
     session_append = re.fullmatch(r"/sessions/([^/]+)/append", path)
     if session_append:
         return 200, _append_session(session_append.group(1), payload)
     if path == "/soul/import":
         return 200, _import_soul(payload)
+    if path == "/hypotheses":
+        try:
+            return 200, _create_hypothesis(payload)
+        except ValueError as exc:
+            return 400, {"ok": False, "error": str(exc)}
+    if path == "/hypotheses/import-obsidian":
+        return 200, _import_obsidian_hypotheses(payload, _load_config())
+    if path == "/vault/reflection":
+        return 200, _vault_reflection(payload)
+    if path == "/vault/refresh-index":
+        return 200, _vault_refresh_index(force=bool(payload.get("force", False)))
+    if path == "/sensors/obsidian/focus":
+        return 200, _sensor_obsidian_focus(payload)
     if path == "/modes/current":
         return 200, _switch_current_mode(payload, _load_config())
+    if path == "/experts/current":
+        try:
+            return 200, _switch_current_expert(payload, _load_config())
+        except ValueError as exc:
+            return 400, {"ok": False, "error": str(exc)}
     if path == "/settings/validate":
         return 200, _validate_settings_draft(payload)
     if path == "/settings/save":
         return 200, _save_settings_draft(payload)
+    if path == "/settings/profile/save":
+        return 200, _save_profile_settings(payload)
+    if path == "/settings/profile/switch":
+        return 200, _switch_active_profile(payload)
+    if path == "/settings/test-model":
+        return 200, _test_model_profile(payload, _load_config())
     match = re.fullmatch(r"/memory/pending/([0-9]+)/(accept|reject)", path)
     if match:
         return 200, _resolve_pending_memory(match.group(1), match.group(2) == "accept")

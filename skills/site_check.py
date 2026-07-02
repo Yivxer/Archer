@@ -7,6 +7,7 @@ import urllib.error
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
+from core.url_safety import open_public_http_url, validate_public_http_url
 
 SKILL = {
     "name": "site_check",
@@ -61,10 +62,13 @@ def schema() -> dict:
 
 
 def _fetch(url: str) -> tuple[int, str]:
-    """返回 (status_code, body)，失败返回 (-1, error_msg)。"""
+    """返回 (status_code, body)，失败返回 (-1, error_msg)。所有 URL 必须通过 SSRF 校验。"""
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": _UA})
-        with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:
+        safe_url = validate_public_http_url(url)
+    except ValueError as e:
+        return -1, f"URL 校验失败：{e}"
+    try:
+        with open_public_http_url(safe_url, headers={"User-Agent": _UA}, timeout=_TIMEOUT) as resp:
             return resp.status, resp.read(80000).decode("utf-8", errors="replace")
     except urllib.error.HTTPError as e:
         return e.code, str(e)

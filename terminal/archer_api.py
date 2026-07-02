@@ -24,6 +24,7 @@ from terminal.api._config import (
     PENDING_TOOL_DRAFTS,
     ROOT,
     _clean_chat_messages,
+    _inject_thread_context,
 )
 from terminal.api._routes import (
     _append_session,
@@ -38,6 +39,7 @@ from terminal.api._security import (
     check_rate_limit,
     constant_time_compare,
     error_response,
+    normalize_error_payload,
 )
 from terminal.api import _tools as _api_tools
 from terminal.api._tools import (
@@ -154,7 +156,7 @@ class Handler(BaseHTTPRequestHandler):
         self._send(401, {"error": "unauthorized", "message": "desktop API token is required"})
 
     def _authorized(self) -> bool:
-        if urlparse(self.path).path == "/health":
+        if urlparse(self.path).path in {"/health", "/ready"}:
             return True
         if not DESKTOP_API_TOKEN:
             return False
@@ -162,6 +164,7 @@ class Handler(BaseHTTPRequestHandler):
         return constant_time_compare(self.headers.get("Authorization", ""), expected)
 
     def _send(self, status: int, payload: dict | list) -> None:
+        payload = normalize_error_payload(status, payload)
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -245,7 +248,7 @@ class Handler(BaseHTTPRequestHandler):
             if not isinstance(payload, dict):
                 raise ValueError("payload must be an object")
             if path == "/chat/stream":
-                messages = _clean_chat_messages(payload.get("messages"))
+                messages = _inject_thread_context(_clean_chat_messages(payload.get("messages")), payload.get("threadContext"))
                 self._send_sse(
                     messages,
                     _clean_memory_mode(payload.get("memoryMode")),

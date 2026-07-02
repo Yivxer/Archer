@@ -2,9 +2,14 @@
   "name": "archer-desktop",
   "version": "1.0.26",
   "description": "Archer Desktop static prototype",
+  "author": "Yivxer",
   "private": true,
   "main": "out/main/index.js",
   "type": "module",
+  "engines": {
+    "node": ">=24 <25",
+    "npm": ">=11 <12"
+  },
   "scripts": {
     "dev": "electron-vite dev",
     "api": "cd ../.. && .venv/bin/python terminal/archer_api.py --port 8765 --token ${ARCHER_DESKTOP_TOKEN:?Set ARCHER_DESKTOP_TOKEN first}",
@@ -14,12 +19,11 @@
     "build": "tsc --noEmit && electron-vite build",
     "build:mac": "npm run build && electron-builder --mac dmg",
     "sign:local": "bash scripts/sign-local-mac.sh",
-    "install:local": "rm -rf /Applications/Archer.app && cp -R release/mac-arm64/Archer.app /Applications/",
+    "install:local": "bash scripts/install-local-mac.sh",
     "verify:local": "bash ../../scripts/verify_desktop_live.sh",
     "build:mac:local": "npm run build:mac && npm run sign:local && npm run install:local"
   },
   "dependencies": {
-    "@vitejs/plugin-react": "^5.1.0",
     "lucide-react": "^0.554.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
@@ -28,6 +32,7 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@vitejs/plugin-react": "^5.1.0",
     "@tailwindcss/vite": "^4.1.17",
     "@types/node": "^25.0.0",
     "@types/react": "^19.2.7",

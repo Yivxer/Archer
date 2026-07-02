@@ -1,6 +1,6 @@
 import json
-import urllib.request
 import urllib.parse
+from core.url_safety import open_public_http_url, validate_public_http_url
 
 SKILL = {
     "name": "weather",
@@ -41,9 +41,11 @@ def run(args: dict) -> str:
 
     url = f"https://wttr.in/{urllib.parse.quote(city)}?format=j1"
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": "curl/7.0"})
-        with urllib.request.urlopen(req, timeout=10) as resp:
+        safe_url = validate_public_http_url(url)
+        with open_public_http_url(safe_url, headers={"User-Agent": "curl/7.0"}, timeout=10) as resp:
             data = json.loads(resp.read().decode("utf-8"))
+    except ValueError as e:
+        return f"天气查询失败：URL 校验失败：{e}"
     except Exception as e:
         return f"天气查询失败：{e}"
 
