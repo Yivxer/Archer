@@ -16,6 +16,8 @@ import { fetchLocalExpertWorkbench, loadLocalSession, switchLocalExpert } from '
 import { connectionStatusLabel, expertShortLabel, modelProfileShortLabel } from './lib/conversationPersona'
 import { mergeInitiativeShadowEvent } from './lib/initiativeShadow'
 import { createOfflineLocalShell, syncBrainData, wasBrainEverLinked } from './lib/brainConnection'
+import { useConnectionState, type ConnectionStateSnapshot } from './lib/useConnectionState'
+import { ConnectionBadge } from './components/ConnectionBadge'
 import { mockArcher } from './adapters/mockArcher'
 import { ArcherRing, ErrorBoundary } from './components/common'
 import { ChatPage } from './pages/ChatPage'
@@ -94,6 +96,9 @@ function App() {
   const [obsidianMode, setObsidianMode] = React.useState<ObsidianContextMode>(() => {
     return (localStorage.getItem('archer-obsidian-context') as ObsidianContextMode) || 'summary'
   })
+
+  // L1.2.5：第 1 层连接状态机（5s 心跳 + 30s doctor + 1s tick）
+  const connection = useConnectionState()
 
   function newChat() {
     setActiveSession(null)
@@ -491,6 +496,15 @@ function App() {
               </button>
             </div>
           )}
+          {connection.state !== 'ready' && (
+            <ConnectionBadge
+              state={connection.state}
+              reason={connection.snapshot.degradedReason}
+              deadReason={connection.snapshot.deadReason}
+              size="footer"
+              onClick={connection.state === 'dead' ? connection.recover : connection.refresh}
+            />
+          )}
           <button
             type="button"
             className="profile-footer"
@@ -500,9 +514,8 @@ function App() {
             <ProfileAvatar avatarUrl={profileAvatarUrl} size="footer" />
             <span className="profile-footer-copy">
               <strong>{profileName}</strong>
-              <em>{connectionStatusLabel(apiState, data.status.adapter === 'local')}</em>
+              <em>{connection.badge.label}</em>
             </span>
-            <span className={`conn-dot ${apiState === 'connected' ? 'live' : ''}`} aria-hidden="true" />
           </button>
           {profileOpen && (
             <ProfilePanel
@@ -556,6 +569,14 @@ function App() {
               sessionLoadState={sessionLoadState}
               sessionLoadError={sessionLoadError}
               resetRuntimeOnMount={chatKey > 0 && !activeSession}
+              connectionState={connection.state}
+              connectionDeadReason={connection.snapshot.deadReason}
+              connectionActions={{
+                start: connection.start,
+                recover: connection.recover,
+                quit: connection.quit,
+                refresh: connection.refresh,
+              }}
               onNavigate={setRoute}
               onInitiativeEvent={handleInitiativeEvent}
               onRefresh={connectLocalApi}
@@ -616,8 +637,14 @@ function App() {
               setObsidianMode={setObsidianMode}
               conversationMode={conversationMode}
               setConversationMode={setConversationMode}
-              apiState={apiState}
-              apiReason={apiReason}
+              connectionState={connection.state}
+              connectionDeadReason={connection.snapshot.deadReason}
+              connectionActions={{
+                start: connection.start,
+                recover: connection.recover,
+                quit: connection.quit,
+                refresh: connection.refresh,
+              }}
               onRefresh={connectLocalApi}
               onNavigate={setRoute}
             />

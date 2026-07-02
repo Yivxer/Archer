@@ -3,6 +3,8 @@ import { Activity, ArrowUp, Check, ChevronDown, Copy, CornerDownLeft, Crop, Down
 import { appendLocalSession, approveJobToolEvent, cancelBackgroundJobEvent, createBackgroundJobEvent, ensureLocalConnection, fetchBackgroundJob, listBackgroundJobs, pollBackgroundJobEvents, retryBackgroundJobEvent, saveLocalSession, spawnChildJobs, streamLocalChat, ChatBusyError, StreamIdleTimeoutError, submitToolApprovalEvent, switchLocalExpert, switchLocalActiveProfile } from '../adapters/localArcher'
 import { pickChatGreeting } from '../lib/chatGreetings'
 import { extendedConversationModes, modelProfileShortLabel, modelSwitchNotice } from '../lib/conversationPersona'
+import { canDeploy, isInputDisabled, isSendDisabled, type ConnectionState } from '../lib/connectionState'
+import type { ConnectionStateSnapshot } from '../lib/useConnectionState'
 import type { ArcherAdapter, BackgroundJob, ChatMessage, ExpertStarter, FileRef, MemoryContextMode, ObsidianContextMode, Route, SavedSession, SessionDetail, ToolEvent, WorkIntent, WorkReceipt } from '../types'
 import { ArcherRing, MarkdownMessage, ThinkingDots, ThinkingMutter } from '../components/common'
 import { ExpertAvatar } from '../components/ExpertAvatar'
@@ -11,6 +13,23 @@ import { buildThinkingMutter } from '../lib/thinkingMutter'
 import { buildTraceDiagnostics, createInitialRuntimeState, createPersistentEventLog, reduceRuntimeEvent, restoreRuntimeStateFromEvents, routeTaskForRuntime, jobSnapshotToAgentEvent, buildPlanChildJobSpecs, buildPlanCoordinatorPrompt, buildPlanExecutionPrompt, planWithStatus } from '../../../agent'
 import type { AgentEvent, ApprovalResultEvent, EventLog, JobEvent, OrchestrationEvent, PlanEvent, TraceDiagnostics } from '../../../agent'
 import type { InitiativeEvent } from '../../../agent/contracts'
+
+/**
+ * L1.2.5：ChatPage 接收来自 App 的连接状态与动作。
+ * - state 用于决定发送按钮 / 输入框 disabled
+ * - deadReason 用于在 placeholder 中提示用户
+ * - actions 在 dead 状态下暴露"手动恢复"入口（后续可在 composer 工具栏加按钮）
+ */
+export type ChatPageConnectionProps = {
+  connectionState: ConnectionState
+  connectionDeadReason?: string
+  connectionActions?: {
+    start: () => void
+    recover: () => void
+    quit: () => void
+    refresh: () => Promise<ConnectionStateSnapshot>
+  }
+}
 
 const DEFAULT_STARTERS: ExpertStarter[] = [
   { label: '先听我说', prompt: '我先说一段，你不用急着给方案。' },
@@ -54,6 +73,9 @@ export function ChatPage({
   sessionLoadState = 'idle',
   sessionLoadError = '',
   resetRuntimeOnMount = false,
+  connectionState = 'disconnected',
+  connectionDeadReason = '',
+  connectionActions,
   onNavigate,
   onInitiativeEvent,
   onRefresh,
@@ -67,6 +89,14 @@ export function ChatPage({
   sessionLoadState?: 'idle' | 'loading' | 'error'
   sessionLoadError?: string
   resetRuntimeOnMount?: boolean
+  connectionState?: ConnectionState
+  connectionDeadReason?: string
+  connectionActions?: {
+    start: () => void
+    recover: () => void
+    quit: () => void
+    refresh: () => Promise<ConnectionStateSnapshot>
+  }
   onNavigate?: (route: Route) => void
   onInitiativeEvent?: (event: InitiativeEvent) => void
   onRefresh?: () => Promise<void>
@@ -333,9 +363,30 @@ export function ChatPage({
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [data])
 
+  /**
+   * L1.2.7：通过 connection state hook 判断本地 API 是否就绪。
+   * - ready/degraded 直接通过（degraded 仍可聊天）
+   * - dead/disconnected 直接拒绝
+   * - connecting/recovering 刷新一次再判断
+   * 没传 connectionActions 时回退到旧 ensureLocalConnection 路径。
+   */
+  async function ensureConnectionReady(): Promise<boolean> {
+    if (!connectionActions) return ensureLocalConnection()
+    if (connectionState === 'ready' || connectionState === 'degraded') return true
+    if (connectionState === 'dead' || connectionState === 'disconnected') return false
+    // connecting / recovering：主动刷新一次看是否已就绪
+    const snap = await connectionActions.refresh()
+    return snap.state === 'ready' || snap.state === 'degraded'
+  }
+
   async function sendMessage() {
     const text = draft.trim()
     if (!text || isSending || isBackgrounding) return
+    // L1.2.5：连接状态守门——非 ready/degraded 直接拦截
+    if (isSendDisabled(connectionState)) {
+      setChatError('本地 API 未就绪，请稍候或点侧栏恢复连接。')
+      return
+    }
     let sentFileRefs = await prepareFileRefsForSend(text)
     if (!sentFileRefs.length && lastAttachedFilesRef.current.length && messageWantsHugoPublish(text)) {
       sentFileRefs = await hydrateFileRefs(lastAttachedFilesRef.current)
@@ -389,7 +440,7 @@ export function ChatPage({
     }))
     setIsSending(true)
 
-    if (!(await ensureLocalConnection())) {
+    if (!(await ensureConnectionReady())) {
       setMessages(previousMessages)
       setDraft(text)
       setFileRefs(sentMessageFileRefs)
@@ -1115,7 +1166,7 @@ export function ChatPage({
     setSelectedModel(profileId)
     setSwitchingModel(profileId)
     setActiveComposerMenu(null)
-    if (!(await ensureLocalConnection())) {
+    if (!(await ensureConnectionReady())) {
       setSelectedModel(data.settings.activeProfile || 'lite')
       setSwitchingModel(null)
       setChatError('大脑未就绪，暂时无法切换模型。')
@@ -1262,11 +1313,21 @@ export function ChatPage({
     }
   }
 
-  const composerPlaceholder = isHome
-      ? '想说点什么…'
-      : activeSession
-        ? '接着这段聊…'
-        : '继续说…'
+  const composerPlaceholder = isInputDisabled(connectionState) && connectionDeadReason
+    ? `本地 API 不可用：${connectionDeadReason}`
+    : isInputDisabled(connectionState)
+      ? '本地 API 不可用，请点击侧栏恢复连接'
+      : isSendDisabled(connectionState) && connectionState === 'connecting'
+        ? '正在连接本地 API…'
+        : isSendDisabled(connectionState) && connectionState === 'recovering'
+          ? '正在恢复本地 API…'
+          : isSendDisabled(connectionState) && connectionState === 'disconnected'
+            ? '未连接本地 API'
+            : isHome
+              ? '想说点什么…'
+              : activeSession
+                ? '接着这段聊…'
+                : '继续说…'
 
   const modelButtonLabel = modelProfileShortLabel(selectedModel)
   const activeExpertTitle = expertOptions.find((item) => item.id === activeExpertId)?.label
@@ -1315,6 +1376,7 @@ export function ChatPage({
         placeholder={composerPlaceholder}
         rows={1}
         autoFocus={isHome}
+        disabled={isInputDisabled(connectionState)}
       />
       {toolNotice && <div className="composer-notice">{toolNotice}</div>}
       <div className="composer-toolbar" aria-label="输入工具栏">
@@ -1425,7 +1487,7 @@ export function ChatPage({
                         setChatError('')
                         try {
                           if (data.status.adapter !== 'local') {
-                            if (!(await ensureLocalConnection())) {
+                            if (!(await ensureConnectionReady())) {
                               throw new Error('大脑未就绪，暂时无法切换专家。')
                             }
                           }
@@ -1549,7 +1611,7 @@ export function ChatPage({
             className={`composer-background${isBackgrounding ? ' active' : ''}`}
             type="button"
             onClick={() => void sendBackgroundJob()}
-            disabled={isSending || isBackgrounding || data.status.adapter !== 'local' || !draft.trim()}
+            disabled={isSending || isBackgrounding || !canDeploy(connectionState) || !draft.trim()}
             title="后台执行"
             aria-label="后台执行"
           >
@@ -1559,7 +1621,7 @@ export function ChatPage({
             className={`send-btn composer-send${draft.trim() ? ' active' : ''}${isSending ? ' stopping' : ''}`}
             type="button"
             onClick={isSending ? stopSending : sendMessage}
-            disabled={!isSending && !draft.trim()}
+            disabled={!isSending && (!draft.trim() || isSendDisabled(connectionState))}
             title={isSending ? '停止并撤回本轮' : '发送'}
           >
             {isSending ? <X size={15} /> : <ArrowUp size={15} />}

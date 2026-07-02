@@ -314,7 +314,7 @@
 
 .profile-footer {
   display: grid;
-  grid-template-columns: 28px minmax(0, 1fr) auto;
+  grid-template-columns: 28px minmax(0, 1fr);
   align-items: center;
   gap: 10px;
   min-width: 0;

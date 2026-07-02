@@ -1,9 +1,11 @@
 import React from 'react'
 import { ArrowLeft, CalendarClock, CalendarDays, Clipboard, Database, Eye, KeyRound, Layers, ListChecks, Moon, Palette, Settings2, SlidersHorizontal, Sun, Terminal, X, Activity } from 'lucide-react'
-import type { ApiConnectionState, ArcherAdapter, ConversationMode, MemoryContextMode, ObsidianContextMode, Route, ScheduledTask, Theme } from '../types'
+import type { ArcherAdapter, ConversationMode, MemoryContextMode, ObsidianContextMode, Route, ScheduledTask, Theme } from '../types'
 import { FormField } from '../components/common'
 import { addSchedule, clearDesktopApiToken, getDesktopApiToken, listSchedules, removeSchedule, resolveDesktopApiToken, restartLocalApi, runSchedule, saveDesktopApiToken, saveLocalProfileSettings, saveLocalSettings, setScheduleEnabled, switchLocalMode, testLocalModelProfile } from '../adapters/localArcher'
-import { connectionStatusLabel, expertShortLabel, modeLabelFromId, modelProfileShortLabel, personaPresetFromMode } from '../lib/conversationPersona'
+import { expertShortLabel, modeLabelFromId, modelProfileShortLabel, personaPresetFromMode } from '../lib/conversationPersona'
+import { badgeLabel, type ConnectionState } from '../lib/connectionState'
+import type { ConnectionStateSnapshot } from '../lib/useConnectionState'
 
 type SettingsTab = 'model' | 'context' | 'local' | 'appearance' | 'schedules' | 'diagnostics'
 
@@ -17,8 +19,9 @@ export function SettingsPage({
   setObsidianMode,
   conversationMode,
   setConversationMode,
-  apiState,
-  apiReason,
+  connectionState = 'disconnected',
+  connectionDeadReason = '',
+  connectionActions,
   onRefresh,
   onNavigate,
 }: {
@@ -31,8 +34,14 @@ export function SettingsPage({
   setObsidianMode: (mode: ObsidianContextMode) => void
   conversationMode: ConversationMode
   setConversationMode: (mode: ConversationMode) => void
-  apiState: ApiConnectionState
-  apiReason?: string
+  connectionState?: ConnectionState
+  connectionDeadReason?: string
+  connectionActions?: {
+    start: () => void
+    recover: () => void
+    quit: () => void
+    refresh: () => Promise<ConnectionStateSnapshot>
+  }
   onRefresh: () => Promise<void>
   onNavigate?: (route: Route) => void
 }) {
@@ -542,12 +551,23 @@ export function SettingsPage({
         {activeTab === 'local' && (
           <SettingsGroup icon={Database} title="本地连接" note="打开 Archer 会自动拉起本机大脑，无需手动拨号。">
             <div className="connection-guide">
-              <div className={`connection-status ${apiState}`}>
+              <div className={`connection-status connection-state-${connectionState}`}>
                 <span>连接状态</span>
-                <strong>{apiStatusText(apiState, data.status.adapter === 'local', apiReason)}</strong>
-                <p>{apiStatusHelp(apiState, data.status.adapter === 'local', apiReason)}</p>
+                <strong>{connectionStatusText(connectionState, connectionDeadReason)}</strong>
+                <p>{connectionStatusHelp(connectionState, connectionDeadReason)}</p>
               </div>
-              <p className="settings-note">{localFixHint(apiState, data.status.adapter === 'local', apiReason)}</p>
+              <p className="settings-note">{connectionFixHint(connectionState, connectionDeadReason)}</p>
+              {connectionState === 'dead' && connectionActions && (
+                <SettingRow title="手动恢复" description="本地 API 不可用，可尝试手动恢复连接。">
+                  <button
+                    className="quiet-button strong"
+                    type="button"
+                    onClick={connectionActions.recover}
+                  >
+                    手动恢复
+                  </button>
+                </SettingRow>
+              )}
             </div>
             <SettingRow title="大脑进程" description="连接异常时，可手动重启本地 API。">
               <button className="quiet-button strong" type="button" onClick={() => void restartApi()} disabled={restartingApi}>
@@ -774,8 +794,8 @@ export function SettingsPage({
               <div className="diagnostics-status">
                 <div className="diagnostics-status-row">
                   <span className="diagnostics-status-label">连接状态</span>
-                  <span className={`diagnostics-status-value diagnostics-status-value-${apiState}`}>
-                    {connectionStatusLabel(apiState, data.status.adapter === 'local')}
+                  <span className={`diagnostics-status-value diagnostics-status-value-${connectionState}`}>
+                    {badgeLabel(connectionState, connectionDeadReason)}
                   </span>
                 </div>
                 <div className="diagnostics-status-row">
@@ -916,39 +936,53 @@ function SettingRow({
   )
 }
 
-function apiStatusText(apiState: ApiConnectionState, isLocal: boolean, reason = ''): string {
-  if (isLocal || apiState === 'connected') return connectionStatusLabel(apiState, true)
-  if (apiState === 'loading') return '连接中'
-  if (reason === 'missing_python') return '找不到 Python 运行环境'
-  if (reason === 'missing_script') return '找不到 Archer API 入口'
-  if (reason === 'not_ready') return '大脑进程未就绪'
-  if (reason === 'token_mismatch') return '连接口令不匹配'
-  if (reason === 'port_down') return '大脑端口未启动'
-  if (apiState === 'missing_token') return '需要本地连接口令'
-  if (apiState === 'bad_token') return 'token 不匹配'
-  if (apiState === 'api_offline') return '大脑进程未运行'
-  return '本地 API 未连接'
+function connectionStatusText(state: ConnectionState, deadReason = ''): string {
+  if (state === 'dead' && deadReason) return `本地 API 不可用：${deadReason}`
+  return badgeLabel(state, deadReason)
 }
 
-function apiStatusHelp(apiState: ApiConnectionState, isLocal: boolean, reason = ''): string {
-  if (isLocal || apiState === 'connected') return '可以读取本地会话、记忆、Soul 文件和设置。'
-  if (apiState === 'loading') return '正在自动连接本机大脑。'
-  if (reason === 'missing_python') return '当前配置的 Python 解释器不存在，检查 ARCHER_PYTHON_BIN 或项目 .venv。'
-  if (reason === 'missing_script') return '当前配置的 API 脚本不存在，检查 ARCHER_API_SCRIPT 或 Archer 项目路径。'
-  if (reason === 'not_ready') return '进程有响应但 readiness 未通过，应用会继续重试。'
-  if (reason === 'token_mismatch') return '端口上已有 Archer API，但它使用了不同的桌面口令。'
-  if (reason === 'port_down') return '本地 8765 端口暂未响应，应用会尝试自动拉起。'
-  if (apiState === 'api_offline') return '应用会自动重试拉起大脑进程，通常无需手动操作。'
-  return '暂时显示示例数据；连接恢复后会自动切回真实内容。'
+function connectionStatusHelp(state: ConnectionState, deadReason = ''): string {
+  switch (state) {
+    case 'ready':
+      return '可以读取本地会话、记忆、Soul 文件和设置。'
+    case 'degraded':
+      return 'API 在线但配置诊断有警告，deploy/write 已临时屏蔽，聊天仍可用。'
+    case 'connecting':
+      return '正在自动连接本机大脑，预计几秒内就绪。'
+    case 'recovering':
+      return '本地 API 未响应，正在自动重启进程恢复。'
+    case 'dead':
+      if (deadReason.includes('missing_python')) return '当前配置的 Python 解释器不存在，检查 ARCHER_PYTHON_BIN 或项目 .venv。'
+      if (deadReason.includes('missing_script')) return '当前配置的 API 脚本不存在，检查 ARCHER_API_SCRIPT 或 Archer 项目路径。'
+      if (deadReason.includes('token_mismatch')) return '端口上已有 Archer API，但它使用了不同的桌面口令。'
+      if (deadReason.includes('port_down')) return '本地 8765 端口未启动，应用会尝试自动拉起。'
+      if (deadReason.includes('超时')) return '连接超时，可点击「手动恢复」重试。'
+      return '多次重启失败，可点击「手动恢复」或重启 Archer。'
+    case 'disconnected':
+    default:
+      return '尚未连接本地 API。'
+  }
 }
 
-function localFixHint(apiState: ApiConnectionState, isLocal: boolean, reason = ''): string {
-  if (isLocal || apiState === 'connected') return '连接正常。可以恢复会话、引用本地文件。'
-  if (reason === 'missing_python') return '先确认 `/Users/Yivxer/Projects/Archer/.venv/bin/python3` 存在，或设置 ARCHER_PYTHON_BIN。'
-  if (reason === 'missing_script') return '先确认 `/Users/Yivxer/Projects/Archer/archer_api.py` 存在，或设置 ARCHER_API_SCRIPT。'
-  if (reason === 'token_mismatch') return '可完全退出 Archer 后重开；应用会回收不匹配的本地端口。'
-  if (apiState === 'error') return '请确认 ~/Projects/Archer/.venv 存在。重启 Archer 通常会恢复。'
-  return '若长时间未连接，可重启 Archer；高级用户才需要手动改口令。'
+function connectionFixHint(state: ConnectionState, deadReason = ''): string {
+  switch (state) {
+    case 'ready':
+      return '连接正常。可以恢复会话、引用本地文件。'
+    case 'degraded':
+      return '部分高级操作受限，聊天仍可使用。打开诊断查看警告详情。'
+    case 'connecting':
+      return '正在拉起本机大脑，无需操作。'
+    case 'recovering':
+      return '自动重启中，30 秒内若未恢复将进入 dead 状态。'
+    case 'dead':
+      if (deadReason.includes('missing_python')) return '先确认 `/Users/Yivxer/Projects/Archer/.venv/bin/python3` 存在，或设置 ARCHER_PYTHON_BIN。'
+      if (deadReason.includes('missing_script')) return '先确认 `/Users/Yivxer/Projects/Archer/archer_api.py` 存在，或设置 ARCHER_API_SCRIPT。'
+      if (deadReason.includes('token_mismatch')) return '可完全退出 Archer 后重开；应用会回收不匹配的本地端口。'
+      return '可点击「手动恢复」重试，或重启 Archer。'
+    case 'disconnected':
+    default:
+      return '应用会自动尝试连接。若长时间未连接，可重启 Archer。'
+  }
 }
 
 function formatAuditTime(timestamp: number): string {
