@@ -273,6 +273,56 @@ Query：`include_rejected=true` 含已拒绝 pending。
 
 ---
 
+## SSE 事件契约（L2.1）
+
+`POST /chat/stream` 与 `WS /ws/chat` 共用同一份 SSE 事件流。本节为完整事件类型清单 + 顺序契约；前端 `chatEventDispatcher.ts`（L2.2）依据本契约消费事件。
+
+### 事件类型清单（13 种）
+
+| `type` | 载荷字段 | 后端来源 | 客户端处理 |
+|---|---|---|---|
+| `orchestrationEvent` | `orchestrationEvent: {intent, subIntent, mode, depth, labels[], needsMemory, needsJob}` | `_tools.py` 主路径起始 | 进 trace log，不渲染聊天 |
+| `planEvent` | `planEvent: {title, status, detail, steps[], prompt?}` | 多步任务时 | 进 trace log + 显示 plan 卡 |
+| `runtimeContextEvent` | `runtimeContextEvent: {task, phase, userIntent, lastResult, expectedNext, matchedSkills?}` | 主路径起始 | 进 trace log |
+| `statusEvent` | `statusEvent: {intentType, intentLabel, matchedSkills[], isBackground, memoryScope[]}` | 主路径起始 | 进 trace log |
+| `initiativeEvent` | `initiativeEvent: {kind, title, message, shadow, delivered, decisionTrace}` | Part 8 shadow 投递 | 进 trace log + 转发父组件，**不渲染到聊天**（L2.5 边界） |
+| `tool_event` | `toolEvent: {id, name, displayName, status, risk, summary, detail, args, requiresApproval, blocked, ...}` | 工具执行 | 渲染工具卡 + 进 trace log |
+| `ready` | `{ready: true}` | 模型开始生成 | 标记进入 streaming 状态 |
+| `token` | `{text: "..."}` | 流式文本增量 | 拼接显示 |
+| `vault_sources` | `{sources: [...]}` | Obsidian focus 模式 | 渲染上下文提示（当前前端忽略） |
+| `failureHintEvent` | `failureHintEvent: {keyword, stage, recoverable, detail, id, traceId}` | 失败兜底 | dispatcher 决定 UI 表现（见下节） |
+| `error` | `{detail: "..."}` | 流内异常 | 流终止，不再继续 |
+| `done` | `{done: true}` | 流结束 | 关闭流 |
+| `heartbeat` | `{}` | 保活 | 客户端忽略 |
+
+### 顺序契约
+
+1. **元信息先于 token**：`orchestrationEvent` / `planEvent` / `runtimeContextEvent` / `statusEvent` / `initiativeEvent` 在主路径开始时一次性发出，必须先于 `token`
+2. **`ready` 必须先于 `token`**：`ready` 表示模型已开始生成
+3. **`tool_event` 与 `token` 可交错**：模型先调工具再总结时，`tool_event` → `token` 顺序；工具执行中可继续流式输出
+4. **`failureHintEvent` 必须先于 `error`/`done`**：失败时先发 `failureHintEvent`，再发 `error`（流内错误）或直接 `done`（兜底）
+5. **`done` 必须是最后一个事件**：客户端收到 `done` 后关闭流，之后不应再有事件
+6. **`heartbeat` 可在任意位置出现**：客户端应忽略
+7. **`vault_sources` 必须先于 `token`**：在 Obsidian focus 模式下注入
+
+### 客户端处理职责
+
+- `pythonStreamPayloadToAgentEvents()`（`client/desktop/src/agent/pythonBridge.ts`）把 7 种 `*Event` 字段转成 `AgentEvent` 联合类型，由 `onAgentEvent` 回调消费
+- `tool_event` / `token` / `ready` / `done` / `error` 不经 agent 化，直接由 `streamLocalChat`（`adapters/localArcher.ts`）回调处理
+- `vault_sources` / `heartbeat` 当前被前端忽略
+- `chatEventDispatcher.ts`（L2.2）负责把 `AgentEvent` 映射到 UI action，覆盖 `failure.hint` + 派生失败（`tool_failed` / `approval_rejected` / `job_stale_cancelled` / `approval_duplicated`）
+
+### 派生失败类型（非 failure.hint keyword，由 dispatcher 从其他事件推导）
+
+| 派生类型 | 来源事件 | 推导条件 |
+|---|---|---|
+| `tool_failed` | `tool.result` | `status === 'complete' && !ok`，或 `status === 'blocked'` |
+| `approval_rejected` | `approval.result` | `decision === 'denied'` |
+| `job_stale_cancelled` | `job.event` | `status === 'cancelled' && stale === true` |
+| `approval_duplicated` | `tool.request` | 同 `requestId` 重复出现 ≥ 2 次（dispatcher 维护已见 requestId 集合） |
+
+---
+
 ## failureHintEvent（失败提示事件）
 
 聊天流（SSE / WebSocket）在失败或异常结束时，通过 `failureHintEvent` 事件向客户端传达结构化失败原因。客户端依据 `keyword` 决定展示文案与恢复建议，不再只显示"模型无回复"。

@@ -5,6 +5,12 @@ import { pickChatGreeting } from '../lib/chatGreetings'
 import { extendedConversationModes, modelProfileShortLabel, modelSwitchNotice } from '../lib/conversationPersona'
 import { canDeploy, isInputDisabled, isSendDisabled, type ConnectionState } from '../lib/connectionState'
 import type { ConnectionStateSnapshot } from '../lib/useConnectionState'
+import {
+  createInitialDispatcherContext,
+  dispatchAgentEvent,
+  fallbackActionWhenNoReply,
+  type DispatcherContext,
+} from '../lib/chatEventDispatcher'
 import type { ArcherAdapter, BackgroundJob, ChatMessage, ExpertStarter, FileRef, MemoryContextMode, ObsidianContextMode, Route, SavedSession, SessionDetail, ToolEvent, WorkIntent, WorkReceipt } from '../types'
 import { ArcherRing, MarkdownMessage, ThinkingDots, ThinkingMutter } from '../components/common'
 import { ExpertAvatar } from '../components/ExpertAvatar'
@@ -12,7 +18,7 @@ import { WorkspaceContextPanel, type WorkspaceJobSummary } from '../components/W
 import { buildThinkingMutter } from '../lib/thinkingMutter'
 import { buildTraceDiagnostics, createInitialRuntimeState, createPersistentEventLog, reduceRuntimeEvent, restoreRuntimeStateFromEvents, routeTaskForRuntime, jobSnapshotToAgentEvent, buildPlanChildJobSpecs, buildPlanCoordinatorPrompt, buildPlanExecutionPrompt, planWithStatus } from '../../../agent'
 import type { AgentEvent, ApprovalResultEvent, EventLog, JobEvent, OrchestrationEvent, PlanEvent, TraceDiagnostics } from '../../../agent'
-import type { InitiativeEvent } from '../../../agent/contracts'
+import type { FailureHintEvent, InitiativeEvent } from '../../../agent/contracts'
 
 /**
  * L1.2.5：ChatPage 接收来自 App 的连接状态与动作。
@@ -50,19 +56,6 @@ function isRequestTimeout(error: unknown): boolean {
 function isChatBusy(error: unknown): boolean {
   return error instanceof ChatBusyError
     || (error instanceof Error && /chat_busy|上一轮对话仍在处理中|仍在处理/i.test(error.message))
-}
-
-function failureHintFallback(event: AgentEvent | null, sawToolEvent: boolean): string {
-  if (event?.type !== 'failure.hint') {
-    return sawToolEvent ? '已执行操作，详见上方卡片。' : '模型没有返回内容，请打开诊断查看原因。'
-  }
-  if (event.keyword === 'model_empty_response') return '模型请求成功但没有返回文本，请打开诊断查看本轮模型状态。'
-  if (event.keyword === 'tool_executed_no_summary') return '工具已执行，但模型没有返回总结，结果见上方卡片。'
-  if (event.keyword === 'model_stream_timeout') return '模型流式响应超时，请稍后重试。'
-  if (event.keyword === 'provider_connection_failed') return '模型服务连接失败，请检查当前 provider/API 配置。'
-  if (event.keyword === 'chat_busy') return '上一轮仍在处理，请等它结束后再发送。'
-  if (event.keyword === 'context_trimmed') return '本轮上下文已裁剪，部分旧历史没有带入。'
-  return event.detail || '本轮没有返回可显示内容，请打开诊断查看原因。'
 }
 
 export function ChatPage({
@@ -466,6 +459,8 @@ export function ChatPage({
       let reply = ''
       let sawToolEvent = false
       let lastFailureHint: AgentEvent | null = null
+      // L2.3：dispatcher ctx 维护本轮事件状态（sawToolEvent / hasStreamedReply / seenRequestIds）
+      const dispatcherCtx: DispatcherContext = createInitialDispatcherContext()
       await streamLocalChat(
         requestMessages,
         memoryMode,
@@ -510,14 +505,20 @@ export function ChatPage({
         },
         (event) => {
           if (event.type === 'failure.hint') lastFailureHint = event
+          // L2.3：通过 dispatcher 维护 ctx（actions 由 recordAgentEvent 处理，暂不消费）
+          dispatchAgentEvent(event, dispatcherCtx)
           recordAgentEvent(event)
         },
         controller.signal,
         runtimeSessionId
       )
       if (!streamedReply) {
-        // 模型未返回文本时，根据是否有工具事件给出更友好的兜底
-        reply = failureHintFallback(lastFailureHint, sawToolEvent)
+        // L2.3：流结束未收到回复，走 dispatcher 兜底文案
+        reply = fallbackActionWhenNoReply(
+          lastFailureHint as FailureHintEvent | null,
+          dispatcherCtx,
+        ).text
+        void sawToolEvent // 保留原变量供 file.reference 逻辑使用，dispatcher ctx 已独立维护
         setMessages([...nextMessages, { id: assistantId, role: 'assistant', text: reply }])
       } else {
         try {
@@ -1247,6 +1248,8 @@ export function ChatPage({
       let streamedReply = ''
       let reply = ''
       let lastFailureHint: AgentEvent | null = null
+      // L2.3：dispatcher ctx 维护本轮事件状态
+      const dispatcherCtx: DispatcherContext = createInitialDispatcherContext()
       await streamLocalChat(
         requestMessages,
         memoryMode,
@@ -1267,15 +1270,20 @@ export function ChatPage({
         },
         (event) => {
           if (event.type === 'failure.hint') lastFailureHint = event
+          // L2.3：通过 dispatcher 维护 ctx
+          dispatchAgentEvent(event, dispatcherCtx)
           recordAgentEvent(event)
         },
         controller.signal,
         runtimeSessionId
       )
-      const regenerateHadToolEvents = toolEvents.length > 0
+      // L2.3：流结束未收到回复，走 dispatcher 兜底文案（不再用 failureHintFallback + toolEvents.length）
       const regenerateReply = streamedReply
         ? reply
-        : failureHintFallback(lastFailureHint, regenerateHadToolEvents)
+        : fallbackActionWhenNoReply(
+            lastFailureHint as FailureHintEvent | null,
+            dispatcherCtx,
+          ).text
       const finalMessages: ChatMessage[] = [
         ...baseMessages,
         { id: assistantId, role: 'assistant', text: regenerateReply }
