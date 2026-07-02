@@ -900,61 +900,74 @@ def _preview() -> str:
 
 
 def run(args: dict) -> str:
-    action = args.get("action", "").strip()
-    match action:
-        case "publish":
-            return _publish(args)[1]
-        case "new":
-            return _new_post(args)
-        case "list":
-            try:
-                limit = int(args.get("limit", 10))
-            except (TypeError, ValueError):
-                limit = 10
-            return _list_posts(limit)
-        case "read":
-            return _read_post(args.get("filename", ""))
-        case "edit":
-            return _edit_post(args)
-        case "delete":
-            return _delete_post(args)
-        case "delete_and_deploy":
-            return _delete_and_deploy(args)[1]
-        case "deploy":
-            return _deploy(args)
-        case "preview":
-            return _preview()
-        case "doctor":
-            return _doctor()
-        case _:
-            return f"未知 action：{action}。可选：publish / new / list / read / edit / delete / delete_and_deploy / deploy / preview / doctor"
+    # B3.1: 顶层 try/except —— 单 skill 失败不应向上传播，依赖 tool_runtime.invoke 是二次防御
+    try:
+        action = args.get("action", "").strip()
+        match action:
+            case "publish":
+                return _publish(args)[1]
+            case "new":
+                return _new_post(args)
+            case "list":
+                try:
+                    limit = int(args.get("limit", 10))
+                except (TypeError, ValueError):
+                    limit = 10
+                return _list_posts(limit)
+            case "read":
+                return _read_post(args.get("filename", ""))
+            case "edit":
+                return _edit_post(args)
+            case "delete":
+                return _delete_post(args)
+            case "delete_and_deploy":
+                return _delete_and_deploy(args)[1]
+            case "deploy":
+                return _deploy(args)
+            case "preview":
+                return _preview()
+            case "doctor":
+                return _doctor()
+            case _:
+                return f"未知 action：{action}。可选：publish / new / list / read / edit / delete / delete_and_deploy / deploy / preview / doctor"
+    except Exception as exc:
+        return f"hugo_blog 执行失败：{exc}"
 
 
 def run_structured(args: dict) -> dict:
-    action = str(args.get("action", "")).strip()
-    metadata: dict = {}
-    if action == "publish":
-        ok, output, metadata = _publish(args)
-    elif action == "delete_and_deploy":
-        ok, output, metadata = _delete_and_deploy(args)
-    else:
-        output = run(args)
-        ok = not str(output).startswith(("错误：", "未知 action："))
-    if ok and action == "new":
-        metadata = _new_post_metadata(args, output)
-    elif action == "deploy":
-        target_url = ""
-        try:
-            target_url = _target_url(args)
-        except Exception:
+    # B3.1: 顶层 try/except —— 保证 run_structured 永远返回结构化 dict，不抛异常
+    try:
+        action = str(args.get("action", "")).strip()
+        metadata: dict = {}
+        if action == "publish":
+            ok, output, metadata = _publish(args)
+        elif action == "delete_and_deploy":
+            ok, output, metadata = _delete_and_deploy(args)
+        else:
+            output = run(args)
+            ok = not str(output).startswith(("错误：", "未知 action："))
+        if ok and action == "new":
+            metadata = _new_post_metadata(args, output)
+        elif action == "deploy":
             target_url = ""
-        metadata = {
-            "url": target_url,
-            "verified": "验证：" in output or "HTTP 200" in output,
+            try:
+                target_url = _target_url(args)
+            except Exception:
+                target_url = ""
+            metadata = {
+                "url": target_url,
+                "verified": "验证：" in output or "HTTP 200" in output,
+            }
+        return {
+            "ok": ok,
+            "summary": f"hugo_blog {action} 完成" if ok else f"hugo_blog {action} 失败",
+            "output": output,
+            "metadata": metadata,
         }
-    return {
-        "ok": ok,
-        "summary": f"hugo_blog {action} 完成" if ok else f"hugo_blog {action} 失败",
-        "output": output,
-        "metadata": metadata,
-    }
+    except Exception as exc:
+        return {
+            "ok": False,
+            "summary": f"hugo_blog {args.get('action', '')} 异常",
+            "output": f"hugo_blog run_structured 异常：{exc}",
+            "metadata": {},
+        }

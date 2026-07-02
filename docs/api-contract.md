@@ -273,6 +273,57 @@ Query：`include_rejected=true` 含已拒绝 pending。
 
 ---
 
+## failureHintEvent（失败提示事件）
+
+聊天流（SSE / WebSocket）在失败或异常结束时，通过 `failureHintEvent` 事件向客户端传达结构化失败原因。客户端依据 `keyword` 决定展示文案与恢复建议，不再只显示"模型无回复"。
+
+### 事件结构
+
+```json
+{
+  "type": "failureHintEvent",
+  "failureHintEvent": {
+    "id": "failure-hint-<8hex>",
+    "traceId": "trace-<12hex>",
+    "keyword": "<keyword>",
+    "stage": "<stage>",
+    "recoverable": true,
+    "detail": "<最多 300 字符的错误细节>"
+  }
+}
+```
+
+### keyword 完整枚举
+
+| keyword | 含义 | recoverable | 触发场景 |
+|---|---|---|---|
+| `provider_connection_failed` | LLM provider 连接/鉴权/限流失败 | true | `_connection_hint` / `_status_hint` 抛出的 RuntimeError，stage 为 `model_stream` / `llm` / `call_with_tools` |
+| `command_timeout` | 命令执行超时或连接失败 | true | `timeout` / `connect` 关键词，非 LLM stage |
+| `write_permission` | 文件/目录写入权限被拒绝 | false | `permission` / `denied` 关键词 |
+| `dependency_missing` | 依赖文件/命令/库未找到 | true | `not found` / `no such file` / `missing` 关键词 |
+| `syntax_mismatch` | 语法/解析错误（JSON、配置等） | true | `syntax` / `parse` / `json` 关键词 |
+| `runtime_failure` | 运行时异常（兜底） | true | 未匹配上述任何关键词 |
+| `model_empty_response` | 模型请求成功但无文本返回 | true | 主 stream 完成但 `ai_reply.strip()` 为空（B1.1） |
+| `tool_executed_no_summary` | 工具已执行但模型无总结 | true | 主 stream 为空且本轮有工具事件（B1.1） |
+
+### stage 常见值
+
+| stage | 来源 |
+|---|---|
+| `model_stream` | 主模型流式响应失败 |
+| `llm` / `call_with_tools` | LLM 调用失败 |
+| `shell_execute` | Shell 命令执行失败 |
+| `hugo_workflow` | Hugo 博客部署工作流失败 |
+| `initiative_shadow.<operation>` | Part 8 shadow initiative 操作失败 |
+
+### 客户端处理约定
+
+- 客户端应依据 `keyword` 显示简短中文文案，保留 `traceId` 供诊断追踪
+- `recoverable=true` 时提示"可重试"，`recoverable=false` 时提示"需检查配置/权限"
+- `provider_connection_failed` 连续 3 次后端会触发 B6.1 熔断，自动切回 default profile（lite）
+
+---
+
 ## 其他 GET 端点
 
 | 路径 | 说明 |

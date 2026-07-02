@@ -3016,7 +3016,8 @@ def test_chat_stream_emits_failure_hint_on_stream_error(monkeypatch):
     failure_events = [e for e in events if e.get("type") == "failureHintEvent"]
     assert len(failure_events) == 1
     hint = failure_events[0]["failureHintEvent"]
-    assert hint["keyword"] == "command_timeout"
+    # B6.1: provider 连接/超时失败 → provider_connection_failed（从 command_timeout 细分出来）
+    assert hint["keyword"] == "provider_connection_failed"
     assert hint["stage"] == "model_stream"
     assert hint["recoverable"] is True
     assert events[-1] == {"type": "done", "done": True}

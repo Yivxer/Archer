@@ -627,3 +627,57 @@ def plan_desktop_turn(
         tool_plan=tool_plan,
         intent=intent,
     )
+
+
+# ── B5.1: simple path / full path 分叉 ──────────────────────────────────────
+
+def is_simple_chat_path(
+    query: str,
+    intent_info: dict,
+    *,
+    file_refs: list[dict] | None = None,
+) -> bool:
+    """判定是否走 simple path（跳过 orchestration/router/memory/vault 全链路）。
+
+    保守判定：只对「明确的短闲聊」走 simple path，任何需要上下文/工具/记忆的请求都走 full path。
+
+    判定条件（全部满足）：
+    1. 非空 query
+    2. 无 file_refs（附件请求需要上下文）
+    3. intent == "chat"（拒绝 task/decision/project/reflection/emotional）
+    4. needs_memory == False（拒绝需要记忆检索的）
+    5. needs_tools == False（拒绝需要工具的）
+    6. needs_project == False（拒绝需要项目上下文的）
+    7. 无 URL（避免 web_fetch 请求被误判）
+    8. 无明显工具关键词（hugo/obsidian/shell/git/file 等）
+
+    注：intent.py:134-137 把 >=40 字无关键词文本打成 task, 0.72；
+        intent.py:148 把 >=40 字文本 needs_memory=True。
+        所以条件 3+4 已经隐式过滤了长文本陷阱。
+    """
+    q = str(query or "").strip()
+    if not q:
+        return False
+    if file_refs:
+        return False
+    if intent_info.get("intent") != "chat":
+        return False
+    if intent_info.get("needs_memory"):
+        return False
+    if intent_info.get("needs_tools"):
+        return False
+    if intent_info.get("needs_project"):
+        return False
+    # 无 URL（web_fetch/web_search 请求需要 full path）
+    if re.search(r"https?://", q):
+        return False
+    # 无明显工具关键词（保守起见，即使 intent=chat 也拒绝）
+    tool_kw = (
+        "hugo", "博客", "obsidian", "笔记", "shell", "终端", "命令",
+        "git", "github", "文件", "读取", "写入", "搜索", "部署",
+        "发布", "新建文章", "删除文章",
+    )
+    lowered = q.lower()
+    if any(kw in lowered for kw in tool_kw):
+        return False
+    return True

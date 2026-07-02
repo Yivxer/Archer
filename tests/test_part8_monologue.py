@@ -149,7 +149,7 @@ def test_chat_stream_records_monologue_and_thread_clue_shadow_material(tmp_path,
 
         monologues = list_monologues(store.DB_PATH)
         threads = list_open_threads(store.DB_PATH)
-        assert first_chunk.get("type") in {"orchestrationEvent", "planEvent", "statusEvent", "toolEvent"}
+        assert first_chunk.get("type") in {"orchestrationEvent", "planEvent", "statusEvent", "toolEvent", "ready", "initiativeEvent"}
         assert monologues[0]["source"] == "rules"
         assert monologues[0]["delivered"] is False
         assert threads[0]["topic"] == "Archer 的 Part 8 继续做"

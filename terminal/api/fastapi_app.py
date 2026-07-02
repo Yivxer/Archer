@@ -148,7 +148,18 @@ def _close_iter(iter_obj) -> None:
             pass
 
 
-def create_app(desktop_api_token: str = "") -> FastAPI:
+def _read_desktop_pid_from_env() -> int | None:
+    """从环境变量 ARCHER_DESKTOP_PID 读 Desktop 主进程 PID (L0 用)."""
+    raw = os.environ.get("ARCHER_DESKTOP_PID", "").strip()
+    if not raw:
+        return None
+    try:
+        return int(raw)
+    except ValueError:
+        return None
+
+
+def create_app(desktop_api_token: str = "", active_context_mgr=None) -> FastAPI:
     app = FastAPI(
         title="Archer Desktop API",
         version="0.2.0",
@@ -156,9 +167,27 @@ def create_app(desktop_api_token: str = "") -> FastAPI:
     )
     app.state.desktop_api_token = desktop_api_token
     app.state.chat_stream_semaphore = threading.BoundedSemaphore(DEFAULT_MAX_CHAT_STREAMS)
+    app.state.active_context_mgr = active_context_mgr
 
     @app.on_event("startup")
     def _on_startup() -> None:
+        # L0 active_context: 启动时判定崩溃 + 写新 active_context + 启动心跳
+        if active_context_mgr is not None:
+            try:
+                desktop_pid = _read_desktop_pid_from_env()
+                is_crash, reason, crash_count = active_context_mgr.on_startup(desktop_pid=desktop_pid)
+                active_context_mgr.start_heartbeat()
+                from core.active_context import install_sigterm_handler
+                install_sigterm_handler(active_context_mgr)
+                app.state.startup_crash_info = (is_crash, reason, crash_count)
+                logger.info(
+                    "[startup] active_context initialized: is_crash=%s reason=%s crash_count=%d",
+                    is_crash, reason, crash_count,
+                )
+            except Exception as exc:
+                logger.warning("[startup] active_context init failed: %s", exc)
+                app.state.startup_crash_info = (False, "init_failed", 0)
+
         # 初始化定时任务：确保假设扫描任务存在，并执行到期的定时任务
         # 移植自 terminal/archer.py:336-337，API 进程之前缺失此逻辑导致定时任务失效
         try:
@@ -170,6 +199,16 @@ def create_app(desktop_api_token: str = "") -> FastAPI:
             logger.info("[startup] scheduled tasks initialized")
         except Exception as exc:
             logger.warning("[startup] scheduled tasks init failed: %s", exc)
+
+    @app.on_event("shutdown")
+    def _on_shutdown() -> None:
+        # L0 active_context: 正常退出时写 exit_status.clean=True
+        if active_context_mgr is not None:
+            try:
+                active_context_mgr.on_shutdown(clean=True, reason="user_quit")
+                logger.info("[shutdown] active_context written with clean exit")
+            except Exception as exc:
+                logger.warning("[shutdown] active_context shutdown write failed: %s", exc)
 
     app.add_middleware(
         CORSMiddleware,
@@ -213,6 +252,23 @@ def create_app(desktop_api_token: str = "") -> FastAPI:
     @app.get("/ready")
     async def ready() -> dict[str, bool | str]:
         return {"ok": True, "ready": True, "runtime": "fastapi"}
+
+    @app.get("/active-context")
+    async def active_context_endpoint() -> dict:
+        """L0 active_context: 返回当前 active_context + 启动时崩溃判定结果."""
+        mgr = app.state.active_context_mgr
+        if mgr is None:
+            return {"ok": False, "error": "active_context not configured"}
+        snapshot = mgr.get_snapshot()
+        startup_crash_info = getattr(app.state, "startup_crash_info", (False, "no_previous_context", 0))
+        is_crash, reason, crash_count = startup_crash_info
+        return {
+            "ok": True,
+            "active_context": snapshot,
+            "is_crash": is_crash,
+            "crash_reason": reason,
+            "crash_count": crash_count,
+        }
 
     @app.post("/chat/stream")
     async def chat_stream(request: Request):
@@ -302,8 +358,10 @@ def create_app(desktop_api_token: str = "") -> FastAPI:
 
 def run_fastapi_server(host: str, port: int, desktop_api_token: str = "") -> None:
     import uvicorn
+    from core.active_context import ActiveContextManager
 
-    app = create_app(desktop_api_token)
+    active_context_mgr = ActiveContextManager()
+    app = create_app(desktop_api_token, active_context_mgr=active_context_mgr)
     logger.info("Archer Desktop API (FastAPI) listening on http://%s:%s", host, port)
     print(f"Archer Desktop API (FastAPI) listening on http://{host}:{port}")
     uvicorn.run(app, host=host, port=port, log_level="info")

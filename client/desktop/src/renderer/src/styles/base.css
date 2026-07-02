@@ -997,3 +997,51 @@ body {
 :root[data-theme="dark"] body {
   background: var(--bg-1);
 }
+
+/* ── L0.4: crash-banner ────────────────────────────────────────────── */
+.crash-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  margin-bottom: 12px;
+  border: 1px solid color-mix(in srgb, var(--amber) 32%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--amber) 8%, var(--panel-solid));
+  color: var(--ink);
+  box-shadow: var(--shadow-xs);
+}
+
+.crash-banner span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.crash-banner strong {
+  font-size: 13px;
+  font-weight: 600;
+  color: color-mix(in srgb, var(--orange) 80%, var(--text));
+}
+
+.crash-banner em {
+  font-size: 12px;
+  color: var(--text-soft);
+  font-style: normal;
+}
+
+.crash-banner button {
+  border: 1px solid color-mix(in srgb, var(--amber) 34%, var(--line));
+  border-radius: 999px;
+  padding: 4px 12px;
+  color: var(--ink);
+  background: transparent;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.crash-banner button:hover {
+  background: color-mix(in srgb, var(--amber) 12%, transparent);
+}

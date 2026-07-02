@@ -61,6 +61,15 @@ function App() {
   const [apiState, setApiState] = React.useState<ApiConnectionState>('loading')
   const [apiReason, setApiReason] = React.useState('')
   const [apiBannerDismissed, setApiBannerDismissed] = React.useState(false)
+  // L0.4: 崩溃恢复提示
+  const [crashInfo, setCrashInfo] = React.useState<{
+    isCrash: boolean
+    reason: string
+    crashCount: number
+    lastTraceId: string | null
+    startedAt: string | null
+  } | null>(null)
+  const [crashBannerDismissed, setCrashBannerDismissed] = React.useState(false)
   const [activeSession, setActiveSession] = React.useState<SessionDetail | null>(null)
   const [sessionLoadState, setSessionLoadState] = React.useState<'idle' | 'loading' | 'error'>('idle')
   const [sessionLoadError, setSessionLoadError] = React.useState('')
@@ -194,6 +203,16 @@ function App() {
       setApiReason(result.reason || '')
       if (result.state === 'connected') {
         setApiBannerDismissed(false)
+        // L0.4: 连接成功后读崩溃信息 (只读一次)
+        try {
+          const info = await window.archerDesktop?.getCrashInfo?.()
+          if (info && info.isCrash) {
+            setCrashInfo(info)
+            setCrashBannerDismissed(false)
+          }
+        } catch {
+          // getCrashInfo 失败不影响主流程
+        }
       }
     })()
 
@@ -507,6 +526,26 @@ function App() {
       {/* ── Main workspace ── */}
       <main className="workspace">
         <section className="page-frame">
+          {/* L0.4: 崩溃恢复提示 banner */}
+          {crashInfo && crashInfo.isCrash && !crashBannerDismissed && (
+            <div className="crash-banner" role="status">
+              <span>
+                <strong>Archer 上次未正常退出</strong>
+                <em>
+                  {crashInfo.crashCount >= 3
+                    ? `近期已异常退出 ${crashInfo.crashCount} 次，建议检查日志`
+                    : `原因：${crashReasonLabel(crashInfo.reason)}`}
+                </em>
+              </span>
+              <button
+                type="button"
+                onClick={() => setCrashBannerDismissed(true)}
+                title="关闭提示"
+              >
+                知道了
+              </button>
+            </div>
+          )}
           {route === 'Chat' && (
             <ChatPage
               key={chatKey}
@@ -602,6 +641,18 @@ function summarizeThreadMessages(messages: SessionDetail['messages']): string {
 
 function compactSummaryText(value: string, limit: number): string {
   return value.replace(/\s+/g, ' ').trim().slice(0, limit)
+}
+
+/** L0.4: 崩溃原因转中文标签. */
+function crashReasonLabel(reason: string): string {
+  const map: Record<string, string> = {
+    no_exit_status_and_heartbeat_stale: '进程意外终止',
+    sigterm: '收到退出信号',
+    crash: '崩溃',
+    unclean_exit: '异常退出',
+    init_failed: '初始化失败',
+  }
+  return map[reason] || reason
 }
 
 function ProfileAvatar({ avatarUrl, size = 'menu' }: { avatarUrl: string; size?: 'menu' | 'footer' }) {

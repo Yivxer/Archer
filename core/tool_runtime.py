@@ -7,6 +7,7 @@ Skill Runtime Wrapper (Step 1)
   - 执行时长追踪
   - 超长结果截断 + artifact 存储
 """
+import logging
 import time
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeoutError
@@ -15,6 +16,8 @@ from pathlib import Path
 from typing import Any
 
 from core.artifacts import save_tool_result
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_TIMEOUT = 30       # 秒，无 SKILL 元数据时的兜底值
 MAX_INLINE_CHARS = 12_000  # 约 3000 tokens，超过则存 artifact
@@ -90,6 +93,13 @@ def invoke(skill_name: str, args: dict, skills: dict,
         raw = future.result(timeout=effective_timeout)
     except FutureTimeoutError:
         executor.shutdown(wait=False)
+        # B3.1: P0 skill 失败额外记日志，便于诊断
+        try:
+            from core.permission_levels import is_p0_critical_skill
+            if is_p0_critical_skill(skill_name):
+                logger.warning("P0 skill %s timeout (>%ss)", skill_name, effective_timeout)
+        except Exception:
+            pass
         return ToolResult(
             ok=False,
             skill=skill_name,
@@ -103,6 +113,13 @@ def invoke(skill_name: str, args: dict, skills: dict,
         )
     except Exception as e:
         executor.shutdown(wait=False)
+        # B3.1: P0 skill 失败额外记日志，便于诊断
+        try:
+            from core.permission_levels import is_p0_critical_skill
+            if is_p0_critical_skill(skill_name):
+                logger.warning("P0 skill %s failed: %s: %s", skill_name, type(e).__name__, e)
+        except Exception:
+            pass
         return ToolResult(
             ok=False,
             skill=skill_name,

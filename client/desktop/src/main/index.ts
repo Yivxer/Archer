@@ -88,6 +88,16 @@ let apiWatchTimer: ReturnType<typeof setInterval> | null = null
 let apiRestartTimer: ReturnType<typeof setTimeout> | null = null
 let apiRestartAttempt = 0
 
+// L0.4: 上次启动时的崩溃信息 (从 /active-context 读)
+type CrashInfo = {
+  isCrash: boolean
+  reason: string
+  crashCount: number
+  lastTraceId: string | null
+  startedAt: string | null
+}
+let lastStartupCrashInfo: CrashInfo | null = null
+
 type ApiEnsureResult = { ok: boolean; reason: string }
 const API_WATCHDOG_INTERVAL_MS = 5_000
 
@@ -252,6 +262,7 @@ function apiChildEnv(): NodeJS.ProcessEnv {
     ...processEnv,
     PATH: pathParts.filter(Boolean).join(':'),
     ARCHER_ROOT: ARCHER_ROOT,
+    ARCHER_DESKTOP_PID: String(process.pid),
   }
 }
 
@@ -266,6 +277,44 @@ function spawnApiProcess(): ChildProcess | null {
   attachApiProcessHandlers(child)
   console.log('[archer_api] Started, pid:', child.pid)
   return child
+}
+
+/** L0.4: 从 /active-context 读崩溃信息, 存到 lastStartupCrashInfo. */
+async function fetchActiveContext(): Promise<void> {
+  if (!desktopApiToken) return
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 2000)
+  try {
+    const response = await fetch('http://127.0.0.1:8765/active-context', {
+      signal: controller.signal,
+      headers: { Authorization: `Bearer ${desktopApiToken}` },
+    })
+    if (!response.ok) return
+    const data = await response.json() as {
+      ok?: boolean
+      is_crash?: boolean
+      crash_reason?: string
+      crash_count?: number
+      active_context?: { last_trace_id?: string | null; started_at?: string | null }
+    }
+    if (!data.ok) return
+    lastStartupCrashInfo = {
+      isCrash: Boolean(data.is_crash),
+      reason: String(data.crash_reason || 'unknown'),
+      crashCount: Number(data.crash_count || 0),
+      lastTraceId: data.active_context?.last_trace_id ?? null,
+      startedAt: data.active_context?.started_at ?? null,
+    }
+    if (lastStartupCrashInfo.isCrash) {
+      console.warn(
+        `[archer_api] Crash detected: reason=${lastStartupCrashInfo.reason} count=${lastStartupCrashInfo.crashCount}`
+      )
+    }
+  } catch (err) {
+    console.warn('[archer_api] fetchActiveContext failed:', err)
+  } finally {
+    clearTimeout(timeout)
+  }
 }
 
 async function ensureApiProcess(): Promise<ApiEnsureResult> {
@@ -325,6 +374,8 @@ async function ensureApiProcess(): Promise<ApiEnsureResult> {
     if (result.ok) {
       apiRestartAttempt = 0
       clearScheduledApiRestart()
+      // L0.4: API 就绪后读 active_context 崩溃信息
+      void fetchActiveContext()
     }
     return result
   } finally {
@@ -652,6 +703,10 @@ ipcMain.handle('archer:get-brain-status', async () => {
   const owned = Boolean(apiProcess && apiProcess.pid && !apiProcess.killed)
   const reason = brainStatusReason({ pythonOk, scriptOk, portOk, readyOk, tokenOk, owned })
   return { pythonOk, scriptOk, portOk, readyOk, tokenOk, owned, reason }
+})
+
+ipcMain.handle('archer:get-crash-info', async () => {
+  return lastStartupCrashInfo
 })
 
 ipcMain.handle('archer:execute-local-skill', async (_event, name: string, args: Record<string, unknown> = {}) => {

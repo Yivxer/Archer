@@ -126,7 +126,21 @@ def _runtime_context_event(
 def _failure_hint_event(exc: Exception, *, stage: str, trace_id: str = "") -> dict:
     detail = str(exc)[:300] or type(exc).__name__
     lowered = detail.lower()
-    if "timeout" in lowered or "connect" in lowered:
+    # B6.1: provider 连接/鉴权/限流失败 → provider_connection_failed keyword
+    # _connection_hint 抛 "无法连接 LLM API"，_status_hint 抛 "模型 API 鉴权失败/额度受限"
+    is_llm_stage = stage in ("model_stream", "llm", "call_with_tools")
+    is_provider_error = (
+        "无法连接" in str(exc)
+        or "llm api" in lowered
+        or "模型 api" in lowered
+        or "连接" in str(exc)
+        or "timeout" in lowered
+        or "connect" in lowered
+    )
+    if is_llm_stage and is_provider_error:
+        keyword = "provider_connection_failed"
+        recoverable = True
+    elif "timeout" in lowered or "connect" in lowered:
         keyword = "command_timeout"
         recoverable = True
     elif "permission" in lowered or "denied" in lowered:
@@ -1975,6 +1989,222 @@ def _soul_insight_for_orchestration() -> dict:
 # Streaming chat with tool events
 # ---------------------------------------------------------------------------
 
+def _iter_simple_chat_path(
+    messages: list[dict],
+    *,
+    query: str,
+    intent_info: dict,
+    file_refs: list[dict] | None,
+    trace_id: str,
+    memory_mode: str,
+    obsidian_mode: str,
+):
+    """B5.1 simple path：轻量闲聊跳过 orchestration/router/memory/vault/tool_loop。
+
+    只做：
+    1. yield ready + 最小化 statusEvent
+    2. 构建 enriched_messages（messages + file_context + vault focus）
+    3. 构建简化 model_messages（core_persona + stance，无 task_plan/mode_constraint/matched_skills）
+    4. 主模型 stream + heartbeat + DSML 救援 + fallback
+    5. yield done
+    """
+    from core.model_select import resolve_active_model
+
+    _cfg = _load_config()
+    from core.experts import active_expert, format_expert_block, active_expert_id
+    _expert = active_expert(_cfg)
+    _expert_block = format_expert_block(_expert)
+
+    # shadow initiative events（被动扫描，开销小，simple path 保留）
+    for event in _yield_shadow_initiative_events():
+        yield event
+
+    # ready 信号
+    yield {"type": "ready", "ready": True}
+
+    # 最小化 statusEvent（让 UI 有锚点，不丢状态契约）
+    yield _with_trace_id({
+        "type": "statusEvent",
+        "statusEvent": {
+            "intentType": "chat",
+            "intentLabel": intent_info.get("intent_label", "闲聊"),
+            "matchedSkills": [],
+            "isBackground": False,
+            "memoryScope": [],
+            "expertId": active_expert_id(_cfg),
+            "expertLabel": str(_expert.get("label", "")),
+            "traceId": trace_id,
+            "simplePath": True,  # 标识 simple path，UI 可选简化渲染
+        },
+    }, trace_id)
+
+    # enriched_messages = messages + file_context + vault focus
+    enriched_messages = list(messages)
+    file_context, file_events = _file_reference_context(file_refs or [])
+    for event in file_events:
+        yield event
+    if file_context:
+        enriched_messages = [{"role": "system", "content": file_context}, *enriched_messages]
+    # vault focus（simple path 仍注入，因为它是被动的当前聚焦笔记，开销小）
+    if obsidian_mode != "off":
+        try:
+            from knowledge.vault_sensor import build_focus_context
+            vault_context, vault_source = build_focus_context()
+            if vault_context and vault_source:
+                enriched_messages = [
+                    {"role": "system", "content": vault_context},
+                    *enriched_messages,
+                ]
+                yield {
+                    "type": "vault_sources",
+                    "mode": obsidian_mode,
+                    "current_focus": {
+                        "title": vault_source.get("title", ""),
+                        "path": vault_source.get("path", ""),
+                    },
+                    "sources": [vault_source],
+                }
+        except Exception:
+            pass  # vault 上下文失败不影响 simple path
+
+    # 构建 system prompt（简化版：core_persona + stance + expert_block，无 task_plan）
+    try:
+        from core.context import build_desktop_core_prompt, _get_mode_prompt
+        core_persona = build_desktop_core_prompt()
+        stance_prompt = ""
+        if _cfg["persona"].get("mode_auto", True):
+            # simple path 不跑 orchestration，stance 用默认
+            pass
+        else:
+            current_mode = _cfg["persona"].get("current_mode")
+            if current_mode:
+                stance_prompt = _get_mode_prompt(_cfg, current_mode)
+        if stance_prompt:
+            core_persona = f"{core_persona}\n\n{stance_prompt}"
+        if _expert_block:
+            core_persona = f"{core_persona}\n\n{_expert_block}"
+    except Exception:
+        core_persona = "Archer 的核心身份是长期陪伴型 AI 灵魂伴生体。"
+
+    # 清洗 tool_calls / tool 角色消息
+    clean_messages: list[dict] = []
+    for m in enriched_messages:
+        role = m.get("role")
+        if role == "tool":
+            continue
+        if role == "assistant" and m.get("tool_calls"):
+            content = m.get("content")
+            if content:
+                clean_messages.append({"role": "assistant", "content": content})
+            continue
+        clean_messages.append(m)
+
+    model_messages = [
+        {
+            "role": "system",
+            "content": (
+                "你正在 Archer Desktop 中回复用户。\n\n"
+                + core_persona
+                + "\n\n请直接自然回答，不要输出 XML、function_call、tool_call。"
+            ),
+        },
+        *clean_messages,
+    ]
+    model_messages = _trim_model_messages_for_context(model_messages)
+
+    # 主模型 stream
+    has_images = bool(file_refs and any(r.get("type") == "image" for r in file_refs))
+    active_model, _ = resolve_active_model(
+        _load_config(),
+        user_text=query,
+        intent="chat",
+        needs_tools=False,
+        has_images=has_images,
+    )
+    ai_reply_parts: list[str] = []
+    streamed_safe_text = ""
+    fake_markup_detected = False
+    try:
+        for item in _iter_model_stream_with_heartbeat(model_messages, model=active_model):
+            if item.get("type") == "heartbeat":
+                yield {
+                    "type": "statusEvent",
+                    "statusEvent": {
+                        "id": f"model-wait-{uuid4().hex[:8]}",
+                        "intentType": "chat",
+                        "intentLabel": "模型响应中",
+                        "matchedSkills": [],
+                        "isBackground": False,
+                        "memoryScope": [],
+                        "traceId": trace_id,
+                    },
+                }
+                continue
+            chunk = str(item.get("text") or "")
+            if chunk:
+                ai_reply_parts.append(chunk)
+                if fake_markup_detected:
+                    continue
+                streamed_safe_text, safe_chunk, detected = _split_safe_model_chunk(streamed_safe_text, chunk)
+                if safe_chunk:
+                    yield {"type": "token", "text": safe_chunk}
+                if detected:
+                    fake_markup_detected = True
+    except Exception as stream_exc:
+        err_msg = str(stream_exc)[:300] or type(stream_exc).__name__
+        if "rate" in err_msg.lower() or "limit" in err_msg.lower():
+            yield {"type": "token", "text": "\n\n（请求太频繁，稍等几秒再试。）"}
+        elif "timeout" in err_msg.lower() or "connect" in err_msg.lower():
+            yield {"type": "token", "text": "\n\n（连接超时，请检查本地 API 是否正常运行。）"}
+        else:
+            yield {"type": "token", "text": f"\n\n（回复生成中断：{err_msg}）"}
+        yield {
+            "type": "failureHintEvent",
+            "failureHintEvent": _failure_hint_event(
+                stream_exc, stage="model_stream", trace_id=trace_id
+            ),
+        }
+        yield {"type": "error", "detail": err_msg}
+        yield {"type": "done", "done": True}
+        return
+    ai_reply = "".join(ai_reply_parts)
+
+    # DSML / 伪 XML 救援
+    if _has_fake_xml(ai_reply):
+        rescue_messages = list(model_messages) + [
+            {"role": "assistant", "content": ai_reply},
+            {"role": "user", "content": (
+                "你刚才输出了假标签（如 <读取文件>）或 DSML 标记，这些不会被执行。"
+                "请直接用自然语言重新回答刚才的问题，不要输出任何 XML、伪标签或 function call 语法。"
+            )},
+        ]
+        rescue_parts: list[str] = []
+        try:
+            for item in _iter_model_stream_with_heartbeat(rescue_messages, model=active_model):
+                if item.get("type") == "heartbeat":
+                    continue
+                chunk = str(item.get("text") or "")
+                if chunk:
+                    rescue_parts.append(chunk)
+                    yield {"type": "token", "text": chunk}
+        except Exception:
+            pass  # 救援失败保留原回复
+
+    # B1.1: 模型无回复兜底
+    if not ai_reply.strip():
+        yield {"type": "token", "text": "模型没有返回内容，请重试或检查诊断。"}
+        yield {
+            "type": "failureHintEvent",
+            "failureHintEvent": _failure_hint_event(
+                RuntimeError("model_empty_response"),
+                stage="model_stream",
+                trace_id=trace_id,
+            ),
+        }
+
+    yield {"type": "done", "done": True}
+
+
 def _iter_chat_chunks(
     messages: list[dict],
     memory_mode: str = "conservative",
@@ -1990,6 +2220,18 @@ def _iter_chat_chunks(
     # 历史（不含当前这条用户消息），用于历史感知意图与检索改写
     prior_history = messages[:-1] if (messages and messages[-1].get("role") == "user") else messages
     intent_info = classify_query_intent(query, history=prior_history, llm_fallback=False)
+    # ── B5.1: simple path 分叉（轻量闲聊跳过 orchestration/router/memory/vault/tool_loop） ──
+    try:
+        from core.desktop_tool_router import is_simple_chat_path
+        if is_simple_chat_path(query, intent_info, file_refs=file_refs):
+            yield from _iter_simple_chat_path(
+                messages, query=query, intent_info=intent_info,
+                file_refs=file_refs, trace_id=trace_id,
+                memory_mode=memory_mode, obsidian_mode=obsidian_mode,
+            )
+            return
+    except Exception:
+        pass  # simple path 判定异常 → 回退到 full path
     try:
         from core.orchestrator import (
             build_task_plan,
@@ -2685,6 +2927,13 @@ def _iter_chat_chunks(
 
     if not ai_reply.strip():
         had_tool_activity = bool(tool_loop_events or api_tool_events)
+        # B1.1: 兜底 token —— 让终端/web/三方客户端都能拿到文案，不只依赖前端 failureHintFallback
+        fallback_text = (
+            "已执行操作，详见上方卡片。"
+            if had_tool_activity else
+            "模型没有返回内容，请打开诊断查看原因。"
+        )
+        yield {"type": "token", "text": fallback_text}
         yield {
             "type": "failureHintEvent",
             "failureHintEvent": {

@@ -21,5 +21,12 @@ contextBridge.exposeInMainWorld('archerDesktop', {
     tokenOk: boolean
     owned: boolean
     reason: string
-  }>
+  }>,
+  getCrashInfo: () => ipcRenderer.invoke('archer:get-crash-info') as Promise<{
+    isCrash: boolean
+    reason: string
+    crashCount: number
+    lastTraceId: string | null
+    startedAt: string | null
+  } | null>
 })

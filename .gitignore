@@ -44,6 +44,9 @@ logs/
 private/
 vault/
 
+# L0 journal: active_context + crash_count (runtime data, never commit)
+journal/
+
 # History directories (covenant/presence proposal archives)
 history/
 

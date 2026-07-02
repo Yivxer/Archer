@@ -31,5 +31,12 @@ interface Window {
       owned: boolean
       reason: string
     }>
+    getCrashInfo: () => Promise<{
+      isCrash: boolean
+      reason: string
+      crashCount: number
+      lastTraceId: string | null
+      startedAt: string | null
+    } | null>
   }
 }

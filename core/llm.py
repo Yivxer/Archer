@@ -7,6 +7,7 @@ from typing import Generator
 
 from core.model_profiles import cfg_with_active_api
 from core.observability import trace_span
+from core.provider_breaker import is_provider_connection_error, record_failure, record_success
 from core.token_usage import get_last_call_usage, get_session_usage, record_call_usage, reset_session_usage
 
 _cfg: dict | None = None
@@ -142,6 +143,34 @@ def _status_hint(base_url: str, err: APIStatusError) -> RuntimeError:
     return RuntimeError(f"模型 API 请求失败：HTTP {status_code or 'unknown'}；base_url={base_url}。")
 
 
+def _record_provider_failure(cfg: dict, err: Exception) -> None:
+    """B6.1: 记录 provider 失败到熔断器。
+
+    只计连接/超时类错误，不计 401/403（配置错）和 429（限流）。
+    熔断器内部决定是否触发熔断。
+    """
+    try:
+        profile_id = str(cfg.get("api", {}).get("active_profile", "") or "unknown")
+        # 401/403/429 不计入熔断（_status_hint 已分类，这里通过 status_code 判断）
+        status_code = getattr(err, "status_code", None)
+        if status_code in (401, 403, 429):
+            return
+        # 连接/超时/5xx 计入熔断
+        if is_provider_connection_error(err) or (status_code and int(status_code) >= 500):
+            record_failure(profile_id, f"{type(err).__name__}: {err}")
+    except Exception:
+        pass  # 熔断记录失败不影响主流程
+
+
+def _record_provider_success(cfg: dict) -> None:
+    """B6.1: 记录 provider 成功，清零熔断计数。"""
+    try:
+        profile_id = str(cfg.get("api", {}).get("active_profile", "") or "unknown")
+        record_success(profile_id)
+    except Exception:
+        pass
+
+
 def stream_chat(
     messages: list[dict],
     model: str = "",
@@ -171,11 +200,16 @@ def stream_chat(
                 stream=True,
             )
         except (APIConnectionError, APITimeoutError) as e:
+            # B6.1: provider 连接失败计入熔断
+            _record_provider_failure(cfg, e)
             raise _connection_hint(base_url, e) from e
         except APIStatusError as e:
+            # B6.1: 5xx 类 server error 计入熔断，401/403/429 不计
+            _record_provider_failure(cfg, e)
             raise _status_hint(base_url, e) from e
 
         call_usage: dict[str, int] | None = None
+        _stream_completed = False
 
         try:
             for chunk in response:
@@ -189,12 +223,16 @@ def stream_chat(
 
                 if chunk.choices and chunk.choices[0].delta.content:
                     yield chunk.choices[0].delta.content
+            _stream_completed = True
         finally:
             # generator 耗尽或被提前关闭（GeneratorExit/close）都记录 usage
             # 避免客户端断开时 usage 丢失
             if track_usage and call_usage:
                 record_call_usage(**call_usage)
                 span.update(call_usage)
+            # B6.1: 流式正常完成 → 记录成功，清零熔断计数
+            if _stream_completed:
+                _record_provider_success(cfg)
 
 
 def get_last_usage() -> dict[str, int]:
@@ -227,7 +265,13 @@ def call_with_tools(messages: list[dict], tools: list[dict], model: str = "") ->
                 stream=False,
             )
         except (APIConnectionError, APITimeoutError) as e:
+            # B6.1: provider 连接失败计入熔断
+            _record_provider_failure(cfg, e)
             raise _connection_hint(cfg["api"]["base_url"], e) from e
+        except APIStatusError as e:
+            # B6.1: 补 APIStatusError 分支（与 stream_chat 对称），5xx 计入熔断
+            _record_provider_failure(cfg, e)
+            raise _status_hint(cfg["api"]["base_url"], e) from e
         if getattr(response, "usage", None) and response.usage.total_tokens:
             usage = {
                 "prompt_tokens": response.usage.prompt_tokens or 0,
@@ -236,6 +280,8 @@ def call_with_tools(messages: list[dict], tools: list[dict], model: str = "") ->
             }
             record_call_usage(**usage)
             span.update(usage)
+        # B6.1: 成功 → 记录成功，清零熔断计数
+        _record_provider_success(cfg)
         return response.choices[0].message
 
 

@@ -266,4 +266,19 @@ def run_with_tools(
             "content": "请用自然语言给出最终回答，总结你已完成的操作和结果。不要调用工具，不要输出 XML 或 DSML 标记。",
         })
 
-    return stream_fn(messages, model)
+    final_stream = stream_fn(messages, model)
+
+    # B1.1: 终端兜底 —— stream_fn 返回空文本时，打印兜底文案，避免用户看到"模型无回复"
+    def _wrap_with_fallback(stream):
+        has_content = False
+        try:
+            for chunk in stream:
+                if chunk:
+                    has_content = True
+                yield chunk
+        finally:
+            if not has_content:
+                fallback = "已执行操作，详见上方卡片。" if _executed else "模型没有返回内容，请重试或检查诊断。"
+                console.print(f"[yellow]{fallback}[/yellow]")
+
+    return _wrap_with_fallback(final_stream)
