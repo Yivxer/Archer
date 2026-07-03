@@ -1,0 +1,154 @@
+/* ── L4.4 TracePanel 原语增量 ────────────────────────────────
+   契约：docs/ui-primitives.md §3
+   基础样式（.trace-panel / .trace-panel-header / .trace-kv /
+   .trace-event-row / .trace-events / .trace-empty）仍在
+   chat.css 中，这里只补 L4.4 新增 class：
+   - trace-panel-title / trace-panel-trace-id / trace-panel-close
+   - trace-failure-section / trace-failure-toggle
+   - trace-keyword-badge（+ warning/danger/info 色阶）
+   - trace-failure-stage / trace-failure-detail / trace-failure-text
+   - trace-retry-button
+   - trace-event-type / trace-event-summary
+   ────────────────────────────────────────────────────────── */
+
+.trace-panel-title {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.trace-panel-trace-id {
+  color: var(--muted);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.trace-panel-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: 999px;
+  padding: 0;
+  color: inherit;
+  background: color-mix(in srgb, currentColor 8%, transparent);
+  cursor: pointer;
+}
+
+/* ── failure 折叠区 ───────────────────────────────────────── */
+.trace-failure-section {
+  display: grid;
+  gap: 6px;
+  margin: 0 0 10px;
+}
+
+.trace-failure-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  padding: 4px 0;
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.trace-failure-toggle svg {
+  color: var(--muted);
+  transition: transform 160ms ease;
+}
+
+.trace-failure-toggle[aria-expanded="true"] svg {
+  transform: rotate(180deg);
+}
+
+.trace-keyword-badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.trace-keyword-warning {
+  color: color-mix(in srgb, var(--amber) 78%, var(--ink));
+  background: color-mix(in srgb, var(--amber) 18%, transparent);
+}
+
+.trace-keyword-danger {
+  color: color-mix(in srgb, var(--red) 82%, var(--ink));
+  background: color-mix(in srgb, var(--red) 16%, transparent);
+}
+
+.trace-keyword-info {
+  color: color-mix(in srgb, var(--blue) 78%, var(--ink));
+  background: color-mix(in srgb, var(--blue) 14%, transparent);
+}
+
+.trace-failure-stage {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.trace-failure-detail {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--line) 60%, transparent);
+}
+
+.trace-failure-text {
+  margin: 0;
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.trace-retry-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  border: 1px solid color-mix(in srgb, var(--cyan) 30%, transparent);
+  border-radius: 6px;
+  padding: 4px 8px;
+  color: var(--cyan);
+  background: transparent;
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 160ms ease;
+}
+
+.trace-retry-button:hover {
+  background: color-mix(in srgb, var(--cyan) 10%, transparent);
+  border-color: color-mix(in srgb, var(--cyan) 50%, transparent);
+}
+
+/* ── 事件行：覆盖 chat.css .trace-event-row span/em 的旧样式 ──
+   旧实现里 span/em 共用 muted/ink 配色，这里复用旧 class，
+   不需要额外样式，仅在 .trace-event-type / .trace-event-summary
+   上提供等价语义（保持向后兼容）。 */
+.trace-event-type {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.trace-event-summary {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--ink);
+  font-size: 12px;
+  font-style: normal;
+}

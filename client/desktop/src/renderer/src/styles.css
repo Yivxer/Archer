@@ -9,6 +9,8 @@
 @import "./styles/pages.css";
 @import "./styles/confirmation-card.css";
 @import "./styles/work-receipt.css";
+@import "./styles/trace-panel.css";
+@import "./styles/error-recovery.css";
 
 :root {
   /* Brand colors, bg-1, bg-2, font stacks → tokens.css */

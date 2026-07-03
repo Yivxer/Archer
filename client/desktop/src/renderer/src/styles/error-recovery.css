@@ -1,0 +1,107 @@
+/* ── L4.5 ErrorRecovery 原语 ────────────────────────────────
+   契约：docs/ui-primitives.md §4
+   Archer Ring 五色品牌：色条按 failureType 分类
+   - amber：connection / timeout 类
+   - orange：permission / rejected 类
+   - blue：empty / 事务性 / 提示类
+   - red：严重 / 未知
+   ────────────────────────────────────────────────────────── */
+
+.error-recovery {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 36px;
+  padding: 6px 12px 6px 16px;
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--panel-solid) 92%, transparent);
+  font-size: 12px;
+}
+
+/* 左边色条 4px */
+.error-recovery-stripe {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  border-radius: 8px 0 0 8px;
+}
+
+.error-recovery-tone-amber .error-recovery-stripe { background: var(--amber); }
+.error-recovery-tone-orange .error-recovery-stripe { background: var(--orange); }
+.error-recovery-tone-blue .error-recovery-stripe { background: var(--blue); }
+.error-recovery-tone-red .error-recovery-stripe { background: var(--red); }
+
+/* 色条对应的边框色调微调 */
+.error-recovery-tone-amber {
+  border-color: color-mix(in srgb, var(--amber) 28%, var(--panel-border));
+}
+.error-recovery-tone-orange {
+  border-color: color-mix(in srgb, var(--orange) 28%, var(--panel-border));
+}
+.error-recovery-tone-blue {
+  border-color: color-mix(in srgb, var(--blue) 24%, var(--panel-border));
+}
+.error-recovery-tone-red {
+  border-color: color-mix(in srgb, var(--red) 28%, var(--panel-border));
+}
+
+/* 正文 */
+.error-recovery-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  color: var(--text);
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+/* 右侧动作区 */
+.error-recovery-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.error-recovery-retry {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid color-mix(in srgb, var(--cyan) 30%, transparent);
+  border-radius: 6px;
+  padding: 3px 8px;
+  color: var(--cyan);
+  background: transparent;
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 160ms ease;
+}
+
+.error-recovery-retry:hover {
+  background: color-mix(in srgb, var(--cyan) 10%, transparent);
+  border-color: color-mix(in srgb, var(--cyan) 50%, transparent);
+}
+
+.error-recovery-trace {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  padding: 0;
+  color: var(--muted);
+  background: transparent;
+  cursor: pointer;
+  transition: all 160ms ease;
+}
+
+.error-recovery-trace:hover {
+  color: var(--cyan);
+  border-color: color-mix(in srgb, var(--cyan) 40%, transparent);
+}
