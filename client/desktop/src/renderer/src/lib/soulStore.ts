@@ -1,0 +1,147 @@
+/**
+ * L3.3 — soulStore
+ *
+ * 真值来源：/soul-profile + /soul-files + /vault/reflection/recent + 导入动作
+ * 订阅者：SoulPage、ReviewPage、VaultReflectionsPanel
+ *
+ * 契约：docs/api-contract.md §「soulStore（L3.3）」
+ */
+
+import {
+  fetchVaultReflections,
+  importSoul,
+  triggerVaultReflection,
+} from '../adapters/localArcher'
+import type { SoulFiles, SoulProfileSummary, VaultReflection } from '../types'
+import { createExternalStore, useExternalStore, type LoadState } from './externalStore'
+
+// ───────────────────────── State ─────────────────────────
+
+export type SoulStoreState = {
+  profile: SoulProfileSummary | null
+  files: SoulFiles
+  reflections: VaultReflection[]
+  loadState: LoadState
+  error: string
+  importing: boolean
+  importMessage: string
+}
+
+const initialState: SoulStoreState = {
+  profile: null,
+  files: {} as SoulFiles,
+  reflections: [],
+  loadState: 'idle',
+  error: '',
+  importing: false,
+  importMessage: '',
+}
+
+// ───────────────────────── Store 单例 ─────────────────────────
+
+const store = createExternalStore<SoulStoreState>(initialState)
+
+export function getSoulStoreState(): SoulStoreState {
+  return store.getState()
+}
+
+export function subscribeSoulStore(listener: () => void): () => void {
+  return store.subscribe(listener)
+}
+
+// ───────────────────────── Actions ─────────────────────────
+
+/**
+ * 全量加载 soul 数据（profile + files + reflections 并发）。
+ * profile 和 files 由 loadLocalArcher 注入，loadAll 只补 reflections。
+ */
+export async function loadAllSoul(): Promise<void> {
+  store.setState((s) => ({ ...s, loadState: 'loading', error: '' }))
+  try {
+    const result = await fetchVaultReflections(10)
+    store.setState((s) => ({
+      ...s,
+      reflections: result.reflections,
+      loadState: 'ready',
+      error: '',
+    }))
+  } catch (err) {
+    store.setState((s) => ({
+      ...s,
+      loadState: 'error',
+      error: err instanceof Error ? err.message : String(err),
+    }))
+  }
+}
+
+/**
+ * 导入 soul 数据。
+ */
+export async function importSoulAction(soulData: Record<string, unknown>): Promise<void> {
+  store.setState((s) => ({ ...s, importing: true, importMessage: '' }))
+  try {
+    const result = await importSoul(soulData)
+    store.setState((s) => ({
+      ...s,
+      importing: false,
+      importMessage: result.message || `已导入 ${result.imported} 条`,
+    }))
+    // 导入成功后需要 main.tsx onRefresh 刷新 profile + files
+    // 这里只更新 importing 状态，实际 profile/files 由 mergeProfile/mergeFiles 注入
+  } catch (err) {
+    store.setState((s) => ({
+      ...s,
+      importing: false,
+      importMessage: err instanceof Error ? err.message : String(err),
+      error: err instanceof Error ? err.message : String(err),
+    }))
+    throw err
+  }
+}
+
+/**
+ * 触发 vault reflection。
+ */
+export async function triggerReflectionAction(
+  payload: { path?: string; days?: number; maxNotes?: number; force?: boolean },
+): Promise<void> {
+  try {
+    await triggerVaultReflection(payload)
+    // 触发后 refresh reflections
+    const result = await fetchVaultReflections(10)
+    store.setState((s) => ({ ...s, reflections: result.reflections }))
+  } catch (err) {
+    store.setState((s) => ({
+      ...s,
+      error: err instanceof Error ? err.message : String(err),
+    }))
+    throw err
+  }
+}
+
+/**
+ * 由 loadLocalArcher 注入 profile（不触发 API）。
+ */
+export function mergeSoulProfile(profile: SoulProfileSummary): void {
+  store.setState((s) => ({ ...s, profile }))
+}
+
+/**
+ * 由 loadLocalArcher 注入 files（不触发 API）。
+ */
+export function mergeSoulFiles(files: SoulFiles): void {
+  store.setState((s) => ({ ...s, files }))
+}
+
+/**
+ * 重置 store。
+ */
+export function resetSoulStore(): void {
+  store.setState(() => initialState)
+}
+
+// ───────────────────────── React hook ─────────────────────────
+
+export function useSoulStore<U>(selector: (state: SoulStoreState) => U): U {
+  return useExternalStore(store, selector)
+}

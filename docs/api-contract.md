@@ -534,3 +534,183 @@ Obsidian 传感器入口，用于把当前打开的笔记作为只读上下文�
 | `terminal/api/_config.py` | 配置路径、消息清洗 |
 
 OpenAPI：FastAPI 运行时访问 `/docs`、`/redoc`。
+
+---
+
+## L3 领域 store 契约（L3.1）
+
+5 个领域 store + threadStore（L3.8 后续补）。所有 store 采用**外部 store + useSyncExternalStore** 模式（与 `runtimeStore.ts` 一致），单例对象 + selector hook。
+
+### 通用 store 接口
+
+每个 store 实现：
+
+```ts
+type ExternalStore<T> = {
+  getState(): T
+  subscribe(listener: () => void): () => void
+  setState(producer: (draft: T) => T): void  // 不可变更新
+}
+
+function useXxxStore<U>(selector: (state: T) => U): U {
+  return useSyncExternalStore(store.subscribe, () => selector(store.getState()))
+}
+```
+
+规则：
+1. 页面不直接 fetch，只 dispatch action 或读取 store
+2. store 是单一真值，页面只读订阅
+3. action 成功后由 store 自己 refresh 真值，页面不手动 invalidate
+4. 跨 store 联动（L3.7）：memory accept 后 memoryStore 通知 sessionStore refresh
+
+### memoryStore（L3.2）
+
+**真值来源**：`/memory` + `/memory/stats` + `/memory/groups` + 审阅动作
+
+**State shape**：
+```ts
+type MemoryStoreState = {
+  items: MemoryItem[]           // /memory?include_rejected=true
+  stats: MemoryStats | null     // /memory/stats
+  groups: MemoryGroup[]         // /memory/groups
+  loadState: 'idle' | 'loading' | 'ready' | 'error'
+  error: string
+  // 审阅动作进行中的 id 集合
+  busyIds: Set<number>
+}
+```
+
+**Actions**：
+| Action | 调用 API | 副作用 |
+|--------|---------|--------|
+| `loadAll()` | GET /memory + /memory/stats + /memory/groups（并发） | 全量替换 items/stats/groups |
+| `resolvePending(id, accepted)` | POST /memory/pending/{id}/{accept\|reject} | 移除/标记 item + refresh stats |
+| `batchResolve(accepted)` | POST /memory/pending/batch/{accept\|reject} | refresh items + stats |
+| `updateMemory(id, content)` | POST /memory/update | 替换 item.content |
+| `evolveMemory(id, content, ...)` | POST /memory/evolve | refresh items |
+| `mergeItems(items)` | （无 API，由 loadLocalArcher 注入） | 仅替换 items |
+
+**订阅者**：MemoryPage、ReviewPage、ChatPage Workspace
+
+### soulStore（L3.3）
+
+**真值来源**：`/soul-profile` + `/soul-files` + `/vault/reflection/recent` + 导入动作
+
+**State shape**：
+```ts
+type SoulStoreState = {
+  profile: SoulProfileSummary | null   // /soul-profile
+  files: SoulFiles                      // /soul-files
+  reflections: VaultReflection[]        // /vault/reflection/recent?limit=10
+  loadState: 'idle' | 'loading' | 'ready' | 'error'
+  error: string
+  importing: boolean
+  importMessage: string
+}
+```
+
+**Actions**：
+| Action | 调用 API | 副作用 |
+|--------|---------|--------|
+| `loadAll()` | GET /soul-profile + /soul-files + /vault/reflection/recent?limit=10 | 全量替换 |
+| `importSoul(soulData)` | POST /soul/import | refresh profile + files |
+| `triggerReflection(payload)` | POST /vault/reflection | refresh reflections |
+| `mergeProfile(profile)` / `mergeFiles(files)` | （由 loadLocalArcher 注入） | 局部替换 |
+
+**订阅者**：SoulPage、ReviewPage、VaultReflectionsPanel
+
+### sessionStore（L3.4）
+
+**真值来源**：`/sessions` + `/sessions/{id}` + `/sessions/search` + 保存/续写动作
+
+**State shape**：
+```ts
+type SessionStoreState = {
+  items: SessionItem[]                          // /sessions（列表摘要）
+  currentDetail: SessionDetail | null           // /sessions/{id}（当前打开的详情）
+  searchResults: SessionSearchResult[]          // /sessions/search?q=
+  searchQuery: string
+  loadState: 'idle' | 'loading' | 'ready' | 'error'
+  detailState: 'idle' | 'loading' | 'ready' | 'error'
+  searchState: 'idle' | 'searching' | 'ready' | 'error'
+  error: string
+}
+```
+
+**Actions**：
+| Action | 调用 API | 副作用 |
+|--------|---------|--------|
+| `loadList()` | GET /sessions | 替换 items |
+| `loadDetail(id)` | GET /sessions/{id} | 替换 currentDetail |
+| `search(query)` | GET /sessions/search?q= | 替换 searchResults（debounce 300ms） |
+| `save(messages, meta)` | POST /sessions | 返回 SavedSession + refresh items |
+| `append(id, messages)` | POST /sessions/{id}/append | 返回 SavedSession |
+| `mergeItems(items)` | （由 loadLocalArcher 注入） | 仅替换 items |
+
+**订阅者**：ReviewPage、侧边栏、main.tsx、ProjectsPage
+
+### jobStore（L3.5）
+
+**真值来源**：`/jobs` + `/jobs/{id}` + cancel/retry/approve/spawn 动作
+
+**State shape**：
+```ts
+type JobStoreState = {
+  jobs: BackgroundJob[]                       // /jobs（列表）
+  currentDetail: BackgroundJob | null         // /jobs/{id}（选中详情，含 children）
+  loadState: 'idle' | 'loading' | 'ready' | 'error'
+  detailState: 'idle' | 'loading' | 'ready' | 'error'
+  error: string
+  busyIds: Set<string>                        // 动作进行中（cancel/retry/spawn）
+}
+```
+
+**Actions**：
+| Action | 调用 API | 副作用 |
+|--------|---------|--------|
+| `loadList()` | GET /jobs | 替换 jobs |
+| `loadDetail(id)` | GET /jobs/{id} | 替换 currentDetail |
+| `create(payload)` | POST /jobs | 返回 BackgroundJob + refresh jobs |
+| `cancel(id)` | POST /jobs/{id}/cancel | 替换对应 job |
+| `retry(id)` | POST /jobs/{id}/retry | 替换对应 job + 600ms 后 refresh |
+| `approve(id, eventId, decision)` | POST /jobs/{id}/approve | 替换对应 job |
+| `spawn(id, children)` | POST /jobs/{id}/spawn | 替换对应 job |
+| `mergeFromRuntime(jobEvents)` | （由 runtimeStore SSE 注入） | 合并 JobEvent → BackgroundJob |
+
+**订阅者**：TasksPage、ChatPage 回执、Workspace
+
+**注意**：runtimeStore 的 `state.jobs` 是 `JobEvent`（SSE 事件），jobStore 的 `state.jobs` 是 `BackgroundJob`（API 拉取）。两者并存，jobStore 是页面消费的真值；runtimeStore 的 JobEvent 用于 trace log。
+
+### initiativeStore（L3.6，只读）
+
+**真值来源**：`/initiative-shadow` + 4 个子端点（report/long-term-report/delivery-gate/review-packet）+ SSE 增量
+
+**State shape**：
+```ts
+type InitiativeStoreState = {
+  review: InitiativeShadowReview | null   // 合并 5 端点
+  loadState: 'idle' | 'loading' | 'ready' | 'error'
+  error: string
+}
+```
+
+**Actions**（只读 + mutation，不暴露写 shadow 的 action）：
+| Action | 调用 API | 副作用 |
+|--------|---------|--------|
+| `loadAll()` | GET /initiative-shadow?limit=5 + 4 子端点（并发） | 替换 review |
+| `submitFeedback(id, feedback)` | POST /initiative-shadow/{id}/feedback | refresh review.items |
+| `setPresence(state)` | POST /initiative-shadow/presence | refresh review.presenceState |
+| `setDeliveryOptIn(enabled)` | POST /initiative-shadow/opt-in | refresh review.optIn + deliveryGate |
+| `mergeSseEvent(event)` | （无 API，由 SSE initiative.event 注入） | 合并到 review.items |
+
+**订阅者**：TodayPage、main.tsx（SSE 合并）
+
+**Part 8 边界**：initiativeStore 只读消费 shadow 事件，不写入聊天（与 L2.5 一致）。
+
+### 跨 store 联动（L3.7，下批实现）
+
+- `memoryStore.resolvePending` 成功 → 通知 `sessionStore.loadList()`（记忆可能影响会话摘要）
+- `jobStore.create` 成功 → 通知 `sessionStore.loadList()`（job 可能产生新会话）
+- `soulStore.importSoul` 成功 → 通知 `memoryStore.loadAll()`（soul 导入可能产生 pending memory）
+
+实现方式：store 间通过事件总线（`lib/storeEvents.ts`）订阅，不直接耦合。
