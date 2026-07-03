@@ -15,6 +15,10 @@ import {
 import { fetchLocalExpertWorkbench, loadLocalSession, switchLocalExpert } from './adapters/localArcher'
 import { connectionStatusLabel, expertShortLabel, modelProfileShortLabel } from './lib/conversationPersona'
 import { mergeInitiativeShadowEvent } from './lib/initiativeShadow'
+import { mergeSseInitiativeEvent } from './lib/initiativeStore'
+import { onStoreEvent } from './lib/storeEventBus'
+import { syncStoresFromAdapter } from './lib/storeSync'
+import { upsertThreadFromSave } from './lib/threadStore'
 import { createOfflineLocalShell, syncBrainData, wasBrainEverLinked } from './lib/brainConnection'
 import { useConnectionState, type ConnectionStateSnapshot } from './lib/useConnectionState'
 import { ConnectionBadge } from './components/ConnectionBadge'
@@ -198,6 +202,8 @@ function App() {
       const result = await syncBrainData({ previous: data, silent: options.silent })
       if (result.adapter) {
         setData(result.adapter)
+        // L3.9: 同步注入到 6 个领域 store（影子真值）
+        syncStoresFromAdapter(result.adapter)
         if (result.state === 'connected') {
           setConversationMode(result.adapter.modes.current || 'auto')
         }
@@ -266,6 +272,8 @@ function App() {
       ...current,
       initiativeShadow: mergeInitiativeShadowEvent(current.initiativeShadow, event),
     }))
+    // L3.9: 同步到 initiativeStore（影子真值）
+    mergeSseInitiativeEvent(event)
   }
 
   const pendingMemoryCount = data.memory.filter((m) => m.status === 'pending').length
@@ -329,6 +337,8 @@ function App() {
         projectId: existingThread?.projectId,
         archived: existingThread?.archived,
       }
+      // L3.9: 同步到 threadStore（影子真值，在回调内调用确保 thread 已构造）
+      upsertThreadFromSave(thread)
       return {
         ...current,
         sessions: nextSessions,
@@ -349,6 +359,25 @@ function App() {
     const timer = setInterval(() => { void connectLocalApi({ silent: true }) }, 3000)
     return () => clearInterval(timer)
   }, [apiState])
+
+  // L3.9: 订阅 storeEventBus，store action 成功后 silent refresh（影子真值同步）
+  React.useEffect(() => {
+    const unsubs: Array<() => void> = []
+    const refreshEvents = [
+      'memory:resolved',
+      'memory:batch-resolved',
+      'memory:evolved',
+      'soul:imported',
+      'soul:reflection-triggered',
+      'job:created',
+    ] as const
+    for (const type of refreshEvents) {
+      unsubs.push(onStoreEvent(type, () => {
+        void connectLocalApi({ silent: true })
+      }))
+    }
+    return () => { for (const unsub of unsubs) unsub() }
+  }, [])
 
   React.useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {

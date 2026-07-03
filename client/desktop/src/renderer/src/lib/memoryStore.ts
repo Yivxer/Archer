@@ -188,9 +188,10 @@ export async function evolveMemoryAction(
 
 /**
  * 由 loadLocalArcher 注入 items（不触发 API）。
+ * 注入后即视为 ready，避免 storeSync 后 loadState 仍为 idle。
  */
 export function mergeMemoryItems(items: MemoryItem[]): void {
-  store.setState((s) => ({ ...s, items }))
+  store.setState((s) => ({ ...s, items, loadState: 'ready' }))
 }
 
 /**

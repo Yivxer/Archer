@@ -126,16 +126,18 @@ export async function triggerReflectionAction(
 
 /**
  * 由 loadLocalArcher 注入 profile（不触发 API）。
+ * 注入后即视为 ready，避免 storeSync 后 loadState 仍为 idle。
  */
 export function mergeSoulProfile(profile: SoulProfileSummary): void {
-  store.setState((s) => ({ ...s, profile }))
+  store.setState((s) => ({ ...s, profile, loadState: 'ready' }))
 }
 
 /**
  * 由 loadLocalArcher 注入 files（不触发 API）。
+ * 注入后即视为 ready，避免 storeSync 后 loadState 仍为 idle。
  */
 export function mergeSoulFiles(files: SoulFiles): void {
-  store.setState((s) => ({ ...s, files }))
+  store.setState((s) => ({ ...s, files, loadState: 'ready' }))
 }
 
 /**
