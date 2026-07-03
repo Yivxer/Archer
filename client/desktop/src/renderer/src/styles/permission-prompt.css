@@ -1,0 +1,141 @@
+/* ── L4.6 PermissionPrompt 原语 ─────────────────────────────
+   契约：docs/ui-primitives.md §5
+   Archer Ring 五色品牌：色条按 level 分类
+   - blue：read（只读，最低风险）
+   - amber：write（写入本地/vault）
+   - orange：deploy（部署到远端）
+   - red：shell（命令执行，最高风险）
+   ────────────────────────────────────────────────────────── */
+
+.permission-prompt {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  padding: 10px 12px 10px 16px;
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--panel-solid) 92%, transparent);
+}
+
+.permission-prompt-stripe {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  border-radius: 8px 0 0 8px;
+}
+
+.permission-prompt-tone-blue .permission-prompt-stripe { background: var(--blue); }
+.permission-prompt-tone-amber .permission-prompt-stripe { background: var(--amber); }
+.permission-prompt-tone-orange .permission-prompt-stripe { background: var(--orange); }
+.permission-prompt-tone-red .permission-prompt-stripe { background: var(--red); }
+
+.permission-prompt-tone-blue {
+  border-color: color-mix(in srgb, var(--blue) 24%, var(--panel-border));
+}
+.permission-prompt-tone-amber {
+  border-color: color-mix(in srgb, var(--amber) 28%, var(--panel-border));
+}
+.permission-prompt-tone-orange {
+  border-color: color-mix(in srgb, var(--orange) 28%, var(--panel-border));
+}
+.permission-prompt-tone-red {
+  border-color: color-mix(in srgb, var(--red) 28%, var(--panel-border));
+}
+
+.permission-prompt-body {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.permission-prompt-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.permission-prompt-icon {
+  flex-shrink: 0;
+}
+
+.permission-prompt-tone-blue .permission-prompt-icon { color: var(--blue); }
+.permission-prompt-tone-amber .permission-prompt-icon { color: var(--amber); }
+.permission-prompt-tone-orange .permission-prompt-icon { color: var(--orange); }
+.permission-prompt-tone-red .permission-prompt-icon { color: var(--red); }
+
+.permission-prompt-title {
+  flex: 1 1 auto;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.permission-prompt-dismiss {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 999px;
+  padding: 0;
+  color: var(--muted);
+  background: transparent;
+  cursor: pointer;
+  transition: all 160ms ease;
+}
+
+.permission-prompt-dismiss:hover {
+  color: var(--ink);
+  background: color-mix(in srgb, currentColor 8%, transparent);
+}
+
+.permission-prompt-reason {
+  margin: 0;
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.permission-prompt-target {
+  display: block;
+  padding: 4px 6px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--line) 60%, transparent);
+  color: var(--ink);
+  font-family: "SF Mono", "Fira Code", monospace;
+  font-size: 11px;
+  word-break: break-all;
+  overflow-wrap: anywhere;
+}
+
+.permission-prompt-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.permission-prompt-escalate {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid color-mix(in srgb, var(--cyan) 30%, transparent);
+  border-radius: 6px;
+  padding: 4px 10px;
+  color: var(--cyan);
+  background: transparent;
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 160ms ease;
+}
+
+.permission-prompt-escalate:hover {
+  background: color-mix(in srgb, var(--cyan) 10%, transparent);
+  border-color: color-mix(in srgb, var(--cyan) 50%, transparent);
+}
