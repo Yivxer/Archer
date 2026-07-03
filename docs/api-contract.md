@@ -707,10 +707,66 @@ type InitiativeStoreState = {
 
 **Part 8 边界**：initiativeStore 只读消费 shadow 事件，不写入聊天（与 L2.5 一致）。
 
-### 跨 store 联动（L3.7，下批实现）
+### 跨 store 联动（L3.7，事件总线）
 
-- `memoryStore.resolvePending` 成功 → 通知 `sessionStore.loadList()`（记忆可能影响会话摘要）
-- `jobStore.create` 成功 → 通知 `sessionStore.loadList()`（job 可能产生新会话）
-- `soulStore.importSoul` 成功 → 通知 `memoryStore.loadAll()`（soul 导入可能产生 pending memory）
+store 间通过 `lib/storeEventBus.ts` 解耦：store action 成功后 `emitStoreEvent`，订阅方（main.tsx 或其他 store）决定是否 refresh。store 间不直接调用，main.tsx 作为协调者监听事件后触发 `loadLocalArcher` refresh。
 
-实现方式：store 间通过事件总线（`lib/storeEvents.ts`）订阅，不直接耦合。
+**事件类型清单**：
+
+| 事件 type | 来源 action | payload | 订阅方动作 |
+|---|---|---|---|
+| `memory:resolved` | `memoryStore.resolvePendingMemoryAction` | `{ id, accepted }` | main.tsx refresh（记忆可能影响会话摘要） |
+| `memory:batch-resolved` | `memoryStore.batchResolvePendingMemoryAction` | `{ accepted, count? }` | main.tsx refresh |
+| `memory:evolved` | `memoryStore.evolveMemoryAction` | `{ id }` | main.tsx refresh |
+| `soul:imported` | `soulStore.importSoulAction` | `{ imported }` | main.tsx refresh（soul 导入可能产生 pending memory） |
+| `soul:reflection-triggered` | `soulStore.triggerReflectionAction` | `{}` | main.tsx refresh |
+| `job:created` | `jobStore.createJob` | `{ jobId }` | main.tsx refresh（job 可能产生新会话） |
+| `job:cancelled` | `jobStore.cancelJob` | `{ jobId }` | — |
+| `job:retried` | `jobStore.retryJob` | `{ jobId }` | — |
+| `job:approved` | `jobStore.approveJob` | `{ jobId, decision }` | — |
+| `job:spawned` | `jobStore.spawnChildren` | `{ parentJobId, childCount }` | — |
+
+**设计原则**：
+1. store 间不直接调用（低耦合）
+2. main.tsx 作为协调者，监听事件后触发 `loadLocalArcher` refresh
+3. store 的 action 不需要知道谁在监听
+4. 异常隔离：单个监听者抛错不影响其他监听者（`emitStoreEvent` 内部 try/catch + console.warn）
+
+### threadStore（L3.8，ConversationThread 连续性契约）
+
+**真值来源**：loadLocalArcher 注入 items + `createLocalThread` / `updateLocalThread` / `addLocalSessionToThread` 3 个 API 动作 + 前端局部更新（`upsertThreadFromSave`）
+
+**State shape**：
+```ts
+type ThreadStoreState = {
+  items: ConversationThread[]
+  currentThreadId: string | null
+  loadState: 'idle' | 'loading' | 'ready' | 'error'
+  error: string
+}
+```
+
+**Actions**：
+| Action | 调用 API | 副作用 |
+|--------|---------|--------|
+| `mergeThreadItems(items)` | （无，由 loadLocalArcher 注入） | 替换 items + 保留 currentThreadId（若仍存在）+ 标记 ready |
+| `setCurrentThread(id\|null)` | （无） | 设置/清空当前活跃 thread |
+| `createThread(messages, title?)` | POST /threads | upsert items + 设为 current |
+| `updateThread(id, patch)` | POST /threads/{id} | upsert items（持久化 summary/title/projectId/archived） |
+| `linkSessionToThread(threadId, sessionId)` | POST /threads/{id}/sessions | upsert items（thread.sessionIds 追加） |
+| `upsertThreadFromSave(thread)` | （无，前端局部更新） | upsert items（保存会话后立即更新 UI，不调 API） |
+| `getCurrentThread()` | （selector） | 返回当前活跃 thread 或 null |
+
+**连续性契约**（Archer 稳定性框架.md §ConversationThread 连续性契约）：
+1. 首页第一次发送成功后，后端创建 thread，前端立即把它设为当前 active thread
+2. 用户不点"新建对话"时，连续追问都 append 到同一 session/thread
+3. 侧边栏任务列表渲染 thread，而不是平铺 session
+4. 项目归属优先按 `threadIds`，旧 `sessionIds` 只做兼容
+5. 发消息前注入当前 thread summary；该 summary 不写入 session 正文，避免污染历史记录
+6. 旧 session 无 threadId 时允许 fallback 聚合，但不能把 fallback 当成正式迁移
+
+**与 main.tsx 的关系**（接入留 L3.9）：
+- main.tsx 原 `data.threads` 局部更新逻辑（`upsertSavedSessionSnapshot`）迁移到 `threadStore.upsertThreadFromSave`
+- main.tsx 订阅 `useThreadStore(s => s.items)` 替代 `data.threads`
+- 新 session 保存后，若 threadId 存在且是新 thread，调 `threadStore.linkSessionToThread` 持久化关联
+- thread summary 由前端 `summarizeThreadMessages` 生成，通过 `threadStore.updateThread` 持久化

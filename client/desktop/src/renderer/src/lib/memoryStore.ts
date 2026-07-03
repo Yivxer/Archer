@@ -17,6 +17,7 @@ import {
 } from '../adapters/localArcher'
 import type { MemoryGroup, MemoryItem, MemoryStats } from '../types'
 import { createExternalStore, useExternalStore, type LoadState } from './externalStore'
+import { emitStoreEvent } from './storeEventBus'
 
 // ───────────────────────── State ─────────────────────────
 
@@ -105,6 +106,8 @@ export async function resolvePendingMemoryAction(
     fetchMemoryStats()
       .then((stats) => store.setState((s) => ({ ...s, stats })))
       .catch(() => {})
+    // L3.7: 通知跨 store 联动（main.tsx 监听后触发 loadLocalArcher refresh）
+    emitStoreEvent({ type: 'memory:resolved', id, accepted })
   } catch (err) {
     store.setState((s) => ({
       ...s,
@@ -125,6 +128,8 @@ export async function batchResolvePendingMemoryAction(
     await batchResolvePendingMemory(accepted)
     // 批量操作后全量 refresh
     await loadAllMemory()
+    // L3.7: 通知跨 store 联动
+    emitStoreEvent({ type: 'memory:batch-resolved', accepted })
   } catch (err) {
     store.setState((s) => ({
       ...s,
@@ -170,6 +175,8 @@ export async function evolveMemoryAction(
     await evolveMemory(id, content, type, importance, depth)
     // 演化可能改变 type/depth，全量 refresh items 更稳妥
     await loadAllMemory()
+    // L3.7: 通知跨 store 联动（soul 演化可能影响 session 摘要）
+    emitStoreEvent({ type: 'memory:evolved', id })
   } catch (err) {
     store.setState((s) => ({
       ...s,

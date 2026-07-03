@@ -22,6 +22,7 @@ import {
 } from '../adapters/localArcher'
 import type { BackgroundJob } from '../types'
 import { createExternalStore, useExternalStore, type LoadState } from './externalStore'
+import { emitStoreEvent } from './storeEventBus'
 
 // ───────────────────────── State ─────────────────────────
 
@@ -120,6 +121,8 @@ export async function createJob(
     const result = await createBackgroundJob(payload)
     // 创建后 refresh 列表
     await loadJobList()
+    // L3.7: 通知跨 store 联动（job 可能产生新会话）
+    emitStoreEvent({ type: 'job:created', jobId: result.job.id })
     return result.job
   } catch (err) {
     store.setState((s) => ({
@@ -145,6 +148,8 @@ export async function cancelJob(jobId: string): Promise<void> {
       jobs: upsertJob(s, result.job),
       busyIds: new Set([...s.busyIds].filter((id) => id !== jobId)),
     }))
+    // L3.7: 通知跨 store 联动
+    emitStoreEvent({ type: 'job:cancelled', jobId })
   } catch (err) {
     store.setState((s) => ({
       ...s,
@@ -170,6 +175,8 @@ export async function retryJob(jobId: string): Promise<void> {
       jobs: upsertJob(s, result.job),
       busyIds: new Set([...s.busyIds].filter((id) => id !== jobId)),
     }))
+    // L3.7: 通知跨 store 联动
+    emitStoreEvent({ type: 'job:retried', jobId })
     // 600ms 后 refresh 列表（等后端状态稳定）
     setTimeout(() => {
       loadJobList().catch(() => {})
@@ -203,6 +210,8 @@ export async function approveJob(
       jobs: upsertJob(s, result.job),
       busyIds: new Set([...s.busyIds].filter((id) => id !== jobId)),
     }))
+    // L3.7: 通知跨 store 联动
+    emitStoreEvent({ type: 'job:approved', jobId, decision })
   } catch (err) {
     store.setState((s) => ({
       ...s,
@@ -233,6 +242,8 @@ export async function spawnChildren(
       busyIds: new Set([...s.busyIds].filter((id) => id !== jobId)),
     }))
     await loadJobList()
+    // L3.7: 通知跨 store 联动
+    emitStoreEvent({ type: 'job:spawned', parentJobId: jobId, childCount: children.length })
   } catch (err) {
     store.setState((s) => ({
       ...s,

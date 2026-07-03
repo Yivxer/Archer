@@ -12,6 +12,7 @@
 import { describe, expect, it, beforeEach } from 'vitest'
 import type { InitiativeEvent } from '../../../../agent/contracts'
 import type {
+  ConversationThread,
   InitiativeShadowReview,
   MemoryItem,
   SessionItem,
@@ -58,6 +59,15 @@ import {
   resetInitiativeStore,
   subscribeInitiativeStore,
 } from '../initiativeStore'
+import {
+  getCurrentThread,
+  getThreadStoreState,
+  mergeThreadItems,
+  resetThreadStore,
+  setCurrentThread,
+  subscribeThreadStore,
+  upsertThreadFromSave,
+} from '../threadStore'
 
 // ───────────────────────── 测试夹具 ─────────────────────────
 
@@ -167,6 +177,7 @@ function makeInitiativeEvent(overrides: Partial<InitiativeEvent> = {}): Initiati
   return {
     type: 'initiative.event',
     id: 'initiative-100',
+    sessionId: 'sess-test',
     traceId: 'trace-test',
     createdAt: '2026-07-03T10:00:00',
     kind: 'reflection',
@@ -177,6 +188,15 @@ function makeInitiativeEvent(overrides: Partial<InitiativeEvent> = {}): Initiati
     decisionTrace: {},
     ...overrides,
   }
+}
+
+const thread: ConversationThread = {
+  id: 'thread-1',
+  title: '测试话题',
+  summary: '目标：测试 threadStore',
+  createdAt: '2026-07-03T10:00:00',
+  updatedAt: '2026-07-03T10:00:00',
+  sessionIds: ['sess-1'],
 }
 
 // ───────────────────────── externalStore 共享工具 ─────────────────────────
@@ -530,6 +550,7 @@ describe('跨 store 隔离', () => {
     resetSessionStore()
     resetJobStore()
     resetInitiativeStore()
+    resetThreadStore()
   })
 
   it('5 个 store 重置后互不影响', () => {
@@ -544,5 +565,118 @@ describe('跨 store 隔离', () => {
     expect(getSoulStoreState().profile).toEqual(soulProfile)
     expect(getSessionStoreState().items).toEqual([sessionItem])
     expect(getInitiativeStoreState().review).toEqual(initiativeReview)
+  })
+})
+
+// ───────────────────────── threadStore ─────────────────────────
+
+describe('threadStore — L3.8（ConversationThread 连续性契约）', () => {
+  beforeEach(() => {
+    resetThreadStore()
+  })
+
+  it('初始 state shape', () => {
+    const state = getThreadStoreState()
+    expect(state.items).toEqual([])
+    expect(state.currentThreadId).toBeNull()
+    expect(state.loadState).toBe('idle')
+    expect(state.error).toBe('')
+  })
+
+  it('mergeThreadItems 注入 items 并标记 ready', () => {
+    mergeThreadItems([thread])
+    expect(getThreadStoreState().items).toEqual([thread])
+    expect(getThreadStoreState().loadState).toBe('ready')
+  })
+
+  it('mergeThreadItems 保留已存在的 currentThreadId', () => {
+    mergeThreadItems([thread])
+    setCurrentThread('thread-1')
+    // 重新 merge（loadLocalArcher refresh），currentThreadId 应保留
+    mergeThreadItems([{ ...thread, summary: '更新后' }])
+    expect(getThreadStoreState().currentThreadId).toBe('thread-1')
+  })
+
+  it('mergeThreadItems 清空不存在的 currentThreadId', () => {
+    mergeThreadItems([thread])
+    setCurrentThread('thread-1')
+    // merge 后 thread-1 不在新列表中
+    mergeThreadItems([{ ...thread, id: 'thread-2' }])
+    expect(getThreadStoreState().currentThreadId).toBeNull()
+  })
+
+  it('setCurrentThread 设置/清空当前 thread', () => {
+    mergeThreadItems([thread])
+    setCurrentThread('thread-1')
+    expect(getThreadStoreState().currentThreadId).toBe('thread-1')
+    setCurrentThread(null)
+    expect(getThreadStoreState().currentThreadId).toBeNull()
+  })
+
+  it('upsertThreadFromSave 新 thread 追加到头部', () => {
+    mergeThreadItems([thread])
+    const newThread = { ...thread, id: 'thread-2', title: '新话题' }
+    upsertThreadFromSave(newThread)
+    expect(getThreadStoreState().items).toHaveLength(2)
+    expect(getThreadStoreState().items[0].id).toBe('thread-2')
+  })
+
+  it('upsertThreadFromSave 已有 thread 替换（更新 summary/sessionIds）', () => {
+    mergeThreadItems([thread])
+    const updated = { ...thread, summary: '更新摘要', sessionIds: ['sess-1', 'sess-2'] }
+    upsertThreadFromSave(updated)
+    expect(getThreadStoreState().items).toHaveLength(1)
+    expect(getThreadStoreState().items[0].summary).toBe('更新摘要')
+    expect(getThreadStoreState().items[0].sessionIds).toEqual(['sess-1', 'sess-2'])
+  })
+
+  it('getCurrentThread 返回当前活跃 thread', () => {
+    mergeThreadItems([thread])
+    setCurrentThread('thread-1')
+    expect(getCurrentThread()).toEqual(thread)
+  })
+
+  it('getCurrentThread 无 currentThreadId 时返回 null', () => {
+    mergeThreadItems([thread])
+    expect(getCurrentThread()).toBeNull()
+  })
+
+  it('getCurrentThread currentThreadId 不在 items 中时返回 null', () => {
+    mergeThreadItems([thread])
+    setCurrentThread('thread-x')
+    expect(getCurrentThread()).toBeNull()
+  })
+
+  it('resetThreadStore 恢复初始 state', () => {
+    mergeThreadItems([thread])
+    setCurrentThread('thread-1')
+    resetThreadStore()
+    expect(getThreadStoreState().items).toEqual([])
+    expect(getThreadStoreState().currentThreadId).toBeNull()
+  })
+
+  it('subscribeThreadStore 在 merge 时通知', () => {
+    let calls = 0
+    const unsub = subscribeThreadStore(() => { calls += 1 })
+    mergeThreadItems([thread])
+    expect(calls).toBe(1)
+    unsub()
+  })
+
+  it('subscribeThreadStore 在 setCurrentThread 时通知', () => {
+    mergeThreadItems([thread])
+    let calls = 0
+    const unsub = subscribeThreadStore(() => { calls += 1 })
+    setCurrentThread('thread-1')
+    expect(calls).toBe(1)
+    unsub()
+  })
+
+  it('subscribeThreadStore 取消订阅后不通知', () => {
+    let calls = 0
+    const unsub = subscribeThreadStore(() => { calls += 1 })
+    unsub()
+    mergeThreadItems([thread])
+    expect(calls).toBe(0)
   })
 })

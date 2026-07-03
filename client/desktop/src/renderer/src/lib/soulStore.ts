@@ -14,6 +14,7 @@ import {
 } from '../adapters/localArcher'
 import type { SoulFiles, SoulProfileSummary, VaultReflection } from '../types'
 import { createExternalStore, useExternalStore, type LoadState } from './externalStore'
+import { emitStoreEvent } from './storeEventBus'
 
 // ───────────────────────── State ─────────────────────────
 
@@ -86,6 +87,8 @@ export async function importSoulAction(soulData: Record<string, unknown>): Promi
       importing: false,
       importMessage: result.message || `已导入 ${result.imported} 条`,
     }))
+    // L3.7: 通知跨 store 联动（soul 导入可能产生 pending memory，main.tsx 监听后 refresh）
+    emitStoreEvent({ type: 'soul:imported', imported: result.imported })
     // 导入成功后需要 main.tsx onRefresh 刷新 profile + files
     // 这里只更新 importing 状态，实际 profile/files 由 mergeProfile/mergeFiles 注入
   } catch (err) {
@@ -110,6 +113,8 @@ export async function triggerReflectionAction(
     // 触发后 refresh reflections
     const result = await fetchVaultReflections(10)
     store.setState((s) => ({ ...s, reflections: result.reflections }))
+    // L3.7: 通知跨 store 联动（reflection 可能产生 pending memory）
+    emitStoreEvent({ type: 'soul:reflection-triggered' })
   } catch (err) {
     store.setState((s) => ({
       ...s,
