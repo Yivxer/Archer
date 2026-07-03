@@ -13,6 +13,8 @@
 @import "./styles/error-recovery.css";
 @import "./styles/permission-prompt.css";
 @import "./styles/attachment-upload.css";
+@import "./styles/empty-state.css";
+@import "./styles/loading-state.css";
 
 :root {
   /* Brand colors, bg-1, bg-2, font stacks → tokens.css */

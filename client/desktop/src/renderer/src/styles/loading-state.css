@@ -1,0 +1,62 @@
+/* ── L4.9 LoadingState 原语 ─────────────────────────────────
+   契约：docs/ui-primitives.md §8
+   不复用旧 .thinking-indicator（ThinkingDots 自带「思考中」文字），
+   原语自带 .loading-state-* class + 独立 dot 元素。
+   ────────────────────────────────────────────────────────── */
+
+/* 标准模式：垂直居中，padding 32px */
+.loading-state-standard {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 32px;
+  color: var(--muted);
+}
+
+.loading-state-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.loading-state-dot {
+  display: inline-block;
+  border-radius: 999px;
+  background: var(--cyan);
+  animation: loading-state-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes loading-state-pulse {
+  0%, 100% { opacity: 0.3; transform: scale(0.8); }
+  50% { opacity: 1; transform: scale(1); }
+}
+
+.loading-state-standard .loading-state-text {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+/* 紧凑模式：行内，gap 8px */
+.loading-state-compact {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0;
+  color: var(--muted);
+}
+
+.loading-state-compact .loading-state-dots {
+  gap: 3px;
+}
+
+.loading-state-compact .loading-state-text {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+/* showDots=false 时隐藏 dots */
+.loading-state:not(:has(.loading-state-dots)) .loading-state-text {
+  /* 纯文案渲染，无需额外样式 */
+}
