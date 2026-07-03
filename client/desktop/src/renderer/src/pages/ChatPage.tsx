@@ -1,5 +1,5 @@
 import React from 'react'
-import { Activity, ArrowUp, Check, ChevronDown, Copy, CornerDownLeft, Crop, Download, Edit3, FileText, Github, Loader2, Mic, Monitor, Paperclip, RotateCcw, Send, Terminal, X } from 'lucide-react'
+import { ArrowUp, Check, ChevronDown, Copy, CornerDownLeft, Crop, Download, Edit3, FileText, Github, Loader2, Mic, Monitor, Paperclip, RotateCcw, Send, Terminal, X } from 'lucide-react'
 import { appendLocalSession, approveJobToolEvent, cancelBackgroundJobEvent, createBackgroundJobEvent, ensureLocalConnection, fetchBackgroundJob, listBackgroundJobs, pollBackgroundJobEvents, retryBackgroundJobEvent, saveLocalSession, spawnChildJobs, streamLocalChat, ChatBusyError, StreamIdleTimeoutError, submitToolApprovalEvent, switchLocalExpert, switchLocalActiveProfile } from '../adapters/localArcher'
 import { pickChatGreeting } from '../lib/chatGreetings'
 import { extendedConversationModes, modelProfileShortLabel, modelSwitchNotice } from '../lib/conversationPersona'
@@ -11,10 +11,18 @@ import {
   fallbackActionWhenNoReply,
   type DispatcherContext,
 } from '../lib/chatEventDispatcher'
-import type { ArcherAdapter, BackgroundJob, ChatMessage, ExpertStarter, FileRef, MemoryContextMode, ObsidianContextMode, Route, SavedSession, SessionDetail, ToolEvent, WorkIntent, WorkReceipt } from '../types'
+import type { ArcherAdapter, BackgroundJob, ChatMessage, ExpertStarter, FileRef, MemoryContextMode, ObsidianContextMode, Route, SavedSession, SessionDetail, ToolEvent, WorkIntent } from '../types'
 import { ArcherRing, MarkdownMessage, ThinkingDots, ThinkingMutter } from '../components/common'
 import { ExpertAvatar } from '../components/ExpertAvatar'
 import { WorkspaceContextPanel, type WorkspaceJobSummary } from '../components/WorkspaceContextPanel'
+import { AttachmentUpload } from '../components/AttachmentUpload'
+import { ConfirmationCard } from '../components/ConfirmationCard'
+import { EmptyState } from '../components/EmptyState'
+import { ErrorRecovery } from '../components/ErrorRecovery'
+import { LoadingState } from '../components/LoadingState'
+import { PermissionPrompt } from '../components/PermissionPrompt'
+import { TracePanel } from '../components/TracePanel'
+import { WorkReceipt as WorkReceiptComponent } from '../components/WorkReceipt'
 import { buildThinkingMutter } from '../lib/thinkingMutter'
 import { buildTraceDiagnostics, createInitialRuntimeState, createPersistentEventLog, reduceRuntimeEvent, restoreRuntimeStateFromEvents, routeTaskForRuntime, jobSnapshotToAgentEvent, buildPlanChildJobSpecs, buildPlanCoordinatorPrompt, buildPlanExecutionPrompt, planWithStatus } from '../../../agent'
 import type { AgentEvent, ApprovalResultEvent, EventLog, JobEvent, OrchestrationEvent, PlanEvent, TraceDiagnostics } from '../../../agent'
@@ -209,6 +217,10 @@ export function ChatPage({
   const runtimePlans = Object.values(runtimeState.plans)
     .filter((plan) => !isMisroutedHugoPublishPlan(plan))
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+  const recentTraceId = React.useMemo(
+    () => [...runtimeState.events].reverse().find((event) => event.traceId)?.traceId,
+    [runtimeState.events]
+  )
   function recordAgentEvent(event: AgentEvent) {
     eventLogRef.current?.append(event)
     setRuntimeState((current) => reduceRuntimeEvent(current, event))
@@ -1345,31 +1357,11 @@ export function ChatPage({
   const composerEl = (
     <>
     <div className="composer" ref={composerRef}>
-      {fileRefs.length > 0 && (
-        <div className="file-ref-row" aria-label="已引用文件">
-          {fileRefs.map((file) => (
-            <span
-              className={`file-ref-chip${file.previewDataUrl ? ' has-preview' : ''}`}
-              data-status={file.attachStatus || 'ready'}
-              key={file.path}
-              title={file.attachDetail ? `${file.path}\n${file.attachDetail}` : file.path}
-            >
-              {file.previewDataUrl ? (
-                <img src={file.previewDataUrl} alt="" />
-              ) : (
-                <FileText size={13} />
-              )}
-              <span>
-                <strong>{file.name}</strong>
-                <em>{fileAttachLabel(file)}</em>
-              </span>
-              <button type="button" onClick={() => removeFileRef(file.path)} aria-label={`移除 ${file.name}`}>
-                <X size={12} />
-              </button>
-            </span>
-          ))}
-        </div>
-      )}
+      <AttachmentUpload
+        variant="composer"
+        files={fileRefs}
+        onRemove={removeFileRef}
+      />
       <textarea
         ref={draftTextareaRef}
         value={draft}
@@ -1653,17 +1645,17 @@ export function ChatPage({
               </button>
             ))}
           </div>
-          {sessionLoadState === 'loading' && <div className="session-source-banner">读取会话中…</div>}
+          {sessionLoadState === 'loading' && <LoadingState stage="fetching" hint="读取会话中…" compact />}
           {sessionLoadState === 'error' && <div className="session-source-banner warning">{sessionLoadError || '会话读取失败'}</div>}
           {chatError && (
-            <div className="chat-error with-action">
-              <span>{chatError}</span>
-              <button type="button" onClick={() => openTraceDiagnostics()} title="诊断" aria-label="诊断">
-                <Activity size={13} />
-              </button>
-            </div>
+            <ErrorRecovery
+              failureType="unknown_failure"
+              detail={chatError}
+              traceId={recentTraceId}
+              onViewTrace={() => openTraceDiagnostics()}
+            />
           )}
-          {tracePanel && <TraceDiagnosticsPanel diagnostics={tracePanel} onClose={() => setTracePanel(null)} />}
+          {tracePanel && <TracePanel diagnostics={tracePanel} onClose={() => setTracePanel(null)} />}
           {composerEl}
         </div>
       </div>
@@ -1713,26 +1705,7 @@ export function ChatPage({
               )}
 	              <div className="message-stack">
                 {message.role === 'user' && message.fileRefs?.length ? (
-                  <div className="message-file-ref-row" aria-label="本轮引用文件">
-                    {message.fileRefs.map((file) => (
-                      <span
-                        className={`message-file-ref-chip${file.previewDataUrl ? ' has-preview' : ''}`}
-                        data-status={file.attachStatus || 'ready'}
-                        key={file.path}
-                        title={file.attachDetail ? `${file.path}\n${file.attachDetail}` : file.path}
-                      >
-                        {file.previewDataUrl ? (
-                          <img src={file.previewDataUrl} alt="" />
-                        ) : (
-                          <FileText size={13} />
-                        )}
-                        <span>
-                          <strong>{file.name}</strong>
-                          <em>{fileAttachLabel(file)}</em>
-                        </span>
-                      </span>
-                    ))}
-                  </div>
+                  <AttachmentUpload variant="message" files={message.fileRefs} />
                 ) : null}
 	                <div className={`message-bubble${message.role === 'assistant' && !message.text.trim() && (message.mutter || isTyping) ? ' typing-brand' : ''}`}>
 	                  {message.role === 'system' && message.detail ? (
@@ -1837,71 +1810,21 @@ export function ChatPage({
           ))}
 
         {chatError && (
-          <div className="chat-error with-action">
-            <span>{chatError}</span>
-            <button type="button" onClick={() => openTraceDiagnostics()} title="诊断" aria-label="诊断">
-              <Activity size={13} />
-            </button>
-          </div>
+          <ErrorRecovery
+            failureType="unknown_failure"
+            detail={chatError}
+            traceId={recentTraceId}
+            onViewTrace={() => openTraceDiagnostics()}
+          />
         )}
         <div ref={bottomRef} />
       </div>
 
       <div className="conversation-divider" />
-      {tracePanel && <TraceDiagnosticsPanel diagnostics={tracePanel} onClose={() => setTracePanel(null)} />}
+      {tracePanel && <TracePanel diagnostics={tracePanel} onClose={() => setTracePanel(null)} />}
       {composerEl}
     </div>
   )
-}
-
-function TraceDiagnosticsPanel({ diagnostics, onClose }: { diagnostics: TraceDiagnostics; onClose: () => void }) {
-  const context = diagnostics.runtimeContext
-  const failure = diagnostics.failureHint
-  return (
-    <aside className="trace-panel" aria-label="诊断面板">
-      <div className="trace-panel-header">
-        <div>
-          <strong>诊断</strong>
-          <span>{diagnostics.traceId || '暂无 traceId'}</span>
-        </div>
-        <button type="button" onClick={onClose} title="关闭" aria-label="关闭">
-          <X size={14} />
-        </button>
-      </div>
-      {diagnostics.empty ? (
-        <p className="trace-empty">暂无诊断事件</p>
-      ) : (
-        <>
-          <dl className="trace-kv">
-            <div><dt>任务</dt><dd>{context?.task || '未知'}</dd></div>
-            <div><dt>阶段</dt><dd>{context?.phase || failure?.stage || '未知'}</dd></div>
-            <div><dt>下一步</dt><dd>{context?.expectedNext || '未记录'}</dd></div>
-            <div><dt>故障</dt><dd>{failure ? `${failure.keyword} · ${failure.recoverable ? '可恢复' : '不可恢复'}` : '无'}</dd></div>
-          </dl>
-          {failure && <p className="trace-failure">{failure.detail}</p>}
-          <div className="trace-events">
-            {diagnostics.recentEvents.map((event) => (
-              <div key={event.id} className="trace-event-row">
-                <span>{event.type}</span>
-                <em>{describeTraceEvent(event)}</em>
-              </div>
-            ))}
-          </div>
-        </>
-      )}
-    </aside>
-  )
-}
-
-function describeTraceEvent(event: AgentEvent): string {
-  if (event.type === 'runtime.context') return `${event.task} / ${event.phase}`
-  if (event.type === 'failure.hint') return `${event.keyword} / ${event.stage}`
-  if (event.type === 'tool.request') return `${event.toolName} / ${event.status} / ${event.permissionLevel || 'unknown'}`
-  if (event.type === 'tool.result') return `${event.toolName} / ${event.status}`
-  if (event.type === 'approval.result') return `${event.decision} / ${event.executed ? 'executed' : 'skipped'}`
-  if (event.type === 'job.event') return `${event.title} / ${event.status}${event.stale ? ' / stale' : ''}`
-  if (event.type === 'status.event') return `${event.intentType} / ${event.intentLabel}`
-  return event.type
 }
 
 function restoreRuntimeState(sessionId: string, eventLog: EventLog | null) {
@@ -2105,7 +2028,7 @@ function ToolEventCard({
         <ChevronDown size={13} />
       </button>
 
-      {needsApproval && (
+      {needsApproval && !event.draft?.workIntent && (
         <div className="approval-actions compact">
           <button className="button-primary" type="button" onClick={() => onDecide('approved')} title={(() => { if (kind === 'shell' || kind === 'github') return '执行'; if (kind === 'publish') return '发布'; return '写入'; })()}>
             <Check size={13} />
@@ -2120,9 +2043,14 @@ function ToolEventCard({
         <div className="tool-event-detail">
           <p>{event.summary}</p>
           {event.receipt ? (
-            <WorkReceiptBlock receipt={event.receipt} />
+            <WorkReceiptComponent receipt={event.receipt} />
           ) : null}
-          <ToolEventBody event={event} kind={kind} />
+          <ToolEventBody
+            event={event}
+            kind={kind}
+            needsApproval={needsApproval}
+            onDecide={onDecide}
+          />
         </div>
       )}
     </article>
@@ -2136,10 +2064,49 @@ function toolCompactText(event: ToolEvent, kind: 'shell' | 'github' | 'file' | '
   return event.draft?.title || event.draft?.path || event.summary || toolTitle(event)
 }
 
-function ToolEventBody({ event, kind }: { event: ToolEvent; kind: 'shell' | 'github' | 'file' | 'publish' }) {
+function toolDisplayName(kind: 'shell' | 'github' | 'file' | 'publish', event: ToolEvent): string {
+  if (kind === 'shell') return 'Shell 执行'
+  if (kind === 'github') return 'GitHub 操作'
+  if (kind === 'publish') return '博客发布'
+  if (event.name === 'file.reference') return '文件引用'
+  if (event.name === 'obsidian_write' || event.name === 'obsidian.read') return 'Obsidian 写入'
+  return '文件操作'
+}
+
+function toolTargetPreview(event: ToolEvent): { path?: string; url?: string; command?: string } | undefined {
+  if (event.draft?.path) return { path: event.draft.path }
+  if (event.draft?.targetUrl) return { url: event.draft.targetUrl }
+  if (event.draft?.command) return { command: event.draft.command }
+  return undefined
+}
+
+function ToolEventBody({
+  event,
+  kind,
+  needsApproval,
+  onDecide,
+}: {
+  event: ToolEvent
+  kind: 'shell' | 'github' | 'file' | 'publish'
+  needsApproval: boolean
+  onDecide: (decision: 'approved' | 'denied') => void
+}) {
   const output = event.detail.startsWith('output: ') ? event.detail.slice(8) : ''
   const workIntent = event.draft?.workIntent
   if (workIntent) {
+    if (needsApproval) {
+      return (
+        <ConfirmationCard
+          workIntent={workIntent}
+          toolEventId={event.id}
+          risk={event.risk}
+          toolDisplayName={toolDisplayName(kind, event)}
+          targetPreview={toolTargetPreview(event)}
+          onApprove={() => onDecide('approved')}
+          onReject={() => onDecide('denied')}
+        />
+      )
+    }
     return <WorkIntentBlock intent={workIntent} fallbackDetail={event.detail} />
   }
 
@@ -2171,6 +2138,15 @@ function ToolEventBody({ event, kind }: { event: ToolEvent; kind: 'shell' | 'git
   }
 
   if (event.name === 'file.reference') {
+    if (event.status === 'blocked') {
+      return (
+        <PermissionPrompt
+          level="read"
+          reason={event.detail || '文件引用被阻止'}
+          target={event.draft?.path ? { path: event.draft.path } : undefined}
+        />
+      )
+    }
     return (
       <div className="tool-path-block">
         <strong>{event.draft?.title || event.draft?.path || event.detail || event.name}</strong>
@@ -2181,7 +2157,6 @@ function ToolEventBody({ event, kind }: { event: ToolEvent; kind: 'shell' | 'git
             {event.draft.truncated ? ' · 已截断' : ''}
           </span>
         )}
-        {event.status === 'blocked' && event.detail && <span>{event.detail}</span>}
       </div>
     )
   }
@@ -2228,19 +2203,6 @@ function WorkIntentBlock({ intent, fallbackDetail }: { intent: WorkIntent; fallb
       {intent.verifyPlan && <span>验证：{intent.verifyPlan}</span>}
       {intent.rollbackPlan && <span>回滚：{intent.rollbackPlan}</span>}
       {!targets.length && fallbackDetail && <span>{fallbackDetail}</span>}
-    </div>
-  )
-}
-
-function WorkReceiptBlock({ receipt }: { receipt: WorkReceipt }) {
-  return (
-    <div className="tool-path-block">
-      <strong>{receipt.done}</strong>
-      {receipt.source && <span>来源：{receipt.source}</span>}
-      {receipt.target && <span>目标：{receipt.target}</span>}
-      {receipt.verification && <span>验证：{receipt.verification}</span>}
-      {receipt.rollback && <span>回滚：{receipt.rollback}</span>}
-      {receipt.traceId && <span>Trace：{receipt.traceId}</span>}
     </div>
   )
 }

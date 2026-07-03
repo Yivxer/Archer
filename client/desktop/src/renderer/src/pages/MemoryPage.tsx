@@ -3,6 +3,8 @@ import { Check, Database, Edit3, Heart, Settings, TrendingUp, Waves, Compass, X,
 import { batchResolvePendingMemory, resolvePendingMemory, fetchMemoryStats, fetchMemoryGroups, updateMemory } from '../adapters/localArcher'
 import type { ArcherAdapter, MemoryBlockType, MemoryItem, MemoryStats, MemoryGroup } from '../types'
 import { ConfirmDialog } from '../components/common'
+import { EmptyState } from '../components/EmptyState'
+import { LoadingState } from '../components/LoadingState'
 
 type ViewMode = 'pending' | 'groups'
 type BlockFilter = 'all' | MemoryBlockType
@@ -212,7 +214,11 @@ export function MemoryPage({
                     onResolve={canResolveMemory ? performResolveMemory : undefined} compact />
                 ))
               ) : (
-                <div className="empty-inline">{cleanQuery ? '无匹配记忆' : '暂无待确认记忆，继续对话后会自动提炼'}</div>
+                <EmptyState
+                  compact
+                  title={cleanQuery ? '无匹配记忆' : '暂无待确认记忆'}
+                  hint={cleanQuery ? undefined : '继续对话后会自动提炼'}
+                />
               )}
             </div>
           </section>
@@ -253,13 +259,13 @@ export function MemoryPage({
                       ))}
                     </div>
                   ) : !cleanQuery && blockFilter === 'all' ? (
-                    <div className="empty-inline">此分类暂无记忆</div>
+                    <EmptyState compact title="此分类暂无记忆" />
                   ) : null}
                 </div>
               )
             })
           ) : (
-            <div className="empty-inline">加载中…</div>
+            <LoadingState stage="fetching" hint="加载中…" compact />
           )}
         </section>
       )}

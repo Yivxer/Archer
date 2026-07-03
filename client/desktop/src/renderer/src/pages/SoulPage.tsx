@@ -2,6 +2,8 @@ import React from 'react'
 import { BarChart3, BookOpenText, CheckCircle2, Clock3, Compass, FileText, Heart, PenLine, RotateCcw, Sparkles, TrendingUp, Upload, Waves, XCircle } from 'lucide-react'
 import type { ArcherAdapter, HypothesisItem, ReviewPeriod, SoulFileName, SoulProfileSection, VaultReflection } from '../types'
 import { ConfirmDialog, MarkdownMessage } from '../components/common'
+import { EmptyState } from '../components/EmptyState'
+import { LoadingState } from '../components/LoadingState'
 import { importSoul, fetchVaultReflections } from '../adapters/localArcher'
 
 export function SoulPage({ data, onRefresh }: { data: ArcherAdapter; onRefresh: () => Promise<void> }) {
@@ -136,7 +138,7 @@ export function SoulPage({ data, onRefresh }: { data: ArcherAdapter; onRefresh: 
       <div className="soul-layout">
         <section className="soul-profile-overview">
           {data.soulProfile.empty ? (
-            <div className="empty-inline">暂无结构化 Soul Profile</div>
+            <EmptyState compact title="暂无结构化 Soul Profile" />
           ) : (
             data.soulProfile.sections.map((section) => (
               <SoulProfileBlock section={section} key={section.id} />
@@ -151,7 +153,7 @@ export function SoulPage({ data, onRefresh }: { data: ArcherAdapter; onRefresh: 
           ) : data.soulFiles[file]?.trim() ? (
             <MarkdownMessage text={data.soulFiles[file]} />
           ) : (
-            <div className="empty-inline">此文件未配置路径或为空。</div>
+            <EmptyState compact title="此文件未配置路径或为空" />
           )}
         </div>
       </div>
@@ -228,9 +230,11 @@ function VaultReflectionsPanel({ adapterStatus }: { adapterStatus: string }) {
       </header>
       {error && <p className="vault-reflections-error">{error}</p>}
       {reflections.length === 0 ? (
-        <p className="vault-reflections-empty">
-          {loading ? '加载中…' : '暂无结晶记录。对 Obsidian 笔记触发后会出现在这里。'}
-        </p>
+        loading ? (
+          <LoadingState stage="fetching" hint="加载中…" compact />
+        ) : (
+          <EmptyState compact title="暂无结晶记录" hint="对 Obsidian 笔记触发后会出现在这里" />
+        )
       ) : (
         <div className="vault-reflections-list">
           {reflections.slice(0, 6).map((r) => (

@@ -2,6 +2,7 @@ import React from 'react'
 import { Check, ChevronRight, Clock3, Copy, Loader2, Plus, Trash2, X } from 'lucide-react'
 import { cancelBackgroundJob, fetchBackgroundJob, listBackgroundJobs, retryBackgroundJob, spawnChildJobs } from '../adapters/localArcher'
 import { EmptyDetail, SearchBox } from '../components/common'
+import { EmptyState } from '../components/EmptyState'
 import type { ArcherAdapter, BackgroundJob, BackgroundJobChildSummary } from '../types'
 import type { SpawnChildSpec } from '../adapters/localArcher'
 
@@ -167,7 +168,7 @@ export function TasksPage({ data }: { data: ArcherAdapter }) {
             <ChevronRight size={16} />
           </button>
         )) : (
-          <div className="empty-inline">{loadState === 'error' ? '任务读取失败' : '暂无后台任务'}</div>
+          <EmptyState compact title={loadState === 'error' ? '任务读取失败' : '暂无后台任务'} />
         )}
       </div>
 

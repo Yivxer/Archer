@@ -2,6 +2,8 @@ import React from 'react'
 import { Brain, ChevronRight, History, Layers, Search } from 'lucide-react'
 import { loadLocalSession, resolvePendingMemory, searchLocalSessions } from '../adapters/localArcher'
 import { EmptyDetail, SearchBox } from '../components/common'
+import { EmptyState } from '../components/EmptyState'
+import { LoadingState } from '../components/LoadingState'
 import {
   ReviewMemoryGroupsPanel,
   ReviewInitiativeShadowPanel,
@@ -252,8 +254,10 @@ export function ReviewPage({
                 </button>
               ))}
             </React.Fragment>
+          ) : contentSearching ? (
+            <LoadingState stage="fetching" hint="搜索中…" compact />
           ) : (
-            <div className="empty-inline">{contentSearching ? '搜索中…' : '无内容匹配'}</div>
+            <EmptyState compact title="无内容匹配" />
           )
         ) : grouped.length ? grouped.map((group) => (
           <React.Fragment key={group.label}>
@@ -280,7 +284,7 @@ export function ReviewPage({
             ))}
           </React.Fragment>
         )) : (
-          <div className="empty-inline">无匹配会话</div>
+          <EmptyState compact title="无匹配会话" />
         )}
       </div>
       {selected ? (
@@ -337,7 +341,7 @@ export function ReviewPage({
           <ReviewMemoryGroupsPanel memoryGroups={memoryGroups} onNavigate={onNavigate} />
           <ReviewSoulProfilePanel soulSections={soulSections} onNavigate={onNavigate} />
           <ReviewSignalsPanel reviewSignals={reviewSignals} journalReview={data.journalReview} onNavigate={onNavigate} />
-          {detailState === 'loading' && <p className="detail-muted">读取中…</p>}
+          {detailState === 'loading' && <LoadingState stage="fetching" hint="读取中…" compact />}
           {detailState === 'error' && <p className="detail-error">会话读取失败</p>}
           {detail?.messages.length ? (
             <div className="session-message-list">
