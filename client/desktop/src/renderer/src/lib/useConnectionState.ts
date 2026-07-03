@@ -24,6 +24,7 @@ import {
   type ConnectionSignal,
   transition,
 } from './connectionState'
+import { persistTransitions } from './connectionLog'
 
 // ───────────────────────── 类型 ─────────────────────────
 
@@ -484,6 +485,16 @@ export function useConnectionState(options: UseConnectionStateOptions = {}): Use
     }, tickMs)
     return () => clearInterval(timer)
   }, [tickMs, now])
+
+  // Q1 指标采集：transitions 变化时持久化到 localStorage（best-effort，失败静默）
+  React.useEffect(() => {
+    if (snapshot.transitions.length === 0) return
+    try {
+      persistTransitions(window.localStorage, snapshot.transitions)
+    } catch {
+      // localStorage 不可用时静默降级
+    }
+  }, [snapshot.transitions])
 
   const state = snapshot.state
   const badge = { ...snapshotBadgeVisual(snapshot), label: snapshotBadgeLabel(snapshot) }
