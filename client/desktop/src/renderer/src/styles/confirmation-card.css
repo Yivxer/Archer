@@ -1,0 +1,227 @@
+/* ── L4.2 ConfirmationCard 原语 ───────────────────────────────
+   契约：docs/ui-primitives.md §1
+   Archer Ring 五色品牌：左边色条按 risk 等级映射
+   ────────────────────────────────────────────────────────── */
+
+.confirmation-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 16px 12px 20px;
+  background: var(--bg-2);
+  border: 1px solid var(--border, var(--panel-border));
+  border-radius: 12px;
+  width: 100%;
+}
+
+.confirmation-card.busy {
+  opacity: 0.72;
+}
+
+/* 左边色条：4px，按 risk 等级映射五色品牌 */
+.confirmation-card-stripe {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  border-radius: 12px 0 0 12px;
+  background: var(--amber);
+}
+
+.confirmation-card.risk-low .confirmation-card-stripe { background: var(--cyan); }
+.confirmation-card.risk-medium .confirmation-card-stripe { background: var(--amber); }
+.confirmation-card.risk-high .confirmation-card-stripe { background: var(--orange); }
+.confirmation-card.risk-critical .confirmation-card-stripe { background: var(--red); }
+
+/* 头部：工具名 + risk badge + 展开按钮 */
+.confirmation-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.confirmation-card-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.confirmation-card-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.confirmation-card-risk-badge {
+  display: inline-flex;
+  align-items: center;
+  height: 16px;
+  padding: 0 8px;
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 500;
+  background: color-mix(in srgb, var(--amber) 18%, transparent);
+  color: color-mix(in srgb, var(--amber) 80%, var(--text));
+}
+
+.confirmation-card.risk-low .confirmation-card-risk-badge {
+  background: color-mix(in srgb, var(--cyan) 18%, transparent);
+  color: color-mix(in srgb, var(--cyan) 80%, var(--text));
+}
+.confirmation-card.risk-high .confirmation-card-risk-badge {
+  background: color-mix(in srgb, var(--orange) 18%, transparent);
+  color: color-mix(in srgb, var(--orange) 82%, var(--text));
+}
+.confirmation-card.risk-critical .confirmation-card-risk-badge {
+  background: color-mix(in srgb, var(--red) 18%, transparent);
+  color: color-mix(in srgb, var(--red) 82%, var(--text));
+}
+
+.confirmation-card-expand {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--border, var(--panel-border));
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-tertiary, var(--text));
+  cursor: pointer;
+  transition: all 160ms ease;
+}
+.confirmation-card-expand:hover {
+  border-color: color-mix(in srgb, var(--cyan) 40%, transparent);
+  color: var(--cyan);
+}
+.confirmation-card-expand[aria-expanded="true"] svg {
+  transform: rotate(180deg);
+}
+
+/* 正文区 */
+.confirmation-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.confirmation-card-workflow {
+  margin: 0;
+  font-weight: 500;
+}
+
+.confirmation-card-targets {
+  margin: 0;
+  padding-left: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.confirmation-card-target-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.confirmation-card-target-preview code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  color: var(--text-secondary, var(--text));
+  word-break: break-all;
+}
+
+.confirmation-card-steps {
+  margin: 0;
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  color: var(--text-secondary, var(--text));
+}
+
+.confirmation-card-verify,
+.confirmation-card-rollback {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-tertiary, var(--text));
+}
+
+.confirmation-card-field-label {
+  color: var(--text-secondary, var(--text));
+  margin-right: 4px;
+}
+
+.confirmation-card-diff-toggle {
+  align-self: flex-start;
+  border: 1px solid var(--border, var(--panel-border));
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary, var(--text));
+  padding: 4px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 160ms ease;
+}
+.confirmation-card-diff-toggle:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--cyan) 40%, transparent);
+  color: var(--cyan);
+}
+.confirmation-card-diff-toggle:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* 按钮区 */
+.confirmation-card-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 4px;
+}
+
+.confirmation-card-reject,
+.confirmation-card-approve {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 28px;
+  padding: 0 12px;
+  border: 1px solid var(--border, var(--panel-border));
+  border-radius: 6px;
+  background: transparent;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 160ms ease;
+}
+
+.confirmation-card-reject {
+  color: color-mix(in srgb, var(--orange) 78%, var(--text));
+  border-color: color-mix(in srgb, var(--orange) 24%, transparent);
+}
+.confirmation-card-reject:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--orange) 12%, transparent);
+  border-color: color-mix(in srgb, var(--orange) 50%, transparent);
+}
+
+.confirmation-card-approve {
+  color: color-mix(in srgb, var(--cyan) 80%, var(--ink, var(--text)));
+  border-color: color-mix(in srgb, var(--cyan) 30%, transparent);
+  font-weight: 500;
+}
+.confirmation-card-approve:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--cyan) 12%, transparent);
+  border-color: color-mix(in srgb, var(--cyan) 50%, transparent);
+}
+
+.confirmation-card-reject:disabled,
+.confirmation-card-approve:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

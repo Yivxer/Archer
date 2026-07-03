@@ -1,0 +1,98 @@
+/* ── L4.3 WorkReceipt 原语 ────────────────────────────────────
+   契约：docs/ui-primitives.md §2
+   Archer Ring 五色品牌：左边色条 cyan（success 色，回执 = 已完成）
+   ────────────────────────────────────────────────────────── */
+
+.work-receipt {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 14px 10px 18px;
+  background: var(--bg-2);
+  border: 1px solid var(--border, var(--panel-border));
+  border-radius: 8px;
+  width: 100%;
+}
+
+/* 左边色条：4px，cyan success 色 */
+.work-receipt-stripe {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  border-radius: 8px 0 0 8px;
+  background: var(--cyan);
+}
+
+.work-receipt-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.work-receipt-done {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.work-receipt-trace-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--border, var(--panel-border));
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-tertiary, var(--text));
+  cursor: pointer;
+  transition: all 160ms ease;
+}
+.work-receipt-trace-button:hover {
+  border-color: color-mix(in srgb, var(--cyan) 40%, transparent);
+  color: var(--cyan);
+}
+
+/* 字段网格：2 列 */
+.work-receipt-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 16px;
+  margin: 0;
+}
+
+.work-receipt-field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.work-receipt-field dt {
+  font-size: 11px;
+  color: var(--text-tertiary, var(--text));
+  font-weight: 500;
+}
+
+.work-receipt-field dd {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-secondary, var(--text));
+  word-break: break-all;
+}
+
+.work-receipt-rollback dd {
+  color: var(--text-tertiary, var(--text));
+  font-size: 11px;
+}
+
+/* 窄屏：1 列 */
+@media (max-width: 480px) {
+  .work-receipt-grid {
+    grid-template-columns: 1fr;
+  }
+}

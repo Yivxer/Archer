@@ -7,6 +7,8 @@
 @import "./styles/composer.css";
 @import "./styles/tools.css";
 @import "./styles/pages.css";
+@import "./styles/confirmation-card.css";
+@import "./styles/work-receipt.css";
 
 :root {
   /* Brand colors, bg-1, bg-2, font stacks → tokens.css */
