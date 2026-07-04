@@ -969,6 +969,157 @@ def _try_direct_hugo_publish(
     )
 
 
+def _try_direct_hugo_redeploy_with_attachment(
+    query: str,
+    file_refs: list[dict] | None,
+    *,
+    messages: list[dict] | None = None,
+) -> tuple[list[dict], str] | None:
+    """用户带附件说「重新部署/再部署/更新」已有文章 → 直接读附件正文写入 posts 文件 + deploy，不弹确认卡。
+
+    这是确定性路径，绕过 LLM agent 循环，避免幻觉。触发条件：
+    1. 用户带附件（file_refs 非空）
+    2. query 含「重新部署/再部署/更新部署/重新发布」等关键词
+    3. 附件能解析出 title/slug，且 posts 目录有对应文件
+    """
+    if not file_refs:
+        return None
+
+    lowered = query.lower()
+    redeploy_terms = (
+        "重新部署", "再部署", "重新发布", "再发布",
+        "更新部署", "更新发布", "重新上线", "再上线",
+        "redeploy", "republish",
+    )
+    if not any(term in lowered for term in redeploy_terms):
+        return None
+
+    # 从附件 + 对话历史收集 markdown 源
+    sources = _collect_hugo_markdown_sources(messages or [], query, file_refs)
+    if not sources:
+        return None
+
+    label, text = sources[0]
+    parsed = _parse_markdown_for_hugo(text, source_path=label)
+    if not parsed:
+        return None
+
+    # 提取 frontmatter hints（slug/title 用于匹配已有文件）
+    hints = _extract_frontmatter_hints(text)
+    slug = hints.get("slug", "") or parsed.get("slug", "")
+    title = hints.get("title", "") or parsed.get("title", "")
+    if not slug and not title:
+        return None
+
+    # 找 posts 目录里已有的文件
+    from skills.hugo_blog import POSTS_DIR, _safe_slug, _slug_from_post
+    target: Path | None = None
+    if slug:
+        safe = _safe_slug(slug)
+        direct = POSTS_DIR / f"{safe}.md"
+        if direct.exists():
+            target = direct
+        else:
+            for path in POSTS_DIR.glob("*.md"):
+                if _slug_from_post(path) == safe or path.stem == safe:
+                    target = path
+                    break
+
+    if target is None and title:
+        for path in POSTS_DIR.glob("*.md"):
+            file_hints = _extract_frontmatter_hints(path.read_text(encoding="utf-8", errors="ignore")[:2000])
+            if file_hints.get("title", "") == title:
+                target = path
+                break
+
+    if target is None:
+        return None  # 没找到已有文件，不触发此捷径（交给 _try_direct_hugo_publish 创建新文章）
+
+    # 读已有文件的 frontmatter，保留原 metadata
+    existing_content = target.read_text(encoding="utf-8")
+    existing_hints = _extract_frontmatter_hints(existing_content[:2000])
+    final_title = existing_hints.get("title", title)
+    final_slug = existing_hints.get("slug", _slug_from_post(target))
+
+    # 用附件正文更新已有文件（保留原 frontmatter，替换正文）
+    body = parsed.get("body", "")
+    if len(body) < 40:
+        # 正文太短，尝试合并其他源
+        for _, alt_text in sources:
+            alt_parsed = _parse_markdown_for_hugo(alt_text, source_path=label)
+            if alt_parsed and len(alt_parsed.get("body", "")) > len(body):
+                body = alt_parsed["body"]
+
+    if len(body) < 40:
+        return None  # 正文仍然太短，不触发此捷径
+
+    # 重建文件：保留原 frontmatter + 新正文
+    if existing_content.strip().endswith("---"):
+        new_content = existing_content.strip() + "\n\n" + body + "\n"
+    else:
+        # 已有正文，替换：找第二个 --- 后面的内容
+        parts = existing_content.split("---\n", 2)
+        if len(parts) >= 3:
+            new_content = parts[0] + "---\n" + parts[1] + "---\n\n" + body + "\n"
+        else:
+            new_content = existing_content  # 格式异常，不动文件
+
+    target.write_text(new_content, encoding="utf-8")
+
+    # 直接调用 deploy（不弹确认卡，直接执行）
+    from core.tool_runtime import invoke as runtime_invoke
+    from skills import hugo_blog as hugo_blog_module
+
+    workflow_id = f"hugo-redeploy-{uuid4().hex[:8]}"
+    event_id = f"{workflow_id}-deploy"
+    target_url = f"https://iver.yivxer.com/posts/{final_slug}/"
+
+    tr = runtime_invoke(
+        "hugo_blog",
+        {"action": "deploy", "filename": target.name},
+        {"hugo_blog": hugo_blog_module},
+    )
+
+    if tr.ok:
+        result_text = tr.content_preview or tr.summary
+    else:
+        err = tr.error or {}
+        result_text = (
+            f"枫弋札记重新部署失败："
+            f"{err.get('type', 'Error')}: {err.get('message') or tr.summary}"
+        )
+
+    # 生成 tool_event（complete 或 blocked）
+    status = "complete" if tr.ok else "blocked"
+    tool_event = {
+        "type": "tool_event",
+        "toolEvent": {
+            "id": event_id,
+            "name": "hugo_blog",
+            "status": status,
+            "risk": "low",
+            "summary": f"重新部署《{final_title}》",
+            "detail": result_text,
+            "requiresApproval": False,
+            "draft": {
+                "path": str(target),
+                "title": final_title,
+                "url": target_url,
+                "action": "redeploy",
+            },
+        },
+    }
+
+    summary = _format_hugo_chat_summary(
+        final_title,
+        result_text,
+        deploy_ok=tr.ok,
+        prefix=f"已重新部署《{final_title}》到枫弋札记。" if tr.ok else f"重新部署《{final_title}》失败。",
+    )
+
+    return [tool_event], summary
+
+
 _HUGO_AGENT_SYSTEM_PROMPT = """你是 Archer 的枫弋札记（博客）工作流执行器。
 
 枫弋札记是用户的 Hugo 静态博客：
@@ -2656,6 +2807,9 @@ def _iter_chat_chunks(
         def run_hugo_workflow() -> None:
             try:
                 direct = _try_direct_hugo_delete(query)
+                if not direct:
+                    # 优先尝试带附件重新部署（确定性路径，不弹确认卡，不进 LLM agent）
+                    direct = _try_direct_hugo_redeploy_with_attachment(query, file_refs, messages=enriched_messages)
                 if not direct:
                     direct = _try_direct_hugo_deploy_existing(enriched_messages, query)
                 if not direct:

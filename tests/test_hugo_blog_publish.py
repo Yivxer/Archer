@@ -358,6 +358,127 @@ def test_hugo_blog_deploy_failure_includes_doctor_diagnosis(monkeypatch):
         assert "博客部署环境自检" in result
 
 
+def test_hugo_blog_verify_url_empty_returns_false():
+    """根因 B 回归测试：空 URL 不应放行（否则 action=deploy 无 filename 时会误判成功）"""
+    ok, msg = hugo_blog._verify_url("")
+    assert ok is False
+    assert "未提供文章 URL" in msg or "无法验证" in msg
+
+
+def test_try_direct_hugo_redeploy_with_attachment_updates_and_deploys(monkeypatch):
+    """带附件重新部署已有文章：确定性路径，不弹确认卡，直接执行 deploy"""
+    import sys
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from terminal.api import _tools
+
+    with tempfile.TemporaryDirectory() as root:
+        blog = Path(root)
+        posts = blog / "content" / "posts"
+        posts.mkdir(parents=True)
+        (blog / "deploy.sh").write_text("#!/bin/bash\n", encoding="utf-8")
+        (blog / "hugo.toml").write_text('baseURL = "https://iver.yivxer.com"\n', encoding="utf-8")
+
+        # 已有空正文的文章（模拟用户报告的「最新一篇内容是空的」场景）
+        existing_post = posts / "liu-yue-fu-pan.md"
+        existing_post.write_text(
+            '---\ntitle: "六月：复盘"\nslug: "liu-yue-fu-pan"\ndate: 2026-06-30\ncategories: ["复盘"]\n---\n',
+            encoding="utf-8",
+        )
+
+        monkeypatch.setattr(hugo_blog, "BLOG_DIR", blog)
+        monkeypatch.setattr(hugo_blog, "POSTS_DIR", posts)
+
+        # Mock _run_command 让 deploy 成功
+        def fake_run_command(cmd, timeout):
+            return subprocess.CompletedProcess(cmd, 0, stdout="ok", stderr="")
+        monkeypatch.setattr(hugo_blog, "_run_command", fake_run_command)
+
+        # Mock _verify_url 返回成功
+        monkeypatch.setattr(hugo_blog, "_verify_url", lambda url, timeout=5: (True, f"HTTP 200 {url}"))
+
+        # Mock runtime_invoke 避免真发 deploy
+        class FakeToolResult:
+            def __init__(self, ok, content_preview, summary):
+                self.ok = ok
+                self.content_preview = content_preview
+                self.summary = summary
+                self.error = None
+
+        def fake_runtime_invoke(name, args, skills):
+            assert name == "hugo_blog"
+            assert args["action"] == "deploy"
+            assert args["filename"] == "liu-yue-fu-pan.md"
+            return FakeToolResult(True, "部署成功：https://iver.yivxer.com/posts/liu-yue-fu-pan/ HTTP 200", "hugo_blog deploy 完成")
+
+        monkeypatch.setattr("core.tool_runtime.invoke", fake_runtime_invoke)
+
+        # 构造附件内容（含 frontmatter + 正文）
+        attachment_content = (
+            '---\ntitle: "六月：复盘"\nslug: "liu-yue-fu-pan"\n---\n\n'
+            "这是六月复盘的正文内容，超过 40 字符确保不被判定为太短。" * 3
+        )
+
+        # 附件 file_refs（path 指向临时文件）
+        att_path = Path(root) / "june-review.md"
+        att_path.write_text(attachment_content, encoding="utf-8")
+
+        file_refs = [{"path": str(att_path), "name": "june-review.md", "content": attachment_content}]
+
+        # 调用新捷径
+        result = _tools._try_direct_hugo_redeploy_with_attachment(
+            "请重新部署这篇六月复盘文章",
+            file_refs,
+            messages=[{"role": "user", "content": "请重新部署这篇六月复盘文章"}],
+        )
+
+        # 应返回非 None
+        assert result is not None
+        events, summary = result
+
+        # 应有 1 个 tool_event，status=complete
+        assert len(events) == 1
+        assert events[0]["type"] == "tool_event"
+        assert events[0]["toolEvent"]["status"] == "complete"
+        assert events[0]["toolEvent"]["requiresApproval"] is False  # 不弹确认卡
+
+        # 文件应被更新（正文写入）
+        updated = existing_post.read_text(encoding="utf-8")
+        assert "这是六月复盘的正文内容" in updated
+        assert "slug: \"liu-yue-fu-pan\"" in updated  # 保留原 frontmatter
+
+        # summary 应包含「已重新部署」
+        assert "已重新部署" in summary
+
+
+def test_try_direct_hugo_redeploy_with_attachment_no_attachment_returns_none():
+    """无附件时不触发重新部署捷径"""
+    import sys
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from terminal.api import _tools
+
+    result = _tools._try_direct_hugo_redeploy_with_attachment(
+        "重新部署六月复盘",
+        None,
+        messages=[{"role": "user", "content": "重新部署六月复盘"}],
+    )
+    assert result is None
+
+
+def test_try_direct_hugo_redeploy_with_attachment_no_redeploy_keyword_returns_none():
+    """query 不含重新部署关键词时不触发（避免普通「部署」请求被误判）"""
+    import sys
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from terminal.api import _tools
+
+    file_refs = [{"path": "/tmp/test.md", "name": "test.md", "content": "测试内容"}]
+    result = _tools._try_direct_hugo_redeploy_with_attachment(
+        "帮我部署这篇新文章",  # 不含「重新」「再」「更新」
+        file_refs,
+        messages=[{"role": "user", "content": "帮我部署这篇新文章"}],
+    )
+    assert result is None
+
+
 # ── P0: 中文标题 slug 生成（pypinyin）─────────────────────────────────────────
 
 def test_safe_slug_chinese_to_pinyin():
