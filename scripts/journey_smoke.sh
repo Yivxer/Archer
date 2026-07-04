@@ -164,9 +164,9 @@ journey_1() {
   echo "── Journey 1: 新对话 → 回复 → 恢复 ──────────────"
   local sid="journey1-${TS}"
   local sse
-  sse="$(curl_stream /chat/stream "{\"message\":\"测试对话1\",\"session_id\":\"${sid}\"}" 2>&1)" || true
+  sse="$(curl_stream /chat/stream "{\"messages\":[{\"role\":\"user\",\"content\":\"测试对话1\"}],\"session_id\":\"${sid}\"}" 2>&1)" || true
 
-  if echo "$sse" | grep -q "text.final\|text_chunk"; then
+  if echo "$sse" | grep -q '"type":"token"\|"type":"done"'; then
     ok "SSE 流含文本回复"
   else
     fail "SSE 流无文本回复"
@@ -203,7 +203,7 @@ journey_2() {
   echo "# 测试附件\n\n唯一标记：${marker}" > "$tmpfile"
 
   local sse
-  sse="$(curl_stream /chat/stream "{\"message\":\"请引用附件中的标记\",\"session_id\":\"journey2-${TS}\",\"attachments\":[{\"path\":\"${tmpfile}\"}]}" 2>&1)" || true
+  sse="$(curl_stream /chat/stream "{\"messages\":[{\"role\":\"user\",\"content\":\"请引用附件中的标记\"}],\"session_id\":\"journey2-${TS}\",\"attachments\":[{\"path\":\"${tmpfile}\"}]}" 2>&1)" || true
 
   if echo "$sse" | grep -q "file.reference"; then
     ok "附件被引用 (file.reference 事件)"
@@ -248,7 +248,7 @@ journey_3() {
   fi
 
   local sse
-  sse="$(curl_stream /chat/stream "{\"message\":\"我刚才在看什么笔记？\",\"session_id\":\"journey3-${TS}\"}" 2>&1)" || true
+  sse="$(curl_stream /chat/stream "{\"messages\":[{\"role\":\"user\",\"content\":\"我刚才在看什么笔记？\"}],\"session_id\":\"journey3-${TS}\"}" 2>&1)" || true
   if echo "$sse" | grep -q "runtime.context"; then
     ok "runtime.context 事件存在"
   else
@@ -269,7 +269,7 @@ journey_4() {
   fi
 
   local sse
-  sse="$(curl_stream /chat/stream "{\"message\":\"在 journey4-test-${TS}.md 写入：测试内容 ${TS}\",\"session_id\":\"journey4-${TS}\"}" 2>&1)" || true
+  sse="$(curl_stream /chat/stream "{\"messages\":[{\"role\":\"user\",\"content\":\"在 journey4-test-${TS}.md 写入：测试内容 ${TS}\"}],\"session_id\":\"journey4-${TS}\"}" 2>&1)" || true
 
   if echo "$sse" | grep -q "obsidian_write"; then
     ok "obsidian_write 工具被触发"
@@ -301,7 +301,7 @@ journey_5() {
   fi
 
   local sse
-  sse="$(curl_stream /chat/stream "{\"message\":\"发布一篇测试博客 journey5-test-${TS}\",\"session_id\":\"journey5-${TS}\"}" 2>&1)" || true
+  sse="$(curl_stream /chat/stream "{\"messages\":[{\"role\":\"user\",\"content\":\"发布一篇测试博客 journey5-test-${TS}\"}],\"session_id\":\"journey5-${TS}\"}" 2>&1)" || true
 
   if echo "$sse" | grep -q "hugo_blog"; then
     ok "hugo_blog 工具被触发"
@@ -319,7 +319,7 @@ journey_6() {
   echo ""
   echo "── Journey 6: 工具确认 → Trace 可查 ─────────────"
   local sse
-  sse="$(curl_stream /chat/stream "{\"message\":\"执行 echo journey6-test-${TS}\",\"session_id\":\"journey6-${TS}\"}" 2>&1)" || true
+  sse="$(curl_stream /chat/stream "{\"messages\":[{\"role\":\"user\",\"content\":\"执行 echo journey6-test-${TS}\"}],\"session_id\":\"journey6-${TS}\"}" 2>&1)" || true
 
   local trace_id
   trace_id="$(echo "$sse" | extract_trace_id)"
@@ -336,7 +336,7 @@ journey_6() {
     warn "无 tool 事件（可能模型直接回复）"
   fi
 
-  if echo "$sse" | grep -q "text.final\|done"; then
+  if echo "$sse" | grep -q '"type":"token"\|"type":"done"'; then
     ok "流正常结束"
   else
     fail "流未正常结束"
@@ -354,8 +354,8 @@ journey_7() {
 
   for i in 1 2 3; do
     local sse
-    sse="$(curl_stream /chat/stream "{\"message\":\"继续话题 (第${i}轮)\",\"session_id\":\"${sid}\"}" 2>&1)" || true
-    if echo "$sse" | grep -q "text.final\|text_chunk"; then
+    sse="$(curl_stream /chat/stream "{\"messages\":[{\"role\":\"user\",\"content\":\"继续话题 (第${i}轮)\"}],\"session_id\":\"${sid}\"}" 2>&1)" || true
+    if echo "$sse" | grep -q '"type":"token"\|"type":"done"'; then
       ok "第 ${i} 轮有回复"
     else
       fail "第 ${i} 轮无回复"
