@@ -310,8 +310,10 @@ def _run_command(cmd: list[str], timeout: int) -> subprocess.CompletedProcess:
 
 
 def _verify_url(url: str, timeout: int = 5) -> tuple[bool, str]:
+    # 根因 B 修复：空 URL 不应放行（否则 action=deploy 无 filename 时会误判成功）
+    # 改为明确返回 False，提示「未提供文章 URL」
     if not url:
-        return True, "未指定单篇文章 URL，跳过单页验证"
+        return False, "未提供文章 URL，无法验证部署是否成功（请传 filename 或 url 参数）"
 
     try:
         safe_url = validate_public_http_url(url)
@@ -727,7 +729,7 @@ def _delete_and_deploy(args: dict) -> tuple[bool, str, dict]:
     if delete_output.startswith("错误："):
         return False, delete_output, {}
 
-    deploy_output = _deploy({"action": "deploy"})
+    deploy_output = _deploy({"action": "deploy", "filename": target.name})
     verified, verify_msg = _verify_url_missing(target_url)
     ok = "部署成功" in deploy_output and verified
     output = f"{delete_output}\n\n{deploy_output}\n删除验证：{verify_msg}"
@@ -864,7 +866,7 @@ def _deploy(args: dict) -> str:
             detail = _strip_deploy_noise(build_out, keep_tail=30) or build_out[-2000:]
             return f"构建失败（exit {build.returncode}）：\n{detail}\n\n--- 自动诊断 ---\n{_safe_doctor()}"
 
-        result = _run_command(["bash", str(deploy_sh)], timeout=180)
+        result = _run_command(["bash", str(deploy_sh), target_url], timeout=180)
         out = (result.stdout + result.stderr).strip()
         if result.returncode != 0:
             # 失败时保留更多上下文（30 行），便于定位 deploy.sh 错误
@@ -945,7 +947,18 @@ def run_structured(args: dict) -> dict:
             ok, output, metadata = _delete_and_deploy(args)
         else:
             output = run(args)
-            ok = not str(output).startswith(("错误：", "未知 action："))
+            # 根因 C 修复：补全所有失败前缀判定（原代码只看「错误：」「未知 action：」，
+            # 漏掉「构建失败」「部署失败」「部署完成但单页验证失败」「部署超时」）
+            _FAIL_PREFIXES = (
+                "错误：",
+                "未知 action：",
+                "构建失败",
+                "部署失败",
+                "部署完成但单页验证失败",
+                "部署超时",
+                "发布失败",
+            )
+            ok = not str(output).startswith(_FAIL_PREFIXES)
         if ok and action == "new":
             metadata = _new_post_metadata(args, output)
         elif action == "deploy":

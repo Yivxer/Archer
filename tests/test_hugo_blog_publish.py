@@ -37,7 +37,8 @@ def test_hugo_blog_deploy_verifies_target_post_url(monkeypatch):
         result = hugo_blog.run({"action": "deploy", "filename": "test-post.md"})
 
         assert commands[0][0] == ["hugo", "--cleanDestinationDir", "--minify"]
-        assert commands[1][0] == ["bash", str(blog / "deploy.sh")]
+        # deploy.sh 现在接受 target_url 作为参数（用于验证文章 URL）
+        assert commands[1][0] == ["bash", str(blog / "deploy.sh"), "https://iver.yivxer.com/posts/test-post/"]
         assert verified == ["https://iver.yivxer.com/posts/test-post/"]
         assert "部署成功" in result
         assert "线上地址：https://iver.yivxer.com/posts/test-post/" in result
@@ -74,7 +75,7 @@ def test_hugo_blog_deploy_reuses_recent_result_for_same_post_fingerprint(monkeyp
         assert "复用最近一次部署结果" in second
         assert len(commands) == 2
         assert commands[0][0] == ["hugo", "--cleanDestinationDir", "--minify"]
-        assert commands[1][0] == ["bash", str(blog / "deploy.sh")]
+        assert commands[1][0] == ["bash", str(blog / "deploy.sh"), "https://iver.yivxer.com/posts/test-post/"]
 
 
 def test_hugo_blog_deploy_rejects_external_verify_url(monkeypatch):
@@ -86,6 +87,13 @@ def test_hugo_blog_deploy_rejects_external_verify_url(monkeypatch):
         result = hugo_blog.run({"action": "deploy", "url": "https://example.com/post/"})
 
         assert "url 只允许验证枫弋札记或本地预览地址" in result
+
+
+def test_hugo_blog_verify_url_empty_returns_false():
+    """根因 B 回归测试：空 URL 不应放行（否则 action=deploy 无 filename 时会误判成功）"""
+    ok, msg = hugo_blog._verify_url("")
+    assert ok is False
+    assert "未提供文章 URL" in msg or "无法验证" in msg
 
 
 def test_hugo_blog_new_reuses_existing_identical_post(monkeypatch):
@@ -197,6 +205,8 @@ def test_hugo_blog_delete_and_deploy_returns_404_receipt(monkeypatch):
         monkeypatch.setattr(hugo_blog, "POSTS_DIR", posts)
         monkeypatch.setattr(hugo_blog, "_run_command", fake_run_command)
         monkeypatch.setattr(hugo_blog, "_verify_url_missing", lambda url, timeout=5: (True, f"HTTP 404 {url}"))
+        # 删除场景下 _verify_url 会发真 HTTP 请求，mock 为返回 True（删除后期望 404，由 _verify_url_missing 验证）
+        monkeypatch.setattr(hugo_blog, "_verify_url", lambda url, timeout=5: (True, f"HTTP 200 {url}"))
         hugo_blog._DEPLOY_RESULT_CACHE.clear()
 
         result = hugo_blog.run_structured({
@@ -305,7 +315,8 @@ def test_hugo_blog_doctor_then_deploy_end_to_end(monkeypatch):
         hugo_cmd = next((c for c, _ in commands_run if c and c[0] == "hugo" and "--minify" in c), None)
         bash_cmd = next((c for c, _ in commands_run if c and c[0] == "bash"), None)
         assert hugo_cmd == ["hugo", "--cleanDestinationDir", "--minify"]
-        assert bash_cmd == ["bash", str(deploy_sh)]
+        # deploy.sh 现在接受 target_url 参数（用于验证文章 URL）
+        assert bash_cmd == ["bash", str(deploy_sh), "https://iver.yivxer.com/posts/e2e-post/"]
 
         # Step 3: URL 验证被调用
         assert verified_urls == ["https://iver.yivxer.com/posts/e2e-post/"]

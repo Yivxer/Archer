@@ -977,8 +977,29 @@ _HUGO_AGENT_SYSTEM_PROMPT = """你是 Archer 的枫弋札记（博客）工作�
 - 线上站点：https://iver.yivxer.com
 - 合法分类：系统、健身、复盘、阅读、产品、写作、技术
 
-你只能调用 hugo_blog 工具，必须根据工具返回的真实输出决定下一步，不要编造结果。
-禁止让用户手动复制正文、禁止让用户自己去终端执行命令、禁止说「我手里没有文章内容」。
+## 硬性规则（不可违反）
+
+1. **必须调用 hugo_blog 工具**：你不能直接生成「已部署」「部署成功」等回复。
+   任何关于部署/发布/上线的回复，都必须基于 hugo_blog 工具的真实返回值。
+   如果没调用工具就回复「部署好了」，那是幻觉，会被系统拦截并替换为兜底失败文案。
+
+2. **action=deploy 必须传 filename 参数**：deploy 不传 filename 会被视为全站部署，
+   且无法验证具体文章是否上线。正确流程是：
+   - 先 action=list 或 action=read 拿到 filename
+   - 再 action=deploy 传 filename 参数
+   - 部署后工具会验证该文章 URL，返回 HTTP 状态
+
+3. **必须根据工具返回的真实输出决定下一步**，不要编造结果。
+   工具返回「构建失败」「部署失败」时，必须如实告诉用户失败原因，不能说「部署好了」。
+
+## 禁止事项
+
+- 禁止让用户手动复制正文
+- 禁止让用户自己去终端执行命令
+- 禁止说「我手里没有文章内容」（附件已注入系统消息，应主动查找）
+- 禁止在未调用 hugo_blog 工具的情况下回复「部署成功/已部署/部署好了」
+
+## 工作流
 
 若系统消息或对话历史中已有附件 Markdown、title/slug frontmatter 或正文片段，必须优先使用；
 用户说「部署一下」时，先 action=list，再按 slug/title 匹配已有文章；匹配到则直接 action=deploy。
@@ -989,7 +1010,7 @@ _HUGO_AGENT_SYSTEM_PROMPT = """你是 Archer 的枫弋札记（博客）工作�
 1. 先用 action=list 查看最近文章，判断要部署哪篇（未指定则部署全站）
 2. 若对话里已有正文或用户指定了文章，用 action=read 检查 frontmatter 与 Markdown 结构
 3. 结构不合规时用 action=edit 修正 title、description、category、body
-4. 最后用 action=deploy 构建并同步上线
+4. 最后用 action=deploy 构建并同步上线（必须传 filename 参数）
 
 当用户要删除、下架、移除某篇文章时：
 1. 先用 action=list 或对话中的 title/slug/filename 找到目标文章
@@ -1000,7 +1021,8 @@ _HUGO_AGENT_SYSTEM_PROMPT = """你是 Archer 的枫弋札记（博客）工作�
 1. 从对话整理 title、category、description、body（Markdown 正文）
 2. 用 action=new 创建，再 action=deploy
 
-完成后用简短中文告诉用户：做了什么、文章标题、是否部署成功、可访问地址。"""
+完成后用简短中文告诉用户：做了什么、文章标题、是否部署成功、可访问地址。
+如果工具返回失败，必须如实告知失败原因，不要说「部署好了」。"""
 
 
 def _run_hugo_agent_turn(
@@ -1034,6 +1056,10 @@ def _run_hugo_agent_turn(
     tool_events: list[dict] = []
     final_text = ""
 
+    # 根因 A 修复：跟踪 hugo_blog 是否被实际调用 + 是否有成功执行
+    hugo_tool_invoked = False
+    hugo_tool_succeeded = False
+
     for _ in range(8):
         try:
             msg = call_with_tools(agent_messages, tools)
@@ -1042,7 +1068,32 @@ def _run_hugo_agent_turn(
             break
 
         if not msg.tool_calls:
-            final_text = (msg.content or "").strip()
+            # 根因 A 修复：LLM 没调用工具直接生成文本时，必须校验是否已成功执行 hugo_blog
+            # 如果从未成功调用过 hugo_blog，LLM 的「部署好了」是幻觉，用兜底文案替换
+            if not hugo_tool_succeeded:
+                llm_text = (msg.content or "").strip()
+                if hugo_tool_invoked:
+                    # 调用过但都失败了 → 告知用户失败
+                    final_text = "枫弋札记部署未能完成：hugo_blog 工具执行失败，请稍后重试或检查日志。"
+                else:
+                    # 压根没调用工具 → LLM 幻觉，明确告知用户未部署
+                    final_text = "枫弋札记部署未执行：我未能正确调用 hugo_blog 工具完成部署，请重新告诉我文章内容或附件路径。"
+                # 保留 LLM 原始回复到 tool_events 供 trace 追溯
+                if llm_text and llm_text != final_text:
+                    tool_events.append({
+                        "type": "tool_event",
+                        "toolEvent": {
+                            "id": f"hugo-agent-hallucination-{uuid4().hex[:8]}",
+                            "name": "hugo_blog",
+                            "status": "blocked",
+                            "risk": "high",
+                            "summary": "LLM 未调用工具直接生成回复（已拦截幻觉）",
+                            "detail": f"LLM 原始回复：{llm_text[:200]}",
+                            "requiresApproval": False,
+                        },
+                    })
+            else:
+                final_text = (msg.content or "").strip()
             break
 
         agent_messages.append(msg)
@@ -1086,7 +1137,10 @@ def _run_hugo_agent_turn(
                 })
                 continue
 
+            hugo_tool_invoked = True
             tr = runtime_invoke(fn_name, fn_args, all_skills)
+            if tr.ok:
+                hugo_tool_succeeded = True
             tool_events.append(_tool_event_from_result(
                 event_id,
                 "hugo_blog",
@@ -1105,7 +1159,13 @@ def _run_hugo_agent_turn(
                 "content": tr.to_message_content() if tr.ok else f"[执行失败] {tr.summary}\n{tr.content_preview or ''}",
             })
 
-    if not final_text:
+    # 根因 A 修复：循环结束但从未成功调用 hugo_blog 时，兜底告知用户
+    if not final_text and not hugo_tool_succeeded:
+        if hugo_tool_invoked:
+            final_text = "枫弋札记部署未能完成：hugo_blog 工具执行失败，请稍后重试或检查日志。"
+        else:
+            final_text = "枫弋札记部署未执行：未能正确调用 hugo_blog 工具，请重新告诉我文章内容或附件路径。"
+    elif not final_text:
         for event in reversed(tool_events):
             tool_event = event.get("toolEvent", {})
             if tool_event.get("status") in ("complete", "blocked"):
