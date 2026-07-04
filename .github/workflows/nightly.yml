@@ -1,0 +1,76 @@
+name: Nightly Journey Smoke
+
+on:
+  schedule:
+    # 每天 04:00 UTC = 北京时间 12:00
+    - cron: "0 4 * * *"
+  workflow_dispatch: {}
+
+jobs:
+  journey-smoke:
+    name: Journey Smoke (8 条核心用户旅程)
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: client/desktop/package-lock.json
+
+      - name: Install Desktop dependencies
+        working-directory: client/desktop
+        run: npm ci
+
+      - name: Build Desktop
+        working-directory: client/desktop
+        run: npm run build
+
+      - name: Run journey smoke
+        env:
+          ARCHER_DESKTOP_TOKEN: ci-smoke-token
+        run: |
+          # 启动 API
+          .venv/bin/python terminal/archer_api.py --port 8765 --token $ARCHER_DESKTOP_TOKEN &
+          API_PID=$!
+          # 等待 API 就绪
+          for i in {1..30}; do
+            if curl -s http://127.0.0.1:8765/health | grep -q "ok"; then break; fi
+            sleep 1
+          done
+          # 跑 smoke
+          bash scripts/journey_smoke.sh --all
+          EXIT_CODE=$?
+          # 清理
+          kill $API_PID 2>/dev/null || true
+          exit $EXIT_CODE
+
+      - name: Collect metrics
+        if: always()
+        run: |
+          python scripts/collect_metrics.py || true
+
+      - name: Upload smoke artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: journey-smoke-${{ github.run_id }}
+          path: |
+            logs/journey_smoke/
+            logs/metrics/
+          retention-days: 14

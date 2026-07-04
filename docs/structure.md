@@ -274,8 +274,8 @@ client/desktop/src/renderer/src/lib/connectionLog.ts  # Q1 transitions localStor
 ### 当前 P9 进度
 
 - ✅ 阶段 0-5 完成（baseline + L0/§三-B + L1 + L2 + L3 + L4），tag `part9-L4-done`（commit `36ef256`）
-- ✅ 阶段 6 可自动部分（L5.1 / L5.2 / L5.11）+ 阶段 7 Q1 量化采集
-- ⏸ L5.3-L5.10 Journey 0-7 手动验证 + L5.12 全绿
+- ✅ 阶段 6 可自动部分（L5.1 / L5.2 / L5.11）+ Journey 1-7 基础验证 + 阶段 7 Q1 量化采集
+- ⏸ L5.3 Journey 0 非交互/expect 验证 + L5.12 连续 7 天 8/8 pass
 - ⏸ Q2-Q4 三天真实使用观察 + 整体验收
 
 ## 真实工作流地图
@@ -517,3 +517,26 @@ client/desktop/resources/
 5. 客户端相关改动写到 `client/desktop/`。
 6. 网页端相关改动写到 `web/`。
 7. Obsidian 里的历史日志可以保留，但以后以这份结构说明作为当前路径基准。
+
+---
+
+## 数字 Baseline（2026-07-04 固化，Gate 0 第 3 项）
+
+> Source-of-truth 口径：以本节为准，其他文档引用时需对齐此处。
+
+| 维度 | 数值 | 统计方式 |
+|---|---|---|
+| Python 测试文件 | 117 | `ls tests/test_*.py \| wc -l` |
+| Python 测试用例 | 1431 | `pytest --collect-only` 全量 |
+| TS 测试文件 | 32 | `find client/desktop/src -name "*.test.ts" \| wc -l` |
+| TS 测试用例 | 555 | `npm test -- --run` |
+| 技能数 | 45 | `ls skills/*.py \| wc -l` |
+| 对话模式 | 12 | `ls modes/*.md \| wc -l` |
+| Memory SQLite | 1 | `memory/archer.db` |
+
+**PR CI 子集**（必绿）：7 个 Python 测试文件 + TS 全量单元测试 + tsc 类型检查
+- Python 子集：`tests/test_fastapi_routes.py` / `tests/test_active_context.py` / `tests/test_provider_breaker.py` / `tests/test_simple_path_fork.py` / `tests/test_p0_skill_wrapping.py` / `tests/test_thread_store.py` / `tests/test_desktop_api.py::TestDesktopSessions`
+- 当前子集用例数：95（约占总数 6.6%）
+
+**Nightly CI**：`scripts/journey_smoke.sh --all` 8 条旅程（journey 0 skip 待 `archer.py --prompt`）+ `scripts/collect_metrics.py` 指标采集
+

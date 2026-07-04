@@ -1,0 +1,90 @@
+name: PR Check
+
+on:
+  pull_request:
+    branches: [main, master]
+  push:
+    branches: [main, master]
+
+# 同一 PR 新 push 取消旧 run，省 CI 配额
+concurrency:
+  group: pr-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python-tests:
+    name: Python 架构测试子集
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest
+
+      - name: Run focused tests
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: |
+          python -m pytest \
+            tests/test_fastapi_routes.py \
+            tests/test_active_context.py \
+            tests/test_provider_breaker.py \
+            tests/test_simple_path_fork.py \
+            tests/test_p0_skill_wrapping.py \
+            tests/test_thread_store.py \
+            tests/test_desktop_api.py::TestDesktopSessions \
+            -q --no-header
+
+  ts-tests:
+    name: TypeScript 单元测试
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: client/desktop/package-lock.json
+
+      - name: Install dependencies
+        working-directory: client/desktop
+        run: npm ci
+
+      - name: Run vitest
+        working-directory: client/desktop
+        run: npm test -- --run
+
+  ts-typecheck:
+    name: TypeScript 类型检查
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: client/desktop/package-lock.json
+
+      - name: Install dependencies
+        working-directory: client/desktop
+        run: npm ci
+
+      - name: Type check
+        working-directory: client/desktop
+        run: npx tsc --noEmit
