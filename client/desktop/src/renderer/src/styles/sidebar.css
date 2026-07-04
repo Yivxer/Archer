@@ -693,8 +693,9 @@
 }
 
 .sidebar-session-row {
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto auto;
   gap: 10px;
+  cursor: pointer;
 }
 
 .sidebar-project-row,
@@ -731,6 +732,32 @@
 .sidebar-project-empty:hover {
   color: var(--ink);
   background: color-mix(in srgb, var(--ink) 5%, transparent);
+}
+
+.sidebar-session-delete {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+
+.sidebar-session-row:hover .sidebar-session-delete,
+.sidebar-session-row:focus-within .sidebar-session-delete {
+  opacity: 1;
+}
+
+.sidebar-session-delete:hover {
+  background: color-mix(in srgb, var(--red) 15%, transparent);
+  color: var(--red);
 }
 
 .sidebar-project-row.active svg {

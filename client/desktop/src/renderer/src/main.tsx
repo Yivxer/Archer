@@ -8,6 +8,7 @@ import {
   MessageSquare,
   PanelLeft,
   SquarePen,
+  Trash2,
   UserRoundCog,
   Wrench,
   X,
@@ -19,6 +20,7 @@ import { mergeSseInitiativeEvent } from './lib/initiativeStore'
 import { onStoreEvent } from './lib/storeEventBus'
 import { syncStoresFromAdapter } from './lib/storeSync'
 import { upsertThreadFromSave } from './lib/threadStore'
+import { deleteSession } from './lib/sessionStore'
 import { createOfflineLocalShell, syncBrainData, wasBrainEverLinked } from './lib/brainConnection'
 import { useConnectionState, type ConnectionStateSnapshot } from './lib/useConnectionState'
 import { ConnectionBadge } from './components/ConnectionBadge'
@@ -50,6 +52,7 @@ import {
   readSidebarProjects,
   writeSidebarProjects,
   type ProjectRecord,
+  type SidebarThreadGroup,
 } from './lib/sidebarProjects'
 import type { InitiativeEvent } from '../../agent/contracts'
 import './styles.css'
@@ -151,6 +154,31 @@ function App() {
       setSessionLoadState('error')
       setSessionLoadError(error instanceof Error ? error.message : '无法读取这个历史会话')
     }
+  }
+
+  async function handleDeleteThread(thread: SidebarThreadGroup) {
+    if (!window.confirm(`确定删除「${thread.title}」？该对话的所有会话将被永久删除，无法恢复。`)) return
+    const sessionIds = thread.sessionIds
+    const results = await Promise.all(
+      sessionIds.map((sid) => deleteSession(sid))
+    )
+    if (results.some((r) => !r.ok)) {
+      setSessionLoadError('部分会话删除失败，请稍后重试')
+      return
+    }
+    // 若当前正在查看的被删除会话，回到新对话
+    if (activeSession && sessionIds.includes(activeSession.id)) {
+      setActiveSession(null)
+      setChatKey((k) => k + 1)
+      setRoute('Chat')
+    }
+    // 立即从本地 data 中移除已删除的 sessions/threads，侧边栏即时刷新
+    const deletedIds = new Set(sessionIds)
+    setData((current) => ({
+      ...current,
+      sessions: current.sessions.filter((s) => !deletedIds.has(s.id)),
+      threads: current.threads.filter((t) => t.id !== thread.id),
+    }))
   }
 
   React.useEffect(() => {
@@ -462,16 +490,35 @@ function App() {
             </div>
             <div className="sidebar-rows">
               {sidebarTaskGroups.unassignedThreads.map((thread) => (
-                <button
+                <div
                   key={thread.id}
                   className={`sidebar-session-row ${thread.id === activeSession?.threadId || thread.sessionIds.includes(activeSession?.id || '') ? 'active' : ''}`}
-                  type="button"
+                  role="button"
+                  tabIndex={0}
                   onClick={() => void openSession(thread.latestSession)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault()
+                      void openSession(thread.latestSession)
+                    }
+                  }}
                   title={thread.title}
                 >
                   <span>{thread.title}</span>
                   <em>{thread.sessions.length > 1 ? `${thread.sessions.length} 次` : thread.date}</em>
-                </button>
+                  <button
+                    type="button"
+                    className="sidebar-session-delete"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      void handleDeleteThread(thread)
+                    }}
+                    title="删除对话"
+                    aria-label="删除对话"
+                  >
+                    <Trash2 size={13} />
+                  </button>
+                </div>
               ))}
               {!sidebarTaskGroups.unassignedThreads.length && (
                 <p className="sidebar-empty-hint">没有未归属项目的对话</p>

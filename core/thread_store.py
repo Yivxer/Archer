@@ -113,6 +113,46 @@ def add_session_to_thread(
     return updated
 
 
+def remove_session_from_thread(
+    session_id: str,
+    path: Path | None = None,
+) -> dict[str, Any] | None:
+    """从所有 thread 的 sessionIds 中移除指定 session；若 thread 变空则一并删除该 thread。
+
+    返回被清理的最后一个 thread（已删除，仅用于通知/调试），或 None。
+    """
+    if not session_id:
+        return None
+    threads = read_threads(path)
+    if not threads:
+        return None
+    next_threads: list[dict[str, Any]] = []
+    removed_thread: dict[str, Any] | None = None
+    modified = False
+    for thread in threads:
+        session_ids = list(thread.get("sessionIds") or [])
+        if session_id not in session_ids:
+            next_threads.append(thread)
+            continue
+        modified = True
+        session_ids = [sid for sid in session_ids if sid != session_id]
+        if not session_ids:
+            # thread 变空：直接丢弃该 thread
+            removed_thread = thread
+            continue
+        next_thread = {
+            **thread,
+            "sessionIds": session_ids,
+            "updatedAt": now_iso(),
+        }
+        next_threads.append(next_thread)
+    if not modified:
+        # 没有任何 thread 包含此 session_id
+        return None
+    write_threads(next_threads, path)
+    return removed_thread
+
+
 def normalize_thread(value: object) -> dict[str, Any] | None:
     if not isinstance(value, dict):
         return None

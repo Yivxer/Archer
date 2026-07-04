@@ -676,6 +676,17 @@ export async function appendLocalSession(sessionId: string, messages: ChatReques
   return postJson<SavedSession>(`/sessions/${encodeURIComponent(sessionId)}/append`, { messages })
 }
 
+export type SessionDeleteResult = {
+  ok: boolean
+  id: string
+  fileDeleted: boolean
+  threadRemoved?: string | null
+}
+
+export async function deleteLocalSession(sessionId: string): Promise<SessionDeleteResult> {
+  return postJson<SessionDeleteResult>(`/sessions/${encodeURIComponent(sessionId)}/delete`, {})
+}
+
 export async function loadLocalThread(threadId: string): Promise<ConversationThread> {
   return getJson<ConversationThread>(`/threads/${encodeURIComponent(threadId)}`)
 }

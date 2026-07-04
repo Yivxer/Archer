@@ -233,17 +233,49 @@ def _save_session(payload: dict) -> dict:
     return {"id": path.stem, "path": str(path), "messages": len(messages), "threadId": thread_id}
 
 
+def _clean_append_session_messages(raw: object) -> list[dict]:
+    messages = _clean_session_messages(raw, min_messages=1)
+    if len(messages) == 1:
+        if messages[0]["role"] != "assistant":
+            raise ValueError("single-message append must be assistant")
+        return messages
+    if len(messages) != 2:
+        raise ValueError("append requires exactly one user/assistant turn or one assistant result")
+    if messages[0]["role"] != "user" or messages[1]["role"] != "assistant":
+        raise ValueError("append messages must be user then assistant")
+    return messages
+
+
+def _delete_session(session_id: str) -> dict:
+    """硬删除一个 session：删除文件 + 级联清理 thread 的 sessionIds。
+
+    - session 文件不存在的，视为已删除（幂等返回 ok=True）。
+    - 若 thread 的 sessionIds 在移除该 session 后变空，thread 一并删除。
+    """
+    from core.session import SESSIONS_DIR
+    from core.thread_store import remove_session_from_thread
+    if not _valid_session_id(session_id):
+        raise ValueError("invalid session id")
+    path = Path(SESSIONS_DIR) / f"{session_id}.json"
+    file_existed = path.exists() and path.is_file()
+    if file_existed:
+        path.unlink()
+    removed_thread = remove_session_from_thread(session_id)
+    return {
+        "ok": True,
+        "id": session_id,
+        "fileDeleted": file_existed,
+        "threadRemoved": removed_thread.get("id") if removed_thread else None,
+    }
+
+
 def _append_session(session_id: str, payload: dict) -> dict:
     from core.session import SESSIONS_DIR
     from core.session_store import dump_session_file, read_session_file
     from core.thread_store import add_session_to_thread, create_thread
     if not _valid_session_id(session_id):
         raise ValueError("invalid session id")
-    new_messages = _clean_session_messages(payload.get("messages"))
-    if len(new_messages) != 2:
-        raise ValueError("append requires exactly one user/assistant turn")
-    if new_messages[0]["role"] != "user" or new_messages[1]["role"] != "assistant":
-        raise ValueError("append messages must be user then assistant")
+    new_messages = _clean_append_session_messages(payload.get("messages"))
     path = Path(SESSIONS_DIR) / f"{session_id}.json"
     if not path.exists() or not path.is_file():
         raise FileNotFoundError(f"session not found: {session_id}")
@@ -2938,6 +2970,9 @@ def payload_post(path: str, payload: dict) -> tuple[int, dict | list]:
     session_append = re.fullmatch(r"/sessions/([^/]+)/append", path)
     if session_append:
         return 200, _append_session(session_append.group(1), payload)
+    session_delete = re.fullmatch(r"/sessions/([^/]+)/delete", path)
+    if session_delete:
+        return 200, _delete_session(session_delete.group(1))
     if path == "/soul/import":
         return 200, _import_soul(payload)
     if path == "/hypotheses":

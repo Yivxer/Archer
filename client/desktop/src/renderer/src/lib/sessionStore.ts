@@ -9,6 +9,7 @@
 
 import {
   appendLocalSession,
+  deleteLocalSession,
   loadLocalSession,
   saveLocalSession,
   searchLocalSessions,
@@ -178,6 +179,30 @@ export async function appendSession(
  */
 export function mergeSessionItems(items: SessionItem[]): void {
   store.setState((s) => ({ ...s, items, loadState: 'ready' }))
+}
+
+/**
+ * 删除一个会话（硬删除：后端会同时清理 session 文件和 thread 引用）。
+ * 删除成功后从 items 中移除；若删除的是当前详情会话，则一并清空 currentDetail。
+ */
+export async function deleteSession(sessionId: string): Promise<{ ok: boolean; threadRemoved?: string | null }> {
+  try {
+    const result = await deleteLocalSession(sessionId)
+    store.setState((s) => ({
+      ...s,
+      items: s.items.filter((item) => item.id !== sessionId),
+      currentDetail: s.currentDetail?.id === sessionId ? null : s.currentDetail,
+      detailState: s.currentDetail?.id === sessionId ? 'idle' : s.detailState,
+      error: '',
+    }))
+    return { ok: true, threadRemoved: result.threadRemoved }
+  } catch (err) {
+    store.setState((s) => ({
+      ...s,
+      error: err instanceof Error ? err.message : String(err),
+    }))
+    return { ok: false }
+  }
 }
 
 /**

@@ -1960,6 +1960,21 @@ class TestDesktopSessions:
         assert result["appended"] == 2
         assert result["messages"] == 4
 
+    def test_append_session_accepts_background_assistant_result(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("core.session.SESSIONS_DIR", tmp_path)
+        path = tmp_path / "20260514_101500.json"
+        path.write_text(
+            '[{"role":"user","content":"old"},{"role":"assistant","content":"reply"}]',
+            encoding="utf-8",
+        )
+
+        result = _append_session(
+            "20260514_101500",
+            {"messages": [{"role": "assistant", "content": "后台任务已完成"}]},
+        )
+        assert result["appended"] == 1
+        assert result["messages"] == 3
+
     def test_append_session_rejects_invalid_id(self, tmp_path, monkeypatch):
         monkeypatch.setattr("core.session.SESSIONS_DIR", tmp_path)
         try:
@@ -1984,9 +1999,108 @@ class TestDesktopSessions:
         try:
             _append_session("20260514_101500", {"messages": [{"role": "user", "content": "only one"}]})
         except ValueError as exc:
-            assert "at least two messages" in str(exc) or "exactly one" in str(exc)
+            assert "single-message append must be assistant" in str(exc)
         else:
             raise AssertionError("invalid append payload should fail")
+
+    def test_delete_session_removes_file_and_cleans_thread(self, tmp_path, monkeypatch):
+        from terminal.api._routes import _delete_session
+        from core.thread_store import read_threads
+
+        monkeypatch.setattr("core.session.SESSIONS_DIR", tmp_path)
+        threads_path = tmp_path / "memory" / "conversation_threads.json"
+        monkeypatch.setattr("core.thread_store.THREADS_PATH", threads_path)
+
+        # 建一个有两条 session 的 thread
+        sid1 = "20260514_101500"
+        sid2 = "20260514_102000"
+        (tmp_path / f"{sid1}.json").write_text(
+            '[{"role":"user","content":"a"},{"role":"assistant","content":"b"}]',
+            encoding="utf-8",
+        )
+        (tmp_path / f"{sid2}.json").write_text(
+            '[{"role":"user","content":"c"},{"role":"assistant","content":"d"}]',
+            encoding="utf-8",
+        )
+        from core.thread_store import create_thread, add_session_to_thread
+        thread = create_thread([{"role": "user", "content": "话题"}], sid1)
+        thread_id = thread["id"]
+        add_session_to_thread(thread_id, sid2)
+
+        # 删除 sid1：文件消失，thread 仍存在但 sessionIds 只剩 sid2
+        result = _delete_session(sid1)
+        assert result["ok"] is True
+        assert result["fileDeleted"] is True
+        assert result["threadRemoved"] is None
+        assert not (tmp_path / f"{sid1}.json").exists()
+        assert (tmp_path / f"{sid2}.json").exists()
+
+        threads = read_threads()
+        assert len(threads) == 1
+        assert threads[0]["id"] == thread_id
+        assert threads[0]["sessionIds"] == [sid2]
+
+        # 再删除 sid2：文件消失，thread 变空被一并清理
+        result2 = _delete_session(sid2)
+        assert result2["ok"] is True
+        assert result2["fileDeleted"] is True
+        assert result2["threadRemoved"] == thread_id
+        assert not (tmp_path / f"{sid2}.json").exists()
+        assert read_threads() == []
+
+    def test_delete_session_idempotent_for_missing_file(self, tmp_path, monkeypatch):
+        from terminal.api._routes import _delete_session
+
+        monkeypatch.setattr("core.session.SESSIONS_DIR", tmp_path)
+        monkeypatch.setattr("core.thread_store.THREADS_PATH", tmp_path / "memory" / "conversation_threads.json")
+
+        # 不存在的 session：幂等返回 ok=True, fileDeleted=False
+        result = _delete_session("20260514_101500")
+        assert result["ok"] is True
+        assert result["fileDeleted"] is False
+        assert result["threadRemoved"] is None
+
+    def test_delete_session_rejects_invalid_id(self, tmp_path, monkeypatch):
+        from terminal.api._routes import _delete_session
+
+        monkeypatch.setattr("core.session.SESSIONS_DIR", tmp_path)
+        try:
+            _delete_session("../bad")
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("invalid session id should fail")
+
+    def test_delete_session_route_via_payload_post(self, tmp_path, monkeypatch):
+        from terminal.api import _routes as routes
+
+        monkeypatch.setattr("core.session.SESSIONS_DIR", tmp_path)
+        monkeypatch.setattr("core.thread_store.THREADS_PATH", tmp_path / "memory" / "conversation_threads.json")
+
+        # 先保存一个 session
+        create_status, created = routes.payload_post(
+            "/sessions",
+            {
+                "messages": [
+                    {"role": "user", "content": "测试对话"},
+                    {"role": "assistant", "content": "测试回复"},
+                ],
+            },
+        )
+        assert create_status == 200
+        sid = created["id"]
+        assert (tmp_path / f"{sid}.json").exists()
+
+        # 通过 POST /sessions/{id}/delete 路由删除
+        delete_status, result = routes.payload_post(f"/sessions/{sid}/delete", {})
+        assert delete_status == 200
+        assert result["ok"] is True
+        assert result["fileDeleted"] is True
+        assert not (tmp_path / f"{sid}.json").exists()
+
+        # 再查 detail 应该 404
+        detail_status, _ = routes.payload_get(f"/sessions/{sid}")
+        assert detail_status == 404
 
 
 class TestDesktopMemory:
