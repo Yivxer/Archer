@@ -1,6 +1,6 @@
 # Archer 整体结构说明
 
-> 更新日期：2026-06-30
+> 更新日期：2026-07-04
 > 当前定位：一个项目根目录内维护三个使用端口：终端端、桌面客户端、网页端；同时以 Runtime Foundation 作为稳定性地基，统一承接本地 API、工具执行、权限审计、Trace 诊断、幂等和后台任务。
 
 ## 一句话结构
@@ -201,6 +201,83 @@ ChatPage
 7. **配置诊断和缓存策略**
    `core/doctor.py` 和 `core/cache_policy.py` 负责 doctor 摘要、缓存 TTL 规则、冷启动验收信息。
 
+## Part 9 稳定性框架防塌层
+
+Part 9 在 Runtime Foundation 之上补齐六层防塌架，让 Archer 从「偶发救火」变成「可观测、可量化、可回放」。详细设计见 `docs/stability-framework.md`（Obsidian 副本：`Archer 稳定性框架.md`），工作计划见 `Archer 稳定性框架·工作计划.md`。
+
+### L0 自我感知 + §三-B 后端关键路径
+
+```text
+core/active_context.py            # active_context schema 读写 + 崩溃检测（SIGTERM + FastAPI shutdown 钩子）
+core/tool_runtime.py              # B1.1 tool→summary 闭环兜底（工具执行后模型无回复时自动生成摘要）
+core/permission_levels.py         # B3.1 P0 skill 统一执行包装（hugo_blog/obsidian_write/file_ops 异常结构化失败）
+core/desktop_tool_router.py       # B5.1 simple path / full path 分叉（轻量意图不走完整 tool_loop）
+core/provider_breaker.py          # B6.1 provider 熔断（连续失败 N 次切回 default profile）
+terminal/api/fastapi_app.py       # L0.3 startup/shutdown 钩子 + /active-context 路由
+terminal/api/_tools.py            # B1.1 + B5.1 改
+docs/api-contract.md              # B.doc failure.hint.keyword 完整枚举
+```
+
+### L1 连接状态机
+
+```text
+client/desktop/src/renderer/src/lib/connectionState.ts        # 6 状态枚举 + 17 条转移规则
+client/desktop/src/renderer/src/lib/useConnectionState.ts     # 5s 心跳 + 30s doctor + 1s tick + transitions 持久化
+client/desktop/src/renderer/src/components/ConnectionBadge.tsx # 6 状态视觉规范
+client/desktop/src/main/apiProcess.ts                         # L1.2.3 brain status → 6 状态映射
+```
+
+### L2 对话事件契约
+
+```text
+client/desktop/src/renderer/src/lib/chatEventDispatcher.ts     # 输入事件 → UI action，覆盖 10 种 failure 类型
+docs/api-contract.md                                          # L2.1 SSE 事件完整类型清单 + 顺序契约
+```
+
+### L3 领域状态统一源
+
+```text
+client/desktop/src/renderer/src/lib/externalStore.ts          # 外部 store 模式 + useSyncExternalStore 基座
+client/desktop/src/renderer/src/lib/memoryStore.ts            # 记忆 store
+client/desktop/src/renderer/src/lib/soulStore.ts              # 灵魂档案 store
+client/desktop/src/renderer/src/lib/sessionStore.ts           # 会话 store
+client/desktop/src/renderer/src/lib/jobStore.ts               # 后台任务 store
+client/desktop/src/renderer/src/lib/initiativeStore.ts        # 主动消息 shadow store（只读，Part 8 边界）
+client/desktop/src/renderer/src/lib/threadStore.ts            # ConversationThread 连续性契约
+client/desktop/src/renderer/src/lib/storeEventBus.ts          # 10 事件类型 + 错误隔离
+client/desktop/src/renderer/src/lib/storeSync.ts              # shadow truth 同步（syncStoresFromAdapter）
+```
+
+### L4 交互原语库
+
+```text
+client/desktop/src/renderer/src/components/ConfirmationCard.tsx  # 工作意图确认卡
+client/desktop/src/renderer/src/components/WorkReceipt.tsx        # 工作完成回执
+client/desktop/src/renderer/src/components/TracePanel.tsx         # 诊断信息展开面板
+client/desktop/src/renderer/src/components/ErrorRecovery.tsx      # 错误恢复（10 种 failure 类型）
+client/desktop/src/renderer/src/components/PermissionPrompt.tsx   # 4 级权限提示
+client/desktop/src/renderer/src/components/AttachmentUpload.tsx   # 附件后台上传 + 状态展示
+client/desktop/src/renderer/src/components/EmptyState.tsx         # 统一空状态文案
+client/desktop/src/renderer/src/components/LoadingState.tsx       # 统一加载状态文案
+docs/ui-primitives.md                                            # 8 原语完整 props 签名 + 视觉规范
+```
+
+### L5 旅程 Smoke 套件 + Q1 量化指标
+
+```text
+scripts/journey_smoke.sh                # L5.2 journey runner（--all / --case / --list）
+scripts/replay_trace.py                 # L5.11 trace 顺序契约回放（L2 顺序检查）
+scripts/collect_metrics.py              # Q1 量化指标采集（failure.hint 计数 + dead→ready 恢复耗时）
+client/desktop/src/renderer/src/lib/connectionLog.ts  # Q1 transitions localStorage 持久化
+```
+
+### 当前 P9 进度
+
+- ✅ 阶段 0-5 完成（baseline + L0/§三-B + L1 + L2 + L3 + L4），tag `part9-L4-done`（commit `36ef256`）
+- ✅ 阶段 6 可自动部分（L5.1 / L5.2 / L5.11）+ 阶段 7 Q1 量化采集
+- ⏸ L5.3-L5.10 Journey 0-7 手动验证 + L5.12 全绿
+- ⏸ Q2-Q4 三天真实使用观察 + 整体验收
+
 ## 真实工作流地图
 
 当前高频工作不再依赖模型自然语言“猜执行”，而是收束到确认卡、工具执行、完成回执、Trace 诊断四段。
@@ -362,6 +439,14 @@ tests/        # Python 测试；Desktop 测试在 client/desktop/src/**/__tests_
 | 上下文注入 | `core/context.py` |
 | 配置路径 | `archer.toml`、`core/paths.py` |
 | Desktop installed smoke | `scripts/verify_desktop_live.sh`、`client/desktop/scripts/install-local-mac.sh` |
+| P9 L0 自我感知 / 崩溃检测 | `core/active_context.py`、`terminal/api/fastapi_app.py`（startup/shutdown 钩子 + /active-context） |
+| P9 §三-B 后端关键路径 | `core/tool_runtime.py`、`core/permission_levels.py`、`core/desktop_tool_router.py`、`core/provider_breaker.py` |
+| P9 L1 连接状态机 | `client/desktop/src/renderer/src/lib/connectionState.ts`、`useConnectionState.ts`、`components/ConnectionBadge.tsx` |
+| P9 L2 对话事件契约 / failure 类型 | `client/desktop/src/renderer/src/lib/chatEventDispatcher.ts`、`docs/api-contract.md`（failure.hint 枚举） |
+| P9 L3 领域状态统一源 | `client/desktop/src/renderer/src/lib/`（memoryStore/soulStore/sessionStore/jobStore/initiativeStore/threadStore/storeEventBus/storeSync） |
+| P9 L4 交互原语 | `client/desktop/src/renderer/src/components/`（8 原语 + 专属 .css）、`docs/ui-primitives.md` |
+| P9 L5 旅程 Smoke / trace 回放 | `scripts/journey_smoke.sh`、`scripts/replay_trace.py` |
+| P9 Q1 量化指标采集 | `scripts/collect_metrics.py`、`client/desktop/src/renderer/src/lib/connectionLog.ts` |
 
 ## 当前还可以优化的方向
 
