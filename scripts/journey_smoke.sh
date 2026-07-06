@@ -11,17 +11,24 @@
 #   0  全部通过
 #   1  前置条件不满足 (API 未就绪 / token 缺失)
 #   2  有 journey 失败
-#   3  清理失败 (警告但不阻塞 -- 仍返回 0 如果 journey 本身通过)
+#   3  有 journey 被跳过（验收不完整）
 #
 # 失败时输出: 哪一步失败、trace_id、最近事件、replay_trace.py 命令
 # 契约: Archer 稳定性框架 §八 (L5.1 journey 步骤)
 
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+ROOT="${ARCHER_JOURNEY_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 API_BASE="${ARCHER_API_BASE:-http://127.0.0.1:8765}"
 TOKEN_FILE="${ARCHER_TOKEN_FILE:-${HOME}/Library/Application Support/archer-desktop/security/desktop-api-token}"
 TS="$(date +%s)"
+
+# 优先使用项目 .venv 的 python（含 openai 等依赖），避免 PATH 被其它工具
+# 污染（如 agent-reach 技能自带的 python）时 Journey 0 因 ModuleNotFoundError 误判 FAIL。
+# 显式设置 PYTHON 环境变量可覆盖此行为。
+if [[ -z "${PYTHON:-}" && -x "$ROOT/.venv/bin/python" ]]; then
+  PYTHON="$ROOT/.venv/bin/python"
+fi
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -143,10 +150,18 @@ replay_hint() {
 journey_0() {
   echo ""
   echo "── Journey 0: 终端 REPL smoke ──────────────────"
-  # archer.py 当前是交互式 REPL，不支持 --non-interactive/--prompt
-  # 需 expect 脚本或给 archer.py 加非交互模式才能验证，暂跳过
-  skip "终端 REPL 需 expect 脚本或非交互模式支持（archer.py 当前仅交互式）"
-  return 3
+  local output
+  output="$(cd "$ROOT" && "${PYTHON:-python3}" terminal/archer.py --smoke 2>&1)" || {
+    fail "终端 smoke 失败: ${output}"
+    return 2
+  }
+  if echo "$output" | grep -q "ARCHER_TERMINAL_SMOKE_OK"; then
+    ok "终端 smoke 通过"
+  else
+    fail "终端 smoke 未输出成功标记: ${output}"
+    return 2
+  fi
+  return 0
 }
 
 # ── Journey 1: 新对话 → 回复 → 恢复 ────────────────────────
@@ -482,5 +497,8 @@ echo "════════════════════════�
 
 if [[ $CASE_FAIL -gt 0 ]]; then
   exit 2
+fi
+if [[ $CASE_SKIP -gt 0 ]]; then
+  exit 3
 fi
 exit 0
