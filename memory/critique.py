@@ -21,17 +21,17 @@ def _now() -> str:
     return datetime.now().isoformat(timespec="seconds")
 
 
-def _conn() -> sqlite3.Connection:
+def _conn(db_path: Path | None = None) -> sqlite3.Connection:
     import memory.store as _store
-    conn = sqlite3.connect(_store.DB_PATH)
+    conn = sqlite3.connect(db_path or _store.DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
 
 
 # ── 表初始化（由 store.init_db 调用）────────────────────────────────────────────
 
-def init_critiques_table() -> None:
-    conn = _conn()
+def init_critiques_table(db_path: Path | None = None) -> None:
+    conn = _conn(db_path)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS self_critiques (
             id                 INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -56,10 +56,10 @@ def infer_block_type(memory_type: str, block_type: str | None = None) -> str:
 
 def normalize_label(label: str | None) -> str:
     return str(label or "").strip()[:80]
-
-
-def init_db():
-    conn = sqlite3.connect(DB_PATH)
+def init_db(db_path: str | Path | None = None):
+    resolved_db_path = Path(db_path or DB_PATH).expanduser()
+    resolved_db_path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(resolved_db_path)
     conn.execute("PRAGMA journal_mode=WAL")   # 支持多线程并发写
     conn.execute("""
         CREATE TABLE IF NOT EXISTS memories (
@@ -256,32 +256,32 @@ def init_db():
     conn.close()
     # v1.2 Phase 2: 自我批评表
     from memory.critique import init_critiques_table
-    init_critiques_table()
+    init_critiques_table(resolved_db_path)
     # v1.3 Phase 1: 技能缺口追踪表
     from memory.skill_gap import init_skill_gap_table
-    init_skill_gap_table()
+    init_skill_gap_table(resolved_db_path)
     from memory.workflow_crystal import init_table as init_crystal_table
-    init_crystal_table()
+    init_crystal_table(resolved_db_path)
     from memory.feedback import init_table as init_feedback_table
-    init_feedback_table()
+    init_feedback_table(resolved_db_path)
     from memory.hypothesis_tracker import init_hypotheses_table
-    init_hypotheses_table()
+    init_hypotheses_table(resolved_db_path)
     from core.initiative_shadow import init_table as init_initiative_shadow_table
-    init_initiative_shadow_table(DB_PATH)
+    init_initiative_shadow_table(resolved_db_path)
     from core.part8_threads import init_table as init_part8_threads_table
-    init_part8_threads_table(DB_PATH)
+    init_part8_threads_table(resolved_db_path)
     from core.monologue import init_table as init_monologue_table
-    init_monologue_table(DB_PATH)
+    init_monologue_table(resolved_db_path)
     from core.presence import init_table as init_presence_table
-    init_presence_table(DB_PATH)
+    init_presence_table(resolved_db_path)
     # v1.4: Work item 任务追踪表
     from memory.work import init_work_table
-    init_work_table()
+    init_work_table(resolved_db_path)
     # v1.5: Sub-task 子代理任务表
     from memory.subtask import init_subtask_table
-    init_subtask_table()
+    init_subtask_table(resolved_db_path)
     # v1.5: P1/P2 记忆矛盾追踪
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(resolved_db_path)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS contradictions (
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -303,7 +303,7 @@ def init_db():
     conn.close()
     # v1.5: P3 情绪地图
     from memory.emotion import init_emotion_table
-    init_emotion_table()
+    init_emotion_table(resolved_db_path)
 
 def _now() -> str:
     return datetime.now().isoformat(timespec="seconds")

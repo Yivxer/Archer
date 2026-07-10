@@ -11,15 +11,16 @@
 """
 from datetime import datetime
 import sqlite3
+from pathlib import Path
 
 
-def _conn():
+def _conn(db_path: Path | None = None):
     import memory.store as _store
-    return sqlite3.connect(_store.DB_PATH)
+    return sqlite3.connect(db_path or _store.DB_PATH)
 
 
-def init_skill_gap_table():
-    with _conn() as c:
+def init_skill_gap_table(db_path: Path | None = None):
+    with _conn(db_path) as c:
         c.execute("""
             CREATE TABLE IF NOT EXISTS skill_events (
                 id          INTEGER PRIMARY KEY AUTOINCREMENT,

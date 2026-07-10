@@ -10,6 +10,7 @@
 """
 import re
 import sqlite3
+from pathlib import Path
 
 _CORRECTION_KW = frozenset([
     "不对", "错了", "不是", "不是这个", "不是这样", "不要这样",
@@ -27,13 +28,13 @@ _FOLLOWUP_KW = frozenset([
 ])
 
 
-def _conn():
+def _conn(db_path: Path | None = None):
     import memory.store as _store
-    return sqlite3.connect(_store.DB_PATH)
+    return sqlite3.connect(db_path or _store.DB_PATH)
 
 
-def init_table():
-    with _conn() as c:
+def init_table(db_path: Path | None = None):
+    with _conn(db_path) as c:
         c.execute("""
             CREATE TABLE IF NOT EXISTS interaction_feedback (
                 id           INTEGER PRIMARY KEY AUTOINCREMENT,

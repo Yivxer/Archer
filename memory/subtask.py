@@ -50,15 +50,15 @@ def _now() -> str:
     return datetime.now().isoformat(timespec="seconds")
 
 
-def _conn() -> sqlite3.Connection:
+def _conn(db_path: Path | None = None) -> sqlite3.Connection:
     import memory.store as _store
-    conn = sqlite3.connect(_store.DB_PATH, check_same_thread=False)
+    conn = sqlite3.connect(db_path or _store.DB_PATH, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     return conn
 
 
-def init_subtask_table() -> None:
-    conn = _conn()
+def init_subtask_table(db_path: Path | None = None) -> None:
+    conn = _conn(db_path)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS sub_tasks (
             id            INTEGER PRIMARY KEY AUTOINCREMENT,

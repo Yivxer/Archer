@@ -17,18 +17,18 @@ def _now() -> str:
     return datetime.now().isoformat(timespec="seconds")
 
 
-def _conn() -> sqlite3.Connection:
+def _conn(db_path: Path | None = None) -> sqlite3.Connection:
     import memory.store as _store
-    conn = sqlite3.connect(_store.DB_PATH)
+    conn = sqlite3.connect(db_path or _store.DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
 
 
 # ── 表初始化（由 store.init_db 调用）───────────────────────────────────────
 
-def init_table() -> None:
+def init_table(db_path: Path | None = None) -> None:
     """创建 workflow_crystal 表（幂等）。由 store.init_db() 调用。"""
-    conn = _conn()
+    conn = _conn(db_path)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS workflow_crystal (
             id          INTEGER PRIMARY KEY AUTOINCREMENT,

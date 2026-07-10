@@ -28,8 +28,8 @@ def _now() -> str:
     return datetime.now().isoformat(timespec="seconds")
 
 
-def init_emotion_table():
-    conn = sqlite3.connect(DB_PATH)
+def init_emotion_table(db_path: Path | None = None):
+    conn = sqlite3.connect(db_path or DB_PATH)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS session_emotions (
             id         INTEGER PRIMARY KEY AUTOINCREMENT,
