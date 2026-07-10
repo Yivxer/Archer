@@ -17,6 +17,8 @@ def ensure_hypothesis_scan_schedule(
     *,
     interval_spec: str = "daily",
     db_path: Path = DB_PATH,
+    now: datetime | None = None,
+    output_path: Path | None = None,
 ) -> int:
     """Ensure the daily due-hypothesis scan exists as an internal scheduled task."""
     for task in list_tasks(db_path=db_path):
@@ -29,6 +31,8 @@ def ensure_hypothesis_scan_schedule(
         args={"kind": "hypothesis_due"},
         catchup="latest",
         db_path=db_path,
+        now=now,
+        output_path=output_path,
     )
 
 

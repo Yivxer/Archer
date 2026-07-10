@@ -181,6 +181,14 @@ def create_app(
 
     @app.on_event("startup")
     def _on_startup() -> None:
+        from memory.migrations import run_migrations
+
+        migration_result = run_migrations(
+            app.state.runtime_context.db_path,
+            clock=app.state.runtime_context.clock,
+        )
+        app.state.schema_version = migration_result.version
+
         # L0 active_context: 启动时判定崩溃 + 写新 active_context + 启动心跳
         if active_context_mgr is not None:
             try:
@@ -202,8 +210,18 @@ def create_app(
             from core.reflection_scheduler import ensure_hypothesis_scan_schedule
             from core.scheduler import run_due_tasks
             from skills.loader import load_skills
-            ensure_hypothesis_scan_schedule()
-            run_due_tasks(load_skills())
+            schedule_json = app.state.runtime_context.db_path.parent / "schedules.json"
+            ensure_hypothesis_scan_schedule(
+                db_path=app.state.runtime_context.db_path,
+                now=app.state.runtime_context.now(),
+                output_path=schedule_json,
+            )
+            run_due_tasks(
+                load_skills(),
+                db_path=app.state.runtime_context.db_path,
+                now=app.state.runtime_context.now(),
+                output_path=schedule_json,
+            )
             logger.info("[startup] scheduled tasks initialized")
         except Exception as exc:
             logger.warning("[startup] scheduled tasks init failed: %s", exc)

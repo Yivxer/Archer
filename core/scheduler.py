@@ -203,14 +203,14 @@ def list_tasks(db_path: Path = DB_PATH) -> list[dict]:
     return [dict(r) for r in rows]
 
 
-def get_due_tasks(db_path: Path = DB_PATH) -> list[dict]:
+def get_due_tasks(db_path: Path = DB_PATH, *, now: datetime | None = None) -> list[dict]:
     """返回 enabled=1 且 next_run_at <= now 的任务。"""
-    now = _now()
+    now_text = _now(now)
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     rows = conn.execute(
         "SELECT * FROM scheduled_tasks WHERE enabled=1 AND next_run_at <= ?",
-        (now,),
+        (now_text,),
     ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
@@ -263,7 +263,13 @@ def run_task(task: dict, skills: dict, db_path: Path = DB_PATH) -> Any:
     return runtime_invoke(skill_name, args, skills)
 
 
-def run_due_tasks(skills: dict, db_path: Path = DB_PATH) -> list[tuple[dict, Any]]:
+def run_due_tasks(
+    skills: dict,
+    db_path: Path = DB_PATH,
+    *,
+    now: datetime | None = None,
+    output_path: Path | None = None,
+) -> list[tuple[dict, Any]]:
     """
     检查并执行所有到期任务。
     返回 [(task_dict, ToolResult | None)]，供调用方展示结果。
@@ -271,15 +277,15 @@ def run_due_tasks(skills: dict, db_path: Path = DB_PATH) -> list[tuple[dict, Any
     - catchup='skip'：错过时直接跳过，仅更新 next_run_at
     技能未加载的任务：ToolResult=None，仍更新 next_run_at（避免每次重试）。
     """
-    due = get_due_tasks(db_path)
+    due = get_due_tasks(db_path, now=now)
     results = []
     for task in due:
         if task.get("catchup") == "skip":
-            _mark_ran(task["id"], task["interval_h"], db_path)
+            _mark_ran(task["id"], task["interval_h"], db_path, now=now, output_path=output_path)
             results.append((task, None))
         else:
             tr = run_task(task, skills, db_path=db_path)
-            _mark_ran(task["id"], task["interval_h"], db_path)
+            _mark_ran(task["id"], task["interval_h"], db_path, now=now, output_path=output_path)
             results.append((task, tr))
     return results
 

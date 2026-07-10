@@ -9,12 +9,16 @@ import pytest
 from fastapi.testclient import TestClient
 
 from core.active_context import ActiveContextManager
+from core.runtime_context import create_runtime_context
 from terminal.api.fastapi_app import create_app
 
 
 @pytest.fixture
-def client():
-    app = create_app("test-token")
+def client(tmp_path):
+    app = create_app(
+        "test-token",
+        runtime_context=create_runtime_context(db_path=tmp_path / "archer.db"),
+    )
     with TestClient(app) as test_client:
         yield test_client
 
@@ -44,7 +48,11 @@ def test_active_context_startup_does_not_override_sigterm_handler(tmp_path, monk
     monkeypatch.setattr(active_context, "install_sigterm_handler", _unexpected_install)
 
     mgr = ActiveContextManager(Path(tmp_path) / "journal")
-    app = create_app("test-token", active_context_mgr=mgr)
+    app = create_app(
+        "test-token",
+        active_context_mgr=mgr,
+        runtime_context=create_runtime_context(db_path=tmp_path / "archer.db"),
+    )
 
     with TestClient(app) as test_client:
         response = test_client.get("/active-context", headers={"Authorization": "Bearer test-token"})
