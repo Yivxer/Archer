@@ -1,5 +1,5 @@
 import json
-from core.llm import stream_chat
+from memory.llm_port import stream_chat
 
 _PROMPT = """\
 你是严格的长期记忆提炼助手。分析最近几轮对话，只提炼真正新的、重要的内容。

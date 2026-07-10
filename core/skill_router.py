@@ -26,6 +26,38 @@ def save_learned(entries: list[dict]):
     """写入学习到的路由规则，entries: [{skills:[...], keywords:[...]}]"""
     _LEARNED_ROUTES_PATH.write_text(json.dumps(entries, ensure_ascii=False, indent=2))
 
+
+def apply_route_hints(hints: list[dict]) -> int:
+    """Merge persistence-owned routing evidence into the business routing file."""
+    if not hints:
+        return 0
+    existing: list[dict] = []
+    if _LEARNED_ROUTES_PATH.exists():
+        try:
+            existing = json.loads(_LEARNED_ROUTES_PATH.read_text())
+        except Exception:
+            existing = []
+    existing_index: dict[str, set[str]] = {}
+    for entry in existing:
+        for skill in entry.get("skills", []):
+            existing_index.setdefault(skill, set()).update(entry.get("keywords", []))
+    added = 0
+    for hint in hints:
+        skill = str(hint.get("skill") or "").strip()
+        keyword = str(hint.get("keyword") or "").strip()
+        if not skill or not keyword or keyword in existing_index.get(skill, set()):
+            continue
+        matched = next((entry for entry in existing if skill in entry.get("skills", [])), None)
+        if matched:
+            matched.setdefault("keywords", []).append(keyword)
+        else:
+            existing.append({"skills": [skill], "keywords": [keyword]})
+        existing_index.setdefault(skill, set()).add(keyword)
+        added += 1
+    if added:
+        save_learned(existing)
+    return added
+
 # (技能名集合, 触发关键词列表)  —— 大小写不敏感匹配
 _ROUTES: list[tuple[frozenset, list[str]]] = [
     (

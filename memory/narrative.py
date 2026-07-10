@@ -150,7 +150,7 @@ def self_portrait() -> str:
     )
 
     try:
-        from core.llm import stream_chat, load_config as llm_config
+        from memory.llm_port import load_config as llm_config, stream_chat
         cfg = llm_config()
         # 用 system prompt 带画像角色
         messages = [
@@ -224,7 +224,7 @@ def theme_chronicle(days: int = 14) -> str:
     )
 
     try:
-        from core.llm import stream_chat, load_config as llm_config
+        from memory.llm_port import load_config as llm_config, stream_chat
         cfg = llm_config()
         messages = [
             {"role": "system", "content": "你是枫弋的主题叙事者。观察周期主题，用中文叙事。"},

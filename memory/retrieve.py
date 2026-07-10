@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta
 from memory.a4 import select_context_memories, should_create_reflection_anchor
 from memory.store import search, recent, high_importance, update_last_used, get_by_ids
-from core.observability import trace_span
+from infrastructure.observability import trace_span
 
 _LIGHT_INPUTS = {
     "你好", "hi", "hello", "在吗", "早", "早安", "晚安",
@@ -27,15 +27,6 @@ def _is_valid_memory(m: dict) -> bool:
     return True
 
 
-def _infer_intent(user_input: str) -> str | None:
-    """轻量推断意图；调用方传入 intent 时以调用方为准。"""
-    try:
-        from core.context import classify_query_intent
-        return classify_query_intent(user_input).get("intent")
-    except Exception:
-        return None
-
-
 def _infer_trigger(user_input: str, intent: str | None) -> str | None:
     if should_create_reflection_anchor(user_input):
         return "reflection_anchor"
@@ -54,7 +45,7 @@ def for_context(user_input: str = "", limit: int = 5, intent: str | None = None,
                 tag_hints: list[str] | None = None) -> tuple[list, list]:
     """
     A4 记忆检索：
-    - 保持旧接口兼容：调用方不传 intent 时自动轻量推断。
+    - intent 由业务编排层传入；memory 层不反向执行业务意图分类。
     - 每轮最多注入 limit 条，默认 5；A4 链路可传 7。
     - core 与 related 合并后按 A4 策略排序，再拆回 core / related。
     - 检索后过滤 reflection 类型和已过期记忆，并更新 last_used_at。
@@ -64,7 +55,6 @@ def for_context(user_input: str = "", limit: int = 5, intent: str | None = None,
             span["skipped"] = True
             return [], []
 
-        intent = intent or _infer_intent(user_input)
         trigger = _infer_trigger(user_input, intent)
         total_limit = max(1, limit)
 

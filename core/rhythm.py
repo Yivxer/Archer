@@ -6,26 +6,14 @@ or proactive delivery.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
 from core.session import SESSIONS_DIR
+from domain.rhythm import DAYS_PER_WEEK, HOURS_PER_DAY, HOURS_PER_WEEK, RhythmProfile
 
-HOURS_PER_DAY = 24
-DAYS_PER_WEEK = 7
-HOURS_PER_WEEK = HOURS_PER_DAY * DAYS_PER_WEEK
 MIN_HISTORY_DAYS = 14
 SMOOTHING = 1.0
-
-
-@dataclass(frozen=True)
-class RhythmProfile:
-    status: str
-    hourly_weights: list[float]
-    observed_days: int
-    event_count: int
-    confidence: float
 
 
 def build_hourly_rhythm(

@@ -18,6 +18,10 @@ from rich.table import Table
 
 from core.hooks import HookContext, run_hooks
 from core.llm import stream_chat, load_config, get_last_usage, get_session_tokens, pop_config_reloaded, reset_session_tokens
+from memory.llm_port import configure_llm_client
+import core.llm as _memory_llm_client
+
+configure_llm_client(_memory_llm_client)
 from core.context import (
     build_messages, is_heavy_query, classify_query_intent,
     augment_retrieval_query,

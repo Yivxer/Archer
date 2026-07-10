@@ -43,10 +43,11 @@ def _handle_skill(parts: list[str], skills: dict) -> dict:
             _skill_info(skills, arg)
         case "suggest":
             try:
-                from memory.skill_gap import summary as gap_summary, apply_hints
+                from memory.skill_gap import get_route_hints, summary as gap_summary
+                from core.skill_router import apply_route_hints
                 console.print(gap_summary())
                 if arg.strip() == "--apply":
-                    n = apply_hints()
+                    n = apply_route_hints(get_route_hints())
                     console.print(f"[green]已写入 {n} 条路由规则到 learned_routes.json。[/green]" if n else "[dim]没有新规则可写入。[/dim]")
                 elif arg.strip() == "":
                     console.print("[dim]加 --apply 将建议写入路由规则。[/dim]")

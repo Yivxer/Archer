@@ -108,7 +108,7 @@ def extract_emotion(history: list[dict], session_id: str, cfg: dict | None = Non
         return None
     try:
         prompt = _build_emotion_prompt(history)
-        from core.llm import stream_chat, load_config as llm_config
+        from memory.llm_port import load_config as llm_config, stream_chat
         cfg = cfg or llm_config()
         messages = [{"role": "user", "content": prompt}]
         # 收集流式输出

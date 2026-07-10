@@ -9,7 +9,7 @@ from pathlib import Path
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 
-from core.skill_router import select_skills
+from core.skill_router import apply_route_hints, select_skills
 
 
 def _mock_skills(*names: str) -> dict:
@@ -29,6 +29,19 @@ ALL = _mock_skills(
     "apple_reminders", "summarize", "humanizer", "hugo_blog",
     "weekly_review", "installer",
 )
+
+
+def test_apply_route_hints_owns_router_file_write(tmp_path, monkeypatch):
+    import core.skill_router as router
+
+    monkeypatch.setattr(router, "_LEARNED_ROUTES_PATH", tmp_path / "learned_routes.json")
+    hints = [
+        {"skill": "weather", "keyword": "天气", "count": 3},
+        {"skill": "weather", "keyword": "气温", "count": 4},
+    ]
+
+    assert apply_route_hints(hints) == 2
+    assert apply_route_hints(hints) == 0
 
 
 # ─── 纯聊天 → 无技能 ────────────────────────────────────────────────────────────

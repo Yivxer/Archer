@@ -4,7 +4,7 @@ patterns.py — 跨会话行为模式归纳
 从记忆库中提炼重复出现的主题/模式，建立记忆↔主题图结构。
 """
 import json
-from core.llm import stream_chat
+from memory.llm_port import stream_chat
 from memory.store import (
     get_memories_for_detection,
     save_theme,

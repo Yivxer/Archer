@@ -14,7 +14,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
-from core.rhythm import HOURS_PER_DAY, HOURS_PER_WEEK, RhythmProfile
+from domain.rhythm import HOURS_PER_DAY, HOURS_PER_WEEK, RhythmProfile
 
 
 _PROFILE_FIELDS = (

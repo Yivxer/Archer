@@ -87,46 +87,6 @@ def get_route_hints(min_count: int = 3) -> list[dict]:
     return hints
 
 
-def apply_hints(min_count: int = 3) -> int:
-    """
-    把 get_route_hints() 的结果合并写入 learned_routes.json。
-    返回新写入的条目数。
-    """
-    from core.skill_router import save_learned, _LEARNED_ROUTES_PATH
-    import json
-
-    hints = get_route_hints(min_count)
-    if not hints:
-        return 0
-
-    existing: list[dict] = []
-    if _LEARNED_ROUTES_PATH.exists():
-        try:
-            existing = json.loads(_LEARNED_ROUTES_PATH.read_text())
-        except Exception:
-            pass
-
-    existing_index: dict[str, set] = {}
-    for e in existing:
-        for s in e["skills"]:
-            existing_index.setdefault(s, set()).update(e["keywords"])
-
-    added = 0
-    for hint in hints:
-        skill, kw = hint["skill"], hint["keyword"]
-        if kw not in existing_index.get(skill, set()):
-            matched = next((e for e in existing if skill in e["skills"]), None)
-            if matched:
-                if kw not in matched["keywords"]:
-                    matched["keywords"].append(kw)
-            else:
-                existing.append({"skills": [skill], "keywords": [kw]})
-            added += 1
-
-    save_learned(existing)
-    return added
-
-
 def summary() -> str:
     gaps = get_gaps(10)
     if not gaps:

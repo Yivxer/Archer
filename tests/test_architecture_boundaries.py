@@ -46,17 +46,7 @@ def test_memory_core_imports_cannot_grow_beyond_documented_legacy_debt():
     }
     legacy_debt = imports - approved_infrastructure
 
-    assert legacy_debt == {
-        ("memory/compaction.py", "core.llm"),
-        ("memory/emotion.py", "core.llm"),
-        ("memory/extract.py", "core.llm"),
-        ("memory/narrative.py", "core.llm"),
-        ("memory/patterns.py", "core.llm"),
-        ("memory/retrieve.py", "core.context"),
-        ("memory/retrieve.py", "core.observability"),
-        ("memory/skill_gap.py", "core.skill_router"),
-        ("memory/soul_profile.py", "core.rhythm"),
-    }
+    assert legacy_debt == set()
 
 
 @pytest.mark.contract

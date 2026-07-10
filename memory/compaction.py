@@ -105,7 +105,7 @@ def summarize_archived_memories(memories: list[dict], *, use_llm: bool = True) -
         for m in memories[:12]
     )
     try:
-        from core.llm import stream_chat
+        from memory.llm_port import stream_chat
 
         messages = [
             {

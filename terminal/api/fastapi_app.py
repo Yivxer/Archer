@@ -169,6 +169,25 @@ def create_app(
     active_context_mgr=None,
     runtime_context: RuntimeContext | None = None,
 ) -> FastAPI:
+    from memory.llm_port import configure_llm_client
+
+    resolved_runtime_context = runtime_context
+    if resolved_runtime_context is None:
+        import core.llm as default_llm_client
+
+        resolved_runtime_context = create_runtime_context(llm_client=default_llm_client)
+    elif resolved_runtime_context.llm_client is None:
+        import core.llm as default_llm_client
+
+        resolved_runtime_context = create_runtime_context(
+            db_path=resolved_runtime_context.db_path,
+            config=resolved_runtime_context.config,
+            clock=resolved_runtime_context.clock,
+            event_bus=resolved_runtime_context.event_bus,
+            llm_client=default_llm_client,
+        )
+    configure_llm_client(resolved_runtime_context.llm_client)
+
     app = FastAPI(
         title="Archer Desktop API",
         version="0.2.0",
@@ -177,7 +196,7 @@ def create_app(
     app.state.desktop_api_token = desktop_api_token
     app.state.chat_stream_semaphore = threading.BoundedSemaphore(DEFAULT_MAX_CHAT_STREAMS)
     app.state.active_context_mgr = active_context_mgr
-    app.state.runtime_context = runtime_context or create_runtime_context()
+    app.state.runtime_context = resolved_runtime_context
 
     @app.on_event("startup")
     def _on_startup() -> None:
