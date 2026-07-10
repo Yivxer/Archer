@@ -26,6 +26,7 @@ import {
   transition,
 } from './connectionState'
 import { persistTransitions } from './connectionLog'
+import { contractVersionWarning } from '../../../agent/pythonBridge'
 
 // ───────────────────────── 类型 ─────────────────────────
 
@@ -377,10 +378,13 @@ async function defaultFetchDoctorWarn(): Promise<{ warn: boolean; reason: string
       })
       if (!response.ok) return { warn: false, reason: '' }
       const data = await response.json() as {
+        contractVersion?: number
         ok?: boolean
         warnings?: Array<{ key: string; message: string }>
         warns?: Array<{ key: string; message: string }>
       }
+      const contractWarning = contractVersionWarning(data)
+      if (contractWarning) return { warn: true, reason: contractWarning }
       const warns = data.warnings || data.warns || []
       if (!Array.isArray(warns) || warns.length === 0) return { warn: false, reason: '' }
       return { warn: true, reason: warns[0]?.message || '配置诊断有警告' }

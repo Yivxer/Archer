@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import contractFixture from '../__fixtures__/desktopStreamV1.json'
-import { pythonApprovalToAgentEvent, pythonOrchestrationToAgentEvent, pythonPlanToAgentEvent, pythonStreamPayloadToAgentEvents, pythonToolEventToAgentEvent, type PythonApprovalResult, type PythonStreamPayload } from '../pythonBridge'
+import { UnsupportedContractVersionError, pythonApprovalToAgentEvent, pythonOrchestrationToAgentEvent, pythonPlanToAgentEvent, pythonStreamPayloadToAgentEvents, pythonToolEventToAgentEvent, type PythonApprovalResult, type PythonStreamPayload } from '../pythonBridge'
 
 describe('python bridge', () => {
   it('normalizes the shared Python/Desktop contract fixture in stable order', () => {
@@ -21,7 +21,16 @@ describe('python bridge', () => {
       traceId: 'trace-contract-1',
       receipt: contractFixture.approvalResponse.receipt,
     })
-    expect(contractFixture.donePayload).toEqual({ type: 'done', done: true })
+    expect(contractFixture.donePayload).toEqual({ contractVersion: 1, type: 'done', done: true })
+  })
+
+  it('rejects missing or unknown stream contract versions', () => {
+    expect(() => pythonStreamPayloadToAgentEvents('session-1', {} as PythonStreamPayload))
+      .toThrow(UnsupportedContractVersionError)
+    expect(() => pythonStreamPayloadToAgentEvents(
+      'session-1',
+      { contractVersion: 2 } as PythonStreamPayload,
+    )).toThrow('请升级 Archer')
   })
 
   it('converts Python toolEvent to a tool.request event', () => {
@@ -115,6 +124,7 @@ describe('python bridge', () => {
 
   it('converts a Python stream payload to ordered agent events', () => {
     const events = pythonStreamPayloadToAgentEvents('session-1', {
+      contractVersion: 1,
       runtimeContextEvent: {
         id: 'ctx-1',
         traceId: 'trace-1',

@@ -74,7 +74,7 @@ describe('localArcher token management', () => {
         ensureApi: vi.fn(async () => ({ ok: true, reason: 'owned' })),
       },
     })
-    const fetchSpy = vi.fn(async (_url: string) => new Response(JSON.stringify({ ok: true, ready: true }), { status: 200 }))
+    const fetchSpy = vi.fn(async (_url: string) => new Response(JSON.stringify({ contractVersion: 1, ok: true, ready: true }), { status: 200 }))
     vi.stubGlobal('fetch', fetchSpy)
 
     await expect(ensureLocalConnection()).resolves.toBe(true)
@@ -145,6 +145,7 @@ describe('localArcher token management', () => {
     const encoder = new TextEncoder()
     const payload = [
       'data: ' + JSON.stringify({
+        contractVersion: 1,
         planEvent: {
           id: 'plan-1',
           title: '提炼内容并写入 Obsidian',
@@ -155,7 +156,7 @@ describe('localArcher token management', () => {
           ],
         },
       }) + '\n\n',
-      'data: ' + JSON.stringify({ done: true }) + '\n\n',
+      'data: ' + JSON.stringify({ contractVersion: 1, done: true }) + '\n\n',
     ].join('')
     vi.stubGlobal('fetch', vi.fn(async () => new Response(
       new ReadableStream({
@@ -189,7 +190,7 @@ describe('localArcher token management', () => {
     const fetchSpy = vi.fn(async () => new Response(
       new ReadableStream({
         start(controller) {
-          controller.enqueue(encoder.encode('data: ' + JSON.stringify({ done: true }) + '\n\n'))
+          controller.enqueue(encoder.encode('data: ' + JSON.stringify({ contractVersion: 1, done: true }) + '\n\n'))
           controller.close()
         },
       }),
@@ -280,7 +281,7 @@ describe('localArcher token management', () => {
     const fetchSpy = vi.fn(async () => new Response(
       new ReadableStream({
         start(controller) {
-          controller.enqueue(encoder.encode('data: ' + JSON.stringify({ done: true }) + '\n\n'))
+          controller.enqueue(encoder.encode('data: ' + JSON.stringify({ contractVersion: 1, done: true }) + '\n\n'))
           controller.close()
         },
       }),

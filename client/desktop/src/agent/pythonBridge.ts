@@ -1,5 +1,29 @@
 import type { AgentEvent, ApprovalDecision, PermissionLevel, PlanStatus, RiskLevel, ToolStatus, WorkReceipt } from './contracts'
 
+export const SUPPORTED_CONTRACT_VERSION = 1
+
+export class UnsupportedContractVersionError extends Error {
+  constructor(readonly received: unknown) {
+    super(`Archer API 协议版本不兼容（收到 ${String(received)}，支持 ${SUPPORTED_CONTRACT_VERSION}），请升级 Archer。`)
+    this.name = 'UnsupportedContractVersionError'
+  }
+}
+
+export function assertSupportedContractVersion(value: { contractVersion?: unknown }): void {
+  if (value.contractVersion !== SUPPORTED_CONTRACT_VERSION) {
+    throw new UnsupportedContractVersionError(value.contractVersion)
+  }
+}
+
+export function contractVersionWarning(value: { contractVersion?: unknown }): string | null {
+  try {
+    assertSupportedContractVersion(value)
+    return null
+  } catch (error) {
+    return error instanceof Error ? error.message : 'Archer API 协议版本不兼容，请升级 Archer。'
+  }
+}
+
 type PythonToolEvent = {
   id: string
   traceId?: string
@@ -187,6 +211,7 @@ type PythonFailureHintEvent = {
 }
 
 export type PythonStreamPayload = {
+  contractVersion: number
   toolEvent?: PythonToolEvent
   planEvent?: PythonPlanEvent
   orchestrationEvent?: PythonOrchestrationEvent
@@ -273,6 +298,7 @@ export function pythonStreamPayloadToAgentEvents(
   sessionId: string,
   payload: PythonStreamPayload,
 ): AgentEvent[] {
+  assertSupportedContractVersion(payload)
   const events: AgentEvent[] = []
   if (payload.runtimeContextEvent) {
     events.push(pythonRuntimeContextToAgentEvent(sessionId, payload.runtimeContextEvent))

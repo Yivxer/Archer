@@ -27,12 +27,18 @@ def test_health_is_public(client):
     response = client.get("/health")
     assert response.status_code == 200
     assert response.json()["ok"] is True
+    assert response.json()["contractVersion"] == 1
 
 
 def test_ready_is_public(client):
     response = client.get("/ready")
     assert response.status_code == 200
-    assert response.json() == {"ok": True, "ready": True, "runtime": "fastapi"}
+    assert response.json() == {
+        "contractVersion": 1,
+        "ok": True,
+        "ready": True,
+        "runtime": "fastapi",
+    }
 
 
 def test_active_context_startup_does_not_override_sigterm_handler(tmp_path, monkeypatch):
@@ -247,7 +253,11 @@ def test_wildcard_get_dispatch_preserves_query(client, monkeypatch):
     )
 
     assert response.status_code == 200
-    assert response.json() == {"ok": True, "path": "/memory?include_rejected=true"}
+    assert response.json() == {
+        "contractVersion": 1,
+        "ok": True,
+        "path": "/memory?include_rejected=true",
+    }
     assert captured["path"] == "/memory?include_rejected=true"
     assert captured["runtime_context"] is client.app.state.runtime_context
 
@@ -268,7 +278,7 @@ def test_wildcard_get_dispatch_runs_in_threadpool(client, monkeypatch):
     response = client.get("/memory", headers={"Authorization": "Bearer test-token"})
 
     assert response.status_code == 200
-    assert response.json() == {"path": "/memory"}
+    assert response.json() == {"contractVersion": 1, "path": "/memory"}
     assert calls == [("_dispatch_get", ("/memory", client.app.state.runtime_context))]
 
 
@@ -290,7 +300,7 @@ def test_wildcard_post_dispatch_preserves_body(client, monkeypatch):
     )
 
     assert response.status_code == 200
-    assert response.json() == {"ok": True}
+    assert response.json() == {"contractVersion": 1, "ok": True}
     assert captured == {
         "path": "/settings/validate",
         "body": {"apiKey": "sk-test"},
@@ -318,7 +328,11 @@ def test_wildcard_post_dispatch_runs_in_threadpool(client, monkeypatch):
     )
 
     assert response.status_code == 200
-    assert response.json() == {"path": "/settings/validate", "body": {"apiKey": "sk-test"}}
+    assert response.json() == {
+        "contractVersion": 1,
+        "path": "/settings/validate",
+        "body": {"apiKey": "sk-test"},
+    }
     assert calls == [(
         "_dispatch_post",
         ("/settings/validate", {"apiKey": "sk-test"}, client.app.state.runtime_context),

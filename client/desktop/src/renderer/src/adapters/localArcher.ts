@@ -34,7 +34,7 @@ import type {
   VaultReflection,
   VaultReflectionResult
 } from '../types'
-import { jobSnapshotToAgentEvent, pythonApprovalToAgentEvent, pythonStreamPayloadToAgentEvents } from '../../../agent'
+import { assertSupportedContractVersion, jobSnapshotToAgentEvent, pythonApprovalToAgentEvent, pythonStreamPayloadToAgentEvents } from '../../../agent'
 import type { AgentEvent, PythonStreamPayload } from '../../../agent'
 
 const BASE_URL = 'http://127.0.0.1:8765'
@@ -159,7 +159,10 @@ async function apiFetch(path: string, init: RequestInit = {}, auth = true, timeo
 
 export async function checkLocalApiReady(): Promise<boolean> {
   const response = await apiFetch('/ready', {}, false)
-  return response.ok
+  if (!response.ok) return false
+  const payload = await response.json() as { contractVersion?: unknown }
+  assertSupportedContractVersion(payload)
+  return true
 }
 
 async function getJson<T>(path: string): Promise<T> {

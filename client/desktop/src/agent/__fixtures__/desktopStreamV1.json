@@ -2,6 +2,7 @@
   "fixtureVersion": 1,
   "sessionId": "contract-session-1",
   "payload": {
+    "contractVersion": 1,
     "runtimeContextEvent": {
       "id": "runtime-context-fixture",
       "traceId": "trace-contract-1",
@@ -74,7 +75,7 @@
       "traceId": "trace-contract-1"
     }
   },
-  "donePayload": {"type": "done", "done": true},
+  "donePayload": {"contractVersion": 1, "type": "done", "done": true},
   "expectedAgentEventTypes": [
     "runtime.context",
     "tool.request",

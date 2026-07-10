@@ -42,6 +42,7 @@ from terminal.api._security import (
     normalize_error_payload,
 )
 from terminal.api import _tools as _api_tools
+from terminal.api.contract import CONTRACT_VERSION, CONTRACT_VERSION_HEADER, versioned_dict
 from terminal.api._tools import (
     _bg_extract_api,
     _clean_file_refs,
@@ -165,6 +166,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def _send(self, status: int, payload: dict | list) -> None:
         payload = normalize_error_payload(status, payload)
+        payload = versioned_dict(payload) if isinstance(payload, dict) else payload
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -172,6 +174,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Origin", self._allow_origin())
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
+        self.send_header(CONTRACT_VERSION_HEADER, str(CONTRACT_VERSION))
         self.end_headers()
         self.wfile.write(body)
 
@@ -194,7 +197,7 @@ class Handler(BaseHTTPRequestHandler):
         for event in _iter_chat_chunks(messages, memory_mode, obsidian_mode, file_refs):
             if event.get("type") == "token" and event.get("text"):
                 reply_chunks.append(event["text"])
-            frame = f"data: {json.dumps(event, ensure_ascii=False)}\n\n".encode("utf-8")
+            frame = f"data: {json.dumps(versioned_dict(event), ensure_ascii=False)}\n\n".encode("utf-8")
             self.wfile.write(frame)
             self.wfile.flush()
         if reply_chunks:

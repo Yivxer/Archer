@@ -14,6 +14,7 @@ from terminal.api._tools import (
 )
 from terminal.api._routes import _tool_approval
 from terminal.api import _config
+from terminal.api.fastapi_app import _chat_stream_events
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -122,6 +123,7 @@ def test_contract_fixture_declares_stable_python_to_desktop_order():
     fixture = _fixture()
 
     assert fixture["fixtureVersion"] == 1
+    assert fixture["payload"]["contractVersion"] == 1
     assert fixture["expectedAgentEventTypes"] == [
         "runtime.context",
         "tool.request",
@@ -129,4 +131,25 @@ def test_contract_fixture_declares_stable_python_to_desktop_order():
         "failure.hint",
         "approval.result",
     ]
-    assert fixture["donePayload"] == {"type": "done", "done": True}
+    assert fixture["donePayload"] == {
+        "contractVersion": 1,
+        "type": "done",
+        "done": True,
+    }
+
+
+@pytest.mark.contract
+def test_fastapi_sse_frames_all_declare_contract_version(monkeypatch):
+    monkeypatch.setattr(
+        "terminal.api.fastapi_app._iter_chat_chunks",
+        lambda *_args, **_kwargs: iter([
+            {"type": "ready", "ready": True},
+            {"type": "done", "done": True},
+        ]),
+    )
+    frames = list(
+        _chat_stream_events({"messages": [{"role": "user", "content": "hi"}]})
+    )
+
+    payloads = [json.loads(frame.removeprefix("data: ")) for frame in frames]
+    assert [payload["contractVersion"] for payload in payloads] == [1, 1]

@@ -36,6 +36,11 @@ from terminal.api._tools import (
     _clean_obsidian_mode,
     _iter_chat_chunks,
 )
+from terminal.api.contract import (
+    CONTRACT_VERSION,
+    CONTRACT_VERSION_HEADER,
+    versioned_dict,
+)
 from core.runtime_context import RuntimeContext, create_runtime_context
 
 logger = logging.getLogger("archer_api")
@@ -75,7 +80,12 @@ def _path_with_query(request: Request) -> str:
 
 def _json_response(status: int, payload: dict | list) -> JSONResponse:
     payload = normalize_error_payload(status, payload)
-    return JSONResponse(status_code=status, content=payload)
+    content = versioned_dict(payload) if isinstance(payload, dict) else payload
+    return JSONResponse(
+        status_code=status,
+        content=content,
+        headers={CONTRACT_VERSION_HEADER: str(CONTRACT_VERSION)},
+    )
 
 
 def _handle_dispatch_error(path: str, exc: Exception) -> JSONResponse:
@@ -131,7 +141,7 @@ def _chat_stream_events(
                 elif event.get("type") == "error":
                     # 流式出错：标记，跳过后续记忆提取，避免从不完整/错误回复中提取垃圾记忆
                     has_error = True
-                yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+                yield f"data: {json.dumps(versioned_dict(event), ensure_ascii=False)}\n\n"
         except GeneratorExit:
             # 客户端断开连接：优雅关闭内层 generator，避免 Broken pipe 噪音
             # Starlette 会在客户端断开时向 generator 抛 GeneratorExit
@@ -301,12 +311,17 @@ def create_app(
         return await call_next(request)
 
     @app.get("/health")
-    async def health() -> dict[str, bool]:
-        return {"ok": True}
+    async def health() -> dict[str, object]:
+        return {"contractVersion": CONTRACT_VERSION, "ok": True}
 
     @app.get("/ready")
-    async def ready() -> dict[str, bool | str]:
-        return {"ok": True, "ready": True, "runtime": "fastapi"}
+    async def ready() -> dict[str, object]:
+        return {
+            "contractVersion": CONTRACT_VERSION,
+            "ok": True,
+            "ready": True,
+            "runtime": "fastapi",
+        }
 
     @app.get("/active-context")
     async def active_context_endpoint() -> dict:
