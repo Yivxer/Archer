@@ -36,6 +36,7 @@ from terminal.api._tools import (
     _clean_obsidian_mode,
     _iter_chat_chunks,
 )
+from core.runtime_context import RuntimeContext, create_runtime_context
 
 logger = logging.getLogger("archer_api")
 
@@ -88,17 +89,21 @@ def _handle_dispatch_error(path: str, exc: Exception) -> JSONResponse:
     return _json_response(500, {"error": "server_error", "message": str(exc)})
 
 
-def _dispatch_get(path: str) -> JSONResponse:
+def _dispatch_get(path: str, runtime_context: RuntimeContext | None = None) -> JSONResponse:
     try:
-        status, payload = payload_get(path)
+        status, payload = payload_get(path, runtime_context)
         return _json_response(status, payload)
     except Exception as exc:
         return _handle_dispatch_error(path, exc)
 
 
-def _dispatch_post(path: str, body: dict) -> JSONResponse:
+def _dispatch_post(
+    path: str,
+    body: dict,
+    runtime_context: RuntimeContext | None = None,
+) -> JSONResponse:
     try:
-        status, payload = payload_post(path, body)
+        status, payload = payload_post(path, body, runtime_context)
         return _json_response(status, payload)
     except Exception as exc:
         return _handle_dispatch_error(path, exc)
@@ -159,7 +164,11 @@ def _read_desktop_pid_from_env() -> int | None:
         return None
 
 
-def create_app(desktop_api_token: str = "", active_context_mgr=None) -> FastAPI:
+def create_app(
+    desktop_api_token: str = "",
+    active_context_mgr=None,
+    runtime_context: RuntimeContext | None = None,
+) -> FastAPI:
     app = FastAPI(
         title="Archer Desktop API",
         version="0.2.0",
@@ -168,6 +177,7 @@ def create_app(desktop_api_token: str = "", active_context_mgr=None) -> FastAPI:
     app.state.desktop_api_token = desktop_api_token
     app.state.chat_stream_semaphore = threading.BoundedSemaphore(DEFAULT_MAX_CHAT_STREAMS)
     app.state.active_context_mgr = active_context_mgr
+    app.state.runtime_context = runtime_context or create_runtime_context()
 
     @app.on_event("startup")
     def _on_startup() -> None:
@@ -340,7 +350,7 @@ def create_app(desktop_api_token: str = "", active_context_mgr=None) -> FastAPI:
         if full_path == "ready":
             return await ready()
         path = _path_with_query(request)
-        return await run_in_threadpool(_dispatch_get, path)
+        return await run_in_threadpool(_dispatch_get, path, app.state.runtime_context)
 
     @app.api_route("/{full_path:path}", methods=["POST"])
     async def post_route(full_path: str, request: Request) -> Response:
@@ -353,7 +363,9 @@ def create_app(desktop_api_token: str = "", active_context_mgr=None) -> FastAPI:
             return _json_response(400, {"error": "validation_error", "message": str(exc)})
         if not isinstance(payload, dict):
             return _json_response(400, {"error": "validation_error", "message": "payload must be an object"})
-        return await run_in_threadpool(_dispatch_post, path, payload)
+        return await run_in_threadpool(
+            _dispatch_post, path, payload, app.state.runtime_context
+        )
 
     return app
 

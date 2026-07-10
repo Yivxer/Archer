@@ -19,7 +19,7 @@ type PythonToolEvent = {
   }
 }
 
-type PythonApprovalResult = {
+export type PythonApprovalResult = {
   ok: boolean
   eventId: string
   traceId?: string

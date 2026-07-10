@@ -1,3 +1,5 @@
+import type { PermissionLevel } from '../../agent/contracts'
+
 export type Route = 'Chat' | 'Today' | 'Sessions' | 'Tasks' | 'Memory' | 'Soul' | 'Skills' | 'Projects' | 'Settings'
 export type Theme = 'light' | 'dark'
 export type MemoryContextMode = 'off' | 'conservative' | 'full'
@@ -187,6 +189,8 @@ export type ToolApprovalResult = {
   decision: 'approved' | 'denied'
   executed: boolean
   message: string
+  traceId?: string
+  permissionLevel?: PermissionLevel
   validatedPath?: string
   output?: string
   draft?: ToolEvent['draft']

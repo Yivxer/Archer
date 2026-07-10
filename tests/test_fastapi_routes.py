@@ -226,8 +226,9 @@ def test_websocket_rejects_missing_token(client):
 def test_wildcard_get_dispatch_preserves_query(client, monkeypatch):
     captured = {}
 
-    def fake_payload_get(path):
+    def fake_payload_get(path, runtime_context=None):
         captured["path"] = path
+        captured["runtime_context"] = runtime_context
         return 200, {"ok": True, "path": path}
 
     monkeypatch.setattr("terminal.api.fastapi_app.payload_get", fake_payload_get)
@@ -240,6 +241,7 @@ def test_wildcard_get_dispatch_preserves_query(client, monkeypatch):
     assert response.status_code == 200
     assert response.json() == {"ok": True, "path": "/memory?include_rejected=true"}
     assert captured["path"] == "/memory?include_rejected=true"
+    assert captured["runtime_context"] is client.app.state.runtime_context
 
 
 def test_wildcard_get_dispatch_runs_in_threadpool(client, monkeypatch):
@@ -250,21 +252,25 @@ def test_wildcard_get_dispatch_runs_in_threadpool(client, monkeypatch):
         return fn(*args, **kwargs)
 
     monkeypatch.setattr("terminal.api.fastapi_app.run_in_threadpool", fake_run_in_threadpool)
-    monkeypatch.setattr("terminal.api.fastapi_app.payload_get", lambda path: (200, {"path": path}))
+    monkeypatch.setattr(
+        "terminal.api.fastapi_app.payload_get",
+        lambda path, runtime_context=None: (200, {"path": path}),
+    )
 
     response = client.get("/memory", headers={"Authorization": "Bearer test-token"})
 
     assert response.status_code == 200
     assert response.json() == {"path": "/memory"}
-    assert calls == [("_dispatch_get", ("/memory",))]
+    assert calls == [("_dispatch_get", ("/memory", client.app.state.runtime_context))]
 
 
 def test_wildcard_post_dispatch_preserves_body(client, monkeypatch):
     captured = {}
 
-    def fake_payload_post(path, body):
+    def fake_payload_post(path, body, runtime_context=None):
         captured["path"] = path
         captured["body"] = body
+        captured["runtime_context"] = runtime_context
         return 200, {"ok": True}
 
     monkeypatch.setattr("terminal.api.fastapi_app.payload_post", fake_payload_post)
@@ -277,7 +283,11 @@ def test_wildcard_post_dispatch_preserves_body(client, monkeypatch):
 
     assert response.status_code == 200
     assert response.json() == {"ok": True}
-    assert captured == {"path": "/settings/validate", "body": {"apiKey": "sk-test"}}
+    assert captured == {
+        "path": "/settings/validate",
+        "body": {"apiKey": "sk-test"},
+        "runtime_context": client.app.state.runtime_context,
+    }
 
 
 def test_wildcard_post_dispatch_runs_in_threadpool(client, monkeypatch):
@@ -288,7 +298,10 @@ def test_wildcard_post_dispatch_runs_in_threadpool(client, monkeypatch):
         return fn(*args, **kwargs)
 
     monkeypatch.setattr("terminal.api.fastapi_app.run_in_threadpool", fake_run_in_threadpool)
-    monkeypatch.setattr("terminal.api.fastapi_app.payload_post", lambda path, body: (200, {"path": path, "body": body}))
+    monkeypatch.setattr(
+        "terminal.api.fastapi_app.payload_post",
+        lambda path, body, runtime_context=None: (200, {"path": path, "body": body}),
+    )
 
     response = client.post(
         "/settings/validate",
@@ -298,7 +311,10 @@ def test_wildcard_post_dispatch_runs_in_threadpool(client, monkeypatch):
 
     assert response.status_code == 200
     assert response.json() == {"path": "/settings/validate", "body": {"apiKey": "sk-test"}}
-    assert calls == [("_dispatch_post", ("/settings/validate", {"apiKey": "sk-test"}))]
+    assert calls == [(
+        "_dispatch_post",
+        ("/settings/validate", {"apiKey": "sk-test"}, client.app.state.runtime_context),
+    )]
 
 
 def test_unknown_route_returns_404(client):

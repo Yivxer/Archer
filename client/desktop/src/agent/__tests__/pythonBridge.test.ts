@@ -1,15 +1,27 @@
 import { describe, expect, it } from 'vitest'
 import contractFixture from '../__fixtures__/desktopStreamV1.json'
-import { pythonApprovalToAgentEvent, pythonOrchestrationToAgentEvent, pythonPlanToAgentEvent, pythonStreamPayloadToAgentEvents, pythonToolEventToAgentEvent, type PythonStreamPayload } from '../pythonBridge'
+import { pythonApprovalToAgentEvent, pythonOrchestrationToAgentEvent, pythonPlanToAgentEvent, pythonStreamPayloadToAgentEvents, pythonToolEventToAgentEvent, type PythonApprovalResult, type PythonStreamPayload } from '../pythonBridge'
 
 describe('python bridge', () => {
   it('normalizes the shared Python/Desktop contract fixture in stable order', () => {
-    const events = pythonStreamPayloadToAgentEvents(
+    const streamEvents = pythonStreamPayloadToAgentEvents(
       contractFixture.sessionId,
       contractFixture.payload as PythonStreamPayload,
     )
+    const approvalEvent = pythonApprovalToAgentEvent(
+      contractFixture.sessionId,
+      contractFixture.approvalResponse as PythonApprovalResult,
+    )
+    const events = [...streamEvents, approvalEvent]
 
     expect(events.map((event) => event.type)).toEqual(contractFixture.expectedAgentEventTypes)
+    expect(approvalEvent).toMatchObject({
+      type: 'approval.result',
+      permissionLevel: 'deploy-remote',
+      traceId: 'trace-contract-1',
+      receipt: contractFixture.approvalResponse.receipt,
+    })
+    expect(contractFixture.donePayload).toEqual({ type: 'done', done: true })
   })
 
   it('converts Python toolEvent to a tool.request event', () => {

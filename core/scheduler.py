@@ -44,8 +44,34 @@ def parse_interval(spec: str) -> int:
     )
 
 
-def _now() -> str:
-    return datetime.now().isoformat(timespec="seconds")
+def _now(value: datetime | None = None) -> str:
+    return (value or datetime.now()).isoformat(timespec="seconds")
+
+
+def init_schedule_table(db_path: Path) -> None:
+    """Initialize only scheduler-owned schema for an explicitly selected DB."""
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(db_path)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS scheduled_tasks (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            skill_name   TEXT    NOT NULL,
+            label        TEXT    DEFAULT '',
+            interval_h   INTEGER NOT NULL,
+            args_json    TEXT    DEFAULT '{}',
+            enabled      INTEGER DEFAULT 1,
+            last_run_at  TEXT,
+            next_run_at  TEXT    NOT NULL,
+            created_at   TEXT    NOT NULL,
+            catchup      TEXT    DEFAULT 'latest'
+        )
+    """)
+    try:
+        conn.execute("ALTER TABLE scheduled_tasks ADD COLUMN catchup TEXT DEFAULT 'latest'")
+    except sqlite3.OperationalError:
+        pass
+    conn.commit()
+    conn.close()
 
 
 def format_task(task: dict) -> dict:
@@ -69,22 +95,38 @@ def format_task(task: dict) -> dict:
     }
 
 
-def sync_schedules_json(db_path: Path = DB_PATH) -> None:
+def schedule_json_path(db_path: Path) -> Path:
+    return db_path.parent / "schedules.json"
+
+
+def sync_schedules_json(
+    db_path: Path = DB_PATH,
+    *,
+    now: datetime | None = None,
+    output_path: Path | None = None,
+) -> Path:
     """将 DB 任务镜像到 memory/schedules.json，便于人工查看与 Desktop 读取。"""
     payload = {
         "version": 1,
-        "updatedAt": _now(),
+        "updatedAt": _now(now),
         "tasks": [format_task(t) for t in list_tasks(db_path)],
     }
-    SCHEDULES_JSON_PATH.parent.mkdir(parents=True, exist_ok=True)
-    SCHEDULES_JSON_PATH.write_text(
+    resolved_output_path = output_path or SCHEDULES_JSON_PATH
+    resolved_output_path.parent.mkdir(parents=True, exist_ok=True)
+    resolved_output_path.write_text(
         json.dumps(payload, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
+    return resolved_output_path
 
 
-def _after_mutate(db_path: Path = DB_PATH) -> None:
-    sync_schedules_json(db_path)
+def _after_mutate(
+    db_path: Path = DB_PATH,
+    *,
+    now: datetime | None = None,
+    output_path: Path | None = None,
+) -> None:
+    sync_schedules_json(db_path, now=now, output_path=output_path)
 
 
 # ── CRUD ───────────────────────────────────────────────────────────────────────
@@ -96,6 +138,8 @@ def add_task(
     args: dict | None = None,
     catchup: str = "latest",
     db_path: Path = DB_PATH,
+    now: datetime | None = None,
+    output_path: Path | None = None,
 ) -> int:
     """添加定时任务，next_run_at 设为当前时间（下次启动即执行）。
     catchup: 'latest'（错过后补跑一次）| 'skip'（错过直接跳过重新计时）
@@ -104,32 +148,38 @@ def add_task(
         catchup = "latest"
     interval_h = parse_interval(interval_spec)
     args_json = json.dumps(args or {}, ensure_ascii=False)
-    now = _now()
+    now_text = _now(now)
     conn = sqlite3.connect(db_path)
     cur = conn.execute(
         "INSERT INTO scheduled_tasks (skill_name, label, interval_h, args_json, catchup, next_run_at, created_at)"
         " VALUES (?,?,?,?,?,?,?)",
-        (skill_name, label, interval_h, args_json, catchup, now, now),
+        (skill_name, label, interval_h, args_json, catchup, now_text, now_text),
     )
     task_id = cur.lastrowid
     conn.commit()
     conn.close()
-    _after_mutate(db_path)
+    _after_mutate(db_path, now=now, output_path=output_path)
     return task_id
 
 
-def remove_task(task_id: int, db_path: Path = DB_PATH) -> bool:
+def remove_task(task_id: int, db_path: Path = DB_PATH, *, output_path: Path | None = None) -> bool:
     conn = sqlite3.connect(db_path)
     cur = conn.execute("DELETE FROM scheduled_tasks WHERE id=?", (task_id,))
     ok = cur.rowcount > 0
     conn.commit()
     conn.close()
     if ok:
-        _after_mutate(db_path)
+        _after_mutate(db_path, output_path=output_path)
     return ok
 
 
-def set_enabled(task_id: int, enabled: bool, db_path: Path = DB_PATH) -> bool:
+def set_enabled(
+    task_id: int,
+    enabled: bool,
+    db_path: Path = DB_PATH,
+    *,
+    output_path: Path | None = None,
+) -> bool:
     conn = sqlite3.connect(db_path)
     cur = conn.execute(
         "UPDATE scheduled_tasks SET enabled=? WHERE id=?",
@@ -139,7 +189,7 @@ def set_enabled(task_id: int, enabled: bool, db_path: Path = DB_PATH) -> bool:
     conn.commit()
     conn.close()
     if ok:
-        _after_mutate(db_path)
+        _after_mutate(db_path, output_path=output_path)
     return ok
 
 
@@ -176,8 +226,15 @@ def get_task(task_id: int, db_path: Path = DB_PATH) -> dict | None:
     return dict(row) if row else None
 
 
-def _mark_ran(task_id: int, interval_h: int, db_path: Path = DB_PATH):
-    now = datetime.now()
+def _mark_ran(
+    task_id: int,
+    interval_h: int,
+    db_path: Path = DB_PATH,
+    *,
+    now: datetime | None = None,
+    output_path: Path | None = None,
+):
+    now = now or datetime.now()
     next_run = (now + timedelta(hours=interval_h)).isoformat(timespec="seconds")
     conn = sqlite3.connect(db_path)
     conn.execute(
@@ -186,7 +243,7 @@ def _mark_ran(task_id: int, interval_h: int, db_path: Path = DB_PATH):
     )
     conn.commit()
     conn.close()
-    _after_mutate(db_path)
+    _after_mutate(db_path, now=now, output_path=output_path)
 
 
 # ── 执行 ───────────────────────────────────────────────────────────────────────
@@ -227,13 +284,20 @@ def run_due_tasks(skills: dict, db_path: Path = DB_PATH) -> list[tuple[dict, Any
     return results
 
 
-def run_task_by_id(task_id: int, skills: dict, db_path: Path = DB_PATH) -> Any:
+def run_task_by_id(
+    task_id: int,
+    skills: dict,
+    db_path: Path = DB_PATH,
+    *,
+    now: datetime | None = None,
+    output_path: Path | None = None,
+) -> Any:
     """手动立即执行指定任务，更新 last_run_at / next_run_at。"""
     task = get_task(task_id, db_path)
     if task is None:
         return None
     tr = run_task(task, skills, db_path=db_path)
-    _mark_ran(task_id, task["interval_h"], db_path)
+    _mark_ran(task_id, task["interval_h"], db_path, now=now, output_path=output_path)
     return tr
 
 

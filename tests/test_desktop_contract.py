@@ -12,6 +12,8 @@ from terminal.api._tools import (
     _tool_event,
     _with_trace_id,
 )
+from terminal.api._routes import _tool_approval
+from terminal.api import _config
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -26,7 +28,7 @@ def _fixture() -> dict:
 
 
 @pytest.mark.contract
-def test_python_stream_builders_match_desktop_contract_fixture():
+def test_python_stream_builders_match_desktop_contract_fixture(monkeypatch, tmp_path):
     fixture = _fixture()
     payload = fixture["payload"]
     trace_id = "trace-contract-1"
@@ -76,6 +78,44 @@ def test_python_stream_builders_match_desktop_contract_fixture():
         key: value for key, value in expected_failure.items() if key != "id"
     }
 
+    approval_fixture = fixture["approvalResponse"]
+    event_id = approval_fixture["eventId"]
+    monkeypatch.setattr(_config, "TOOL_DRAFTS_DIR", tmp_path / "tool-drafts")
+    monkeypatch.setattr(
+        _config,
+        "TOOL_APPROVAL_AUDIT_LOG_PATH",
+        tmp_path / "tool-approval-audit.jsonl",
+    )
+    _config.PENDING_TOOL_DRAFTS.clear()
+    _config.PENDING_TOOL_RESULTS.clear()
+    _config.PENDING_TOOL_FINGERPRINT_RESULTS.clear()
+    _config.set_tool_draft(
+        event_id,
+        {
+            "kind": "tool_request",
+            "eventId": event_id,
+            "skillName": "hugo_blog",
+            "args": {"action": "deploy", "contractNonce": event_id},
+            "traceId": trace_id,
+        },
+    )
+    monkeypatch.setattr(
+        "core.api_tool_service.execute_tool_request",
+        lambda *_args, **_kwargs: {
+            "executed": True,
+            "output": "部署成功",
+            "summary": "hugo deploy complete",
+            "workReceipt": approval_fixture["workReceipt"],
+        },
+    )
+    approval = _tool_approval({"eventId": event_id, "decision": "approved"})
+    assert {
+        key: approval.get(key)
+        for key in approval_fixture
+    } == approval_fixture
+    assert isinstance(approval.get("fingerprint"), str)
+    assert approval["fingerprint"]
+
 
 @pytest.mark.contract
 def test_contract_fixture_declares_stable_python_to_desktop_order():
@@ -87,4 +127,6 @@ def test_contract_fixture_declares_stable_python_to_desktop_order():
         "tool.request",
         "status.event",
         "failure.hint",
+        "approval.result",
     ]
+    assert fixture["donePayload"] == {"type": "done", "done": True}

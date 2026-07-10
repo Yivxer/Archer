@@ -48,10 +48,45 @@
       "detail": "deploy timeout"
     }
   },
+  "approvalResponse": {
+    "ok": true,
+    "eventId": "hugo-blog-contract-approval",
+    "traceId": "trace-contract-1",
+    "decision": "approved",
+    "permissionLevel": "deploy-remote",
+    "executed": true,
+    "output": "部署成功",
+    "message": "hugo deploy complete",
+    "receipt": {
+      "done": "已发布测试文章",
+      "source": "/tmp/source.md",
+      "target": "https://example.com/test/",
+      "verification": "HTTP 200",
+      "rollback": "content/posts/test.md",
+      "traceId": "trace-contract-1"
+    },
+    "workReceipt": {
+      "done": "已发布测试文章",
+      "source": "/tmp/source.md",
+      "target": "https://example.com/test/",
+      "verification": "HTTP 200",
+      "rollback": "content/posts/test.md",
+      "traceId": "trace-contract-1"
+    }
+  },
+  "donePayload": {"type": "done", "done": true},
   "expectedAgentEventTypes": [
     "runtime.context",
     "tool.request",
     "status.event",
-    "failure.hint"
+    "failure.hint",
+    "approval.result"
+  ],
+  "expectedSseTerminalTypes": [
+    "runtimeContextEvent",
+    "tool_event",
+    "statusEvent",
+    "failureHintEvent",
+    "done"
   ]
 }

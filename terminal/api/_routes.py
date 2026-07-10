@@ -2694,113 +2694,10 @@ def _tool_draft_from_approval_fallback(event_id: str, fallback: object) -> dict 
 
 
 # ---------------------------------------------------------------------------
-# Scheduled tasks
-# ---------------------------------------------------------------------------
-
-def _list_schedules() -> dict:
-    from core.scheduler import SCHEDULES_JSON_PATH, format_task, list_tasks, sync_schedules_json
-    import memory.store as store
-
-    store.init_db()
-    sync_schedules_json(db_path=store.DB_PATH)
-    return {
-        "ok": True,
-        "jsonPath": str(SCHEDULES_JSON_PATH),
-        "tasks": [format_task(t) for t in list_tasks(db_path=store.DB_PATH)],
-    }
-
-
-def _add_schedule(payload: dict) -> tuple[int, dict]:
-    from core.scheduler import add_task, format_task, get_task, parse_interval
-    import memory.store as store
-    from skills.loader import register_all_skills
-
-    store.init_db()
-    skill_name = str(payload.get("skillName") or payload.get("skill_name") or "").strip()
-    interval = str(payload.get("interval") or payload.get("intervalSpec") or "").strip()
-    label = str(payload.get("label") or "").strip()
-    catchup = str(payload.get("catchup") or "latest").strip()
-    args = payload.get("args") if isinstance(payload.get("args"), dict) else None
-
-    if not skill_name or not interval:
-        return 400, {"ok": False, "error": "skillName and interval are required"}
-
-    registry = register_all_skills()
-    if skill_name not in registry:
-        return 400, {"ok": False, "error": f"unknown skill: {skill_name}"}
-
-    try:
-        parse_interval(interval)
-    except ValueError as exc:
-        return 400, {"ok": False, "error": str(exc)}
-
-    task_id = add_task(skill_name, interval, label, args=args, catchup=catchup, db_path=store.DB_PATH)
-    task = get_task(task_id, db_path=store.DB_PATH)
-    return 200, {"ok": True, "task": format_task(task)}
-
-
-def _schedule_action(task_id: str, action: str, payload: dict | None = None) -> tuple[int, dict]:
-    from core.scheduler import (
-        format_task,
-        get_task,
-        remove_task,
-        run_task_by_id,
-        set_enabled,
-    )
-    import memory.store as store
-    from skills.loader import register_all_skills
-
-    if not re.fullmatch(r"[0-9]+", task_id):
-        return 400, {"ok": False, "error": "task id must be numeric"}
-
-    store.init_db()
-    tid = int(task_id)
-    task = get_task(tid, db_path=store.DB_PATH)
-    if task is None and action != "remove":
-        return 404, {"ok": False, "error": "task_not_found", "id": tid}
-
-    if action == "remove":
-        ok = remove_task(tid, db_path=store.DB_PATH)
-        return (200 if ok else 404), {"ok": ok, "id": tid}
-
-    if action == "enable":
-        ok = set_enabled(tid, True, db_path=store.DB_PATH)
-        task = get_task(tid, db_path=store.DB_PATH)
-        return 200, {"ok": ok, "task": format_task(task) if task else None}
-
-    if action == "disable":
-        ok = set_enabled(tid, False, db_path=store.DB_PATH)
-        task = get_task(tid, db_path=store.DB_PATH)
-        return 200, {"ok": ok, "task": format_task(task) if task else None}
-
-    if action == "run":
-        skills = register_all_skills()
-        tr = run_task_by_id(tid, skills, db_path=store.DB_PATH)
-        task = get_task(tid, db_path=store.DB_PATH)
-        if tr is None and task is None:
-            return 404, {"ok": False, "error": "task_not_found", "id": tid}
-        if tr is None:
-            return 400, {
-                "ok": False,
-                "error": "skill_not_loaded",
-                "id": tid,
-                "skillName": task["skill_name"],
-            }
-        return 200, {
-            "ok": tr.ok,
-            "task": format_task(task) if task else None,
-            "summary": tr.summary,
-            "preview": (tr.content_preview or "")[:600],
-        }
-
-    return 400, {"ok": False, "error": f"unknown action: {action}"}
-
-
-# ---------------------------------------------------------------------------
 # Route dispatchers
 # ---------------------------------------------------------------------------
 
-def payload_get(path: str) -> tuple[int, dict | list]:
+def payload_get(path: str, runtime_context=None) -> tuple[int, dict | list]:
     """Handle GET request routing."""
     if path == "/health":
         return 200, {"ok": True}
@@ -2943,7 +2840,8 @@ def payload_get(path: str) -> tuple[int, dict | list]:
     if path == "/jobs":
         return 200, _list_jobs()
     if path == "/schedules":
-        return 200, _list_schedules()
+        from terminal.api.schedule_routes import list_schedules
+        return 200, list_schedules(runtime_context)
     if path.startswith("/jobs/"):
         job_id = path.removeprefix("/jobs/")
         job = _job_detail(job_id)
@@ -2953,7 +2851,7 @@ def payload_get(path: str) -> tuple[int, dict | list]:
     return 404, {"error": "not_found", "path": path}
 
 
-def payload_post(path: str, payload: dict) -> tuple[int, dict | list]:
+def payload_post(path: str, payload: dict, runtime_context=None) -> tuple[int, dict | list]:
     """Handle POST request routing."""
     initiative_feedback = re.fullmatch(r"/initiative-shadow/([0-9]+)/feedback", path)
     if initiative_feedback:
@@ -2965,11 +2863,15 @@ def payload_post(path: str, payload: dict) -> tuple[int, dict | list]:
     if path == "/jobs":
         return 200, _create_job(payload)
     if path == "/schedules":
-        status, body = _add_schedule(payload)
+        from terminal.api.schedule_routes import add_schedule
+        status, body = add_schedule(payload, runtime_context)
         return status, body
-    schedule_action = re.fullmatch(r"/schedules/([0-9]+)/(remove|enable|disable|run)", path)
-    if schedule_action:
-        status, body = _schedule_action(schedule_action.group(1), schedule_action.group(2), payload)
+    schedule_action_match = re.fullmatch(r"/schedules/([0-9]+)/(remove|enable|disable|run)", path)
+    if schedule_action_match:
+        from terminal.api.schedule_routes import schedule_action
+        status, body = schedule_action(
+            schedule_action_match.group(1), schedule_action_match.group(2), payload, runtime_context
+        )
         return status, body
     job_cancel = re.fullmatch(r"/jobs/([^/]+)/cancel", path)
     if job_cancel:
