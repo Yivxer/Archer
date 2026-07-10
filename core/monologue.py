@@ -29,31 +29,9 @@ class MonologueEntry:
 
 
 def init_table(db_path: Path = DB_PATH) -> None:
-    conn = sqlite3.connect(db_path)
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS part8_monologues (
-            id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            source      TEXT    NOT NULL,
-            thought     TEXT    NOT NULL,
-            trigger     TEXT    DEFAULT '',
-            delivered   INTEGER DEFAULT 0,
-            trace_json  TEXT    DEFAULT '{}',
-            created_at  TEXT    NOT NULL,
-            archived_at TEXT
-        )
-        """
-    )
-    try:
-        conn.execute("ALTER TABLE part8_monologues ADD COLUMN archived_at TEXT")
-    except sqlite3.Error:
-        pass
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_part8_monologues_created_at "
-        "ON part8_monologues(created_at)"
-    )
-    conn.commit()
-    conn.close()
+    from memory.part8_schema import init_monologue_table
+
+    init_monologue_table(db_path)
 
 
 def record_monologue(

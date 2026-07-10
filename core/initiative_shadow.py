@@ -24,29 +24,9 @@ class InitiativeDecision:
 
 
 def init_table(db_path: Path = DB_PATH) -> None:
-    conn = sqlite3.connect(db_path)
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS initiative_sent_log (
-            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
-            event_type          TEXT    NOT NULL,
-            kind                TEXT    NOT NULL,
-            title               TEXT    DEFAULT '',
-            message             TEXT    NOT NULL,
-            delivered           INTEGER DEFAULT 0,
-            decision_trace_json TEXT    DEFAULT '{}',
-            created_at          TEXT    NOT NULL,
-            feedback            TEXT    DEFAULT '',
-            archived_at         TEXT
-        )
-        """
-    )
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_initiative_sent_log_created_at "
-        "ON initiative_sent_log(created_at)"
-    )
-    conn.commit()
-    conn.close()
+    from memory.part8_schema import init_initiative_shadow_table
+
+    init_initiative_shadow_table(db_path)
 
 
 def should_record_shadow_initiative(

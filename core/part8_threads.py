@@ -22,33 +22,9 @@ from memory.store import DB_PATH
 
 
 def init_table(db_path: Path = DB_PATH) -> None:
-    conn = sqlite3.connect(db_path)
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS part8_threads (
-            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
-            session_id          TEXT    DEFAULT '',
-            topic               TEXT    NOT NULL,
-            prompt              TEXT    DEFAULT '',
-            status              TEXT    DEFAULT 'open',
-            last_seen_at        TEXT    NOT NULL,
-            created_at          TEXT    NOT NULL,
-            resume_logged_at    TEXT,
-            closed_at           TEXT,
-            archived_at         TEXT
-        )
-        """
-    )
-    try:
-        conn.execute("ALTER TABLE part8_threads ADD COLUMN archived_at TEXT")
-    except sqlite3.Error:
-        pass
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_part8_threads_status_seen "
-        "ON part8_threads(status, last_seen_at)"
-    )
-    conn.commit()
-    conn.close()
+    from memory.part8_schema import init_part8_threads_table
+
+    init_part8_threads_table(db_path)
 
 
 def record_unclosed_thread(

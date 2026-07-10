@@ -54,9 +54,9 @@ class MigrationResult:
 
 
 def _apply_baseline_schema(db_path: Path) -> None:
-    from memory.store import init_db
+    from memory.schema_setup import initialize_schema
 
-    init_db(db_path)
+    initialize_schema(db_path)
 
 
 MIGRATIONS: tuple[Migration, ...] = (

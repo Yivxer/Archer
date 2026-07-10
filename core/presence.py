@@ -40,18 +40,9 @@ def transition_presence(current_state: str, event: str) -> PresenceTransition:
 
 
 def init_table(db_path: Path = DB_PATH) -> None:
-    conn = sqlite3.connect(db_path)
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS part8_presence_state (
-            id          INTEGER PRIMARY KEY CHECK (id = 1),
-            state       TEXT    NOT NULL,
-            updated_at  TEXT    NOT NULL
-        )
-        """
-    )
-    conn.commit()
-    conn.close()
+    from memory.part8_schema import init_presence_table
+
+    init_presence_table(db_path)
 
 
 def get_presence_state(db_path: Path = DB_PATH) -> str:

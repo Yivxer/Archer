@@ -13,6 +13,7 @@ from memory.work import init_work_table
 from memory.subtask import init_subtask_table
 from memory.emotion import init_emotion_table
 from memory.store import init_db
+from memory.schema_setup import initialize_schema
 
 
 @pytest.mark.integration
@@ -82,3 +83,16 @@ def test_full_legacy_schema_can_initialize_an_explicit_empty_database(tmp_path):
         "contradictions",
         "session_emotions",
     } <= tables
+
+
+@pytest.mark.integration
+def test_schema_layer_initializes_without_crud_store_entrypoint(tmp_path):
+    db_path = tmp_path / "schema-layer" / "archer.db"
+
+    initialize_schema(db_path)
+
+    conn = sqlite3.connect(db_path)
+    assert conn.execute(
+        "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='memories'"
+    ).fetchone()[0] == 1
+    conn.close()

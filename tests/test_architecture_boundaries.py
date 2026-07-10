@@ -56,10 +56,6 @@ def test_memory_core_imports_cannot_grow_beyond_documented_legacy_debt():
         ("memory/retrieve.py", "core.observability"),
         ("memory/skill_gap.py", "core.skill_router"),
         ("memory/soul_profile.py", "core.rhythm"),
-        ("memory/store.py", "core.initiative_shadow"),
-        ("memory/store.py", "core.monologue"),
-        ("memory/store.py", "core.part8_threads"),
-        ("memory/store.py", "core.presence"),
     }
 
 
