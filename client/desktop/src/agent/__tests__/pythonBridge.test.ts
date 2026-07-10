@@ -1,7 +1,17 @@
 import { describe, expect, it } from 'vitest'
-import { pythonApprovalToAgentEvent, pythonOrchestrationToAgentEvent, pythonPlanToAgentEvent, pythonStreamPayloadToAgentEvents, pythonToolEventToAgentEvent } from '../pythonBridge'
+import contractFixture from '../__fixtures__/desktopStreamV1.json'
+import { pythonApprovalToAgentEvent, pythonOrchestrationToAgentEvent, pythonPlanToAgentEvent, pythonStreamPayloadToAgentEvents, pythonToolEventToAgentEvent, type PythonStreamPayload } from '../pythonBridge'
 
 describe('python bridge', () => {
+  it('normalizes the shared Python/Desktop contract fixture in stable order', () => {
+    const events = pythonStreamPayloadToAgentEvents(
+      contractFixture.sessionId,
+      contractFixture.payload as PythonStreamPayload,
+    )
+
+    expect(events.map((event) => event.type)).toEqual(contractFixture.expectedAgentEventTypes)
+  })
+
   it('converts Python toolEvent to a tool.request event', () => {
     const event = pythonToolEventToAgentEvent('session-1', {
       id: 'hugo-blog-1',

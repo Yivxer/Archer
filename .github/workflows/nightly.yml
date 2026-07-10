@@ -11,6 +11,13 @@ jobs:
     name: Journey Smoke (8 条核心用户旅程)
     runs-on: macos-latest
     timeout-minutes: 30
+    env:
+      ARCHER_DESKTOP_TOKEN: ci-smoke-token
+      ARCHER_TOKEN_FILE: ${{ runner.temp }}/archer/desktop-api-token
+      ARCHER_API_KEY: ${{ secrets.ARCHER_NIGHTLY_API_KEY }}
+      DEEPSEEK_API_KEY: ${{ secrets.ARCHER_NIGHTLY_API_KEY }}
+      ARCHER_BASE_URL: https://api.deepseek.com/v1
+      ARCHER_MODEL: deepseek-chat
     steps:
       - uses: actions/checkout@v4
 
@@ -42,23 +49,36 @@ jobs:
         run: npm run build
 
       - name: Run journey smoke
-        env:
-          ARCHER_DESKTOP_TOKEN: ci-smoke-token
         run: |
-          # 启动 API
-          .venv/bin/python terminal/archer_api.py --port 8765 --token $ARCHER_DESKTOP_TOKEN &
+          set -euo pipefail
+          if [[ -z "$ARCHER_API_KEY" ]]; then
+            echo "Missing required secret: ARCHER_NIGHTLY_API_KEY"
+            exit 1
+          fi
+
+          mkdir -p "$(dirname "$ARCHER_TOKEN_FILE")"
+          printf '%s' "$ARCHER_DESKTOP_TOKEN" > "$ARCHER_TOKEN_FILE"
+
+          python terminal/archer_api.py --port 8765 --token "$ARCHER_DESKTOP_TOKEN" &
           API_PID=$!
-          # 等待 API 就绪
-          for i in {1..30}; do
-            if curl -s http://127.0.0.1:8765/health | grep -q "ok"; then break; fi
+          trap 'kill "$API_PID" 2>/dev/null || true' EXIT
+
+          ready=0
+          for i in {1..60}; do
+            if curl -sf http://127.0.0.1:8765/health >/dev/null \
+              && curl -sf http://127.0.0.1:8765/ready | grep -q '"ready":true'; then
+              ready=1
+              break
+            fi
             sleep 1
           done
-          # 跑 smoke
+
+          if [[ "$ready" -ne 1 ]]; then
+            echo "Archer API did not become ready"
+            exit 1
+          fi
+
           bash scripts/journey_smoke.sh --all
-          EXIT_CODE=$?
-          # 清理
-          kill $API_PID 2>/dev/null || true
-          exit $EXIT_CODE
 
       - name: Collect metrics
         if: always()
@@ -71,6 +91,7 @@ jobs:
         with:
           name: journey-smoke-${{ github.run_id }}
           path: |
-            logs/journey_smoke/
+            logs/archer_api.log
+            logs/journey-smoke.log
             logs/metrics/
           retention-days: 14

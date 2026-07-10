@@ -372,6 +372,16 @@ def check(skill_name: str, args: dict, skills: dict, cfg: dict | None = None) ->
             risk="medium",
         )
 
+    if skill_name == "hugo_blog":
+        action = str(args.get("action", "")).strip().lower()
+        if action in {"list", "read", "doctor"}:
+            return PolicyResult(Decision.ALLOW, risk="low")
+        return PolicyResult(
+            Decision.CONFIRM,
+            reason=f"博客副作用 [{action or '未指定动作'}] 需要用户确认",
+            risk="medium",
+        )
+
     if skill_name == "file_ops":
         action = args.get("action", "read")
         path = args.get("path", "")

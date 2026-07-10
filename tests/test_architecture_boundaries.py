@@ -1,0 +1,146 @@
+from __future__ import annotations
+
+import ast
+import subprocess
+import types
+from pathlib import Path
+
+import pytest
+
+from core.policy import Decision, check
+
+
+ROOT = Path(__file__).resolve().parents[1]
+GOD_FILE_LINE_BASELINE = {
+    "terminal/api/_tools.py": 3368,
+    "terminal/api/_routes.py": 3075,
+    "memory/store.py": 1609,
+    "client/desktop/src/renderer/src/pages/ChatPage.tsx": 2361,
+    "client/desktop/src/renderer/src/adapters/localArcher.ts": 1132,
+}
+
+
+def _imports_under(package: str, imported_root: str) -> set[tuple[str, str]]:
+    imports: set[tuple[str, str]] = set()
+    for path in (ROOT / package).rglob("*.py"):
+        if "__pycache__" in path.parts:
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            modules: list[str] = []
+            if isinstance(node, ast.Import):
+                modules = [alias.name for alias in node.names]
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                modules = [node.module]
+            for module in modules:
+                if module == imported_root or module.startswith(f"{imported_root}."):
+                    imports.add((str(path.relative_to(ROOT)), module))
+    return imports
+
+
+@pytest.mark.contract
+def test_memory_core_imports_cannot_grow_beyond_documented_legacy_debt():
+    imports = _imports_under("memory", "core")
+    approved_infrastructure = {
+        item for item in imports if item[1] == "core.paths"
+    }
+    legacy_debt = imports - approved_infrastructure
+
+    assert legacy_debt == {
+        ("memory/compaction.py", "core.llm"),
+        ("memory/emotion.py", "core.llm"),
+        ("memory/extract.py", "core.llm"),
+        ("memory/narrative.py", "core.llm"),
+        ("memory/patterns.py", "core.llm"),
+        ("memory/retrieve.py", "core.context"),
+        ("memory/retrieve.py", "core.observability"),
+        ("memory/skill_gap.py", "core.skill_router"),
+        ("memory/soul_profile.py", "core.rhythm"),
+        ("memory/store.py", "core.initiative_shadow"),
+        ("memory/store.py", "core.monologue"),
+        ("memory/store.py", "core.part8_threads"),
+        ("memory/store.py", "core.presence"),
+    }
+
+
+@pytest.mark.contract
+def test_workflows_never_import_terminal_api():
+    assert _imports_under("workflows", "terminal") == set()
+
+
+def _skill(name: str, *, risk: str = "medium"):
+    module = types.ModuleType(name)
+    module.SKILL = {
+        "name": name,
+        "risk": risk,
+        "requires_confirmation": False,
+    }
+    return module
+
+
+@pytest.mark.contract
+def test_side_effect_skills_require_approval_outside_read_only_domains():
+    obsidian = check(
+        "obsidian_write",
+        {"path": "私人日记/今天.md", "content": "changed"},
+        {"obsidian_write": _skill("obsidian_write")},
+    )
+    hugo = check(
+        "hugo_blog",
+        {"action": "deploy"},
+        {"hugo_blog": _skill("hugo_blog")},
+    )
+
+    assert obsidian.decision == Decision.CONFIRM
+    assert hugo.decision == Decision.CONFIRM
+
+    hugo_read = check(
+        "hugo_blog",
+        {"action": "read", "filename": "existing.md"},
+        {"hugo_blog": _skill("hugo_blog")},
+    )
+    assert hugo_read.decision == Decision.ALLOW
+
+
+@pytest.mark.contract
+def test_generated_and_runtime_artifacts_are_ignored_and_untracked():
+    samples = [
+        "archer.toml.bak.123",
+        "memory/conversation_threads.json",
+        "client/desktop/index-generated.js",
+        "client/desktop/resources/icon.png.bak-123",
+    ]
+    ignored = subprocess.run(
+        ["git", "check-ignore", *samples],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    tracked = set(
+        subprocess.run(
+            ["git", "ls-files"],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=True,
+        ).stdout.splitlines()
+    )
+
+    assert ignored.returncode == 0
+    assert set(ignored.stdout.splitlines()) == set(samples)
+    assert not set(samples) & tracked
+
+
+@pytest.mark.contract
+def test_god_files_cannot_grow_beyond_part10_gate0_baseline():
+    actual = {
+        path: len((ROOT / path).read_text(encoding="utf-8").splitlines())
+        for path in GOD_FILE_LINE_BASELINE
+    }
+
+    assert {
+        path: lines
+        for path, lines in actual.items()
+        if lines > GOD_FILE_LINE_BASELINE[path]
+    } == {}

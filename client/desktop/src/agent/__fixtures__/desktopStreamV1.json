@@ -1,0 +1,57 @@
+{
+  "fixtureVersion": 1,
+  "sessionId": "contract-session-1",
+  "payload": {
+    "runtimeContextEvent": {
+      "id": "runtime-context-fixture",
+      "traceId": "trace-contract-1",
+      "task": "project_planning",
+      "phase": "route",
+      "userIntent": "project_planning",
+      "lastResult": "",
+      "expectedNext": "select_workflow_or_model",
+      "matchedSkills": ["obsidian_read"]
+    },
+    "toolEvent": {
+      "id": "hugo-blog-contract-1",
+      "traceId": "trace-contract-1",
+      "name": "hugo_blog",
+      "status": "waiting",
+      "risk": "medium",
+      "permissionLevel": "deploy-remote",
+      "summary": "确认部署枫弋札记",
+      "detail": "action: deploy",
+      "requiresApproval": true,
+      "draft": {
+        "skillName": "hugo_blog",
+        "displayName": "hugo_blog",
+        "args": {"action": "deploy"},
+        "permissionLevel": "deploy-remote",
+        "blocked": false,
+        "traceId": "trace-contract-1"
+      }
+    },
+    "statusEvent": {
+      "traceId": "trace-contract-1",
+      "intentType": "project",
+      "intentLabel": "项目规划",
+      "matchedSkills": ["obsidian_read"],
+      "isBackground": false,
+      "memoryScope": ["project"]
+    },
+    "failureHintEvent": {
+      "id": "failure-hint-fixture",
+      "traceId": "trace-contract-1",
+      "keyword": "command_timeout",
+      "stage": "deploy",
+      "recoverable": true,
+      "detail": "deploy timeout"
+    }
+  },
+  "expectedAgentEventTypes": [
+    "runtime.context",
+    "tool.request",
+    "status.event",
+    "failure.hint"
+  ]
+}
