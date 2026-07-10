@@ -58,46 +58,11 @@ def _split_safe_model_chunk(buffer: str, chunk: str) -> tuple[str, str, bool]:
     return combined, chunk, False
 
 
-def _initiative_event_from_log(log: dict) -> dict:
-    trace = log.get("decision_trace") if isinstance(log.get("decision_trace"), dict) else {}
-    return {
-        "id": f"initiative-{log.get('id')}",
-        "kind": str(log.get("kind") or ""),
-        "title": str(log.get("title") or ""),
-        "message": str(log.get("message") or ""),
-        "shadow": True,
-        "delivered": bool(log.get("delivered", False)),
-        "decisionTrace": trace,
-        "createdAt": str(log.get("created_at") or ""),
-    }
-
-
-def _yield_shadow_initiative_events():
-    """Emit Part 8 initiative contract events without delivering them to UI."""
-    try:
-        import memory.store as store
-        from core.part8_threads import scan_thread_resume_candidates
-
-        for log in scan_thread_resume_candidates(db_path=store.DB_PATH):
-            yield {
-                "type": "initiativeEvent",
-                "initiativeEvent": _initiative_event_from_log(log),
-            }
-    except Exception:
-        return
-
-
-def _record_part8_shadow_material(messages: list[dict]) -> None:
-    """Record Part 8.2 shadow-only monologue and continuity clues."""
-    try:
-        import memory.store as store
-        from core.monologue import generate_monologue
-        from core.part8_clues import record_thread_clues_from_messages
-
-        generate_monologue(db_path=store.DB_PATH, messages=messages)
-        record_thread_clues_from_messages(db_path=store.DB_PATH, messages=messages)
-    except Exception:
-        return
+from terminal.api.part8_runtime import (
+    _initiative_event_from_log,
+    _record_part8_shadow_material,
+    _yield_shadow_initiative_events,
+)
 
 
 def _runtime_context_event(
@@ -2229,6 +2194,7 @@ def _iter_simple_chat_path(
     trace_id: str,
     memory_mode: str,
     obsidian_mode: str,
+    runtime_context=None,
 ):
     """B5.1 simple path：轻量闲聊跳过 orchestration/router/memory/vault/tool_loop。
 
@@ -2247,7 +2213,7 @@ def _iter_simple_chat_path(
     _expert_block = format_expert_block(_expert)
 
     # shadow initiative events（被动扫描，开销小，simple path 保留）
-    for event in _yield_shadow_initiative_events():
+    for event in _yield_shadow_initiative_events(runtime_context):
         yield event
 
     # ready 信号
@@ -2442,13 +2408,14 @@ def _iter_chat_chunks(
     memory_mode: str = "conservative",
     obsidian_mode: str = "summary",
     file_refs: list[dict] | None = None,
+    runtime_context=None,
 ):
     from core.context import classify_query_intent, augment_retrieval_query
     from core.llm import stream_chat
 
     query = _latest_user_text(messages)
     trace_id = f"trace-{uuid4().hex[:12]}"
-    _record_part8_shadow_material(messages)
+    _record_part8_shadow_material(messages, runtime_context)
     # 历史（不含当前这条用户消息），用于历史感知意图与检索改写
     prior_history = messages[:-1] if (messages and messages[-1].get("role") == "user") else messages
     intent_info = classify_query_intent(query, history=prior_history, llm_fallback=False)
@@ -2460,6 +2427,7 @@ def _iter_chat_chunks(
                 messages, query=query, intent_info=intent_info,
                 file_refs=file_refs, trace_id=trace_id,
                 memory_mode=memory_mode, obsidian_mode=obsidian_mode,
+                runtime_context=runtime_context,
             )
             return
     except Exception:
@@ -2512,7 +2480,7 @@ def _iter_chat_chunks(
     _expert = active_expert(_cfg)
     _expert_block = format_expert_block(_expert)
     _scoped_skills = _expert_scoped_skills(_cfg)
-    for event in _yield_shadow_initiative_events():
+    for event in _yield_shadow_initiative_events(runtime_context):
         yield event
     _turn_plan = _plan_desktop_turn(
         query,

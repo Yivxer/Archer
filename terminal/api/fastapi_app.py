@@ -109,14 +109,20 @@ def _dispatch_post(
         return _handle_dispatch_error(path, exc)
 
 
-def _chat_stream_events(payload: dict, release_slot=None) -> Iterator[str]:
+def _chat_stream_events(
+    payload: dict,
+    release_slot=None,
+    runtime_context: RuntimeContext | None = None,
+) -> Iterator[str]:
     messages = _inject_thread_context(_clean_chat_messages(payload.get("messages")), payload.get("threadContext"))
     memory_mode = _clean_memory_mode(payload.get("memoryMode"))
     obsidian_mode = _clean_obsidian_mode(payload.get("obsidianMode"))
     file_refs = _clean_file_refs(payload.get("fileRefs"))
     reply_chunks: list[str] = []
     has_error = False
-    chunk_iter = _iter_chat_chunks(messages, memory_mode, obsidian_mode, file_refs)
+    chunk_iter = _iter_chat_chunks(
+        messages, memory_mode, obsidian_mode, file_refs, runtime_context
+    )
     try:
         try:
             for event in chunk_iter:
@@ -331,7 +337,11 @@ def create_app(
                 "message": "上一轮对话仍在处理中，请等待它结束后再发送。",
             })
         return StreamingResponse(
-            _chat_stream_events(payload, release_slot=semaphore.release),
+            _chat_stream_events(
+                payload,
+                release_slot=semaphore.release,
+                runtime_context=request.app.state.runtime_context,
+            ),
             media_type="text/event-stream; charset=utf-8",
             headers={
                 "Cache-Control": "no-cache",
@@ -368,7 +378,9 @@ def create_app(
             return
 
         try:
-            for frame in _chat_stream_events(payload):
+            for frame in _chat_stream_events(
+                payload, runtime_context=websocket.app.state.runtime_context
+            ):
                 if not frame.startswith("data: "):
                     continue
                 event = json.loads(frame.removeprefix("data: ").strip())

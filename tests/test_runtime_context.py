@@ -7,6 +7,7 @@ import pytest
 from core.event_bus import ArcherEvent, INITIATIVE_DUE
 from core.runtime_context import RuntimeContext, create_runtime_context
 from terminal.api._routes import payload_get, payload_post
+from terminal.api._tools import _record_part8_shadow_material
 
 
 @pytest.mark.unit
@@ -89,3 +90,32 @@ def test_schedule_mutation_stays_inside_injected_runtime(tmp_path, monkeypatch):
     mirror = context.db_path.parent / "schedules.json"
     assert mirror.exists()
     assert '"updatedAt": "2026-07-10T08:00:00"' in mirror.read_text(encoding="utf-8")
+
+
+@pytest.mark.integration
+def test_part8_shadow_material_uses_runtime_database_and_clock(tmp_path):
+    context = create_runtime_context(
+        db_path=tmp_path / "part8" / "archer.db",
+        clock=lambda: datetime(2026, 7, 10, 9, 30, 0),
+    )
+    messages = [
+        {
+            "role": "user",
+            "content": "Archer 的 Part 8 继续做，先做线索层，后面我再测试。",
+        }
+    ]
+
+    _record_part8_shadow_material(messages, runtime_context=context)
+
+    import sqlite3
+
+    conn = sqlite3.connect(context.db_path)
+    monologue = conn.execute(
+        "SELECT created_at FROM part8_monologues ORDER BY id DESC LIMIT 1"
+    ).fetchone()
+    thread = conn.execute(
+        "SELECT last_seen_at FROM part8_threads ORDER BY id DESC LIMIT 1"
+    ).fetchone()
+    conn.close()
+    assert monologue == ("2026-07-10T09:30:00",)
+    assert thread == ("2026-07-10T09:30:00",)
