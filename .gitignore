@@ -17,6 +17,7 @@ env/
 # Configuration with API keys
 .env
 archer.toml
+archer.toml.bak.*
 
 # Soul system — these are yours, not the project's
 SOUL.md
@@ -33,6 +34,7 @@ ARCHER.local.md
 learned_routes.json
 memory/background_jobs.json
 memory/schedules.json
+memory/conversation_threads.json
 
 # Session & artifact storage
 sessions/
@@ -76,3 +78,5 @@ node_modules/
 client/desktop/node_modules/
 client/desktop/out/
 client/desktop/release/
+client/desktop/index-*.js
+client/desktop/resources/*.bak-*

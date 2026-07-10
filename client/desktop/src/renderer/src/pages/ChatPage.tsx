@@ -24,7 +24,7 @@ import { PermissionPrompt } from '../components/PermissionPrompt'
 import { TracePanel } from '../components/TracePanel'
 import { WorkReceipt as WorkReceiptComponent } from '../components/WorkReceipt'
 import { buildThinkingMutter } from '../lib/thinkingMutter'
-import { buildTraceDiagnostics, createInitialRuntimeState, createPersistentEventLog, reduceRuntimeEvent, restoreRuntimeStateFromEvents, routeTaskForRuntime, jobSnapshotToAgentEvent, buildPlanChildJobSpecs, buildPlanCoordinatorPrompt, buildPlanExecutionPrompt, planWithStatus } from '../../../agent'
+import { buildTraceDiagnostics, createInitialRuntimeState, createPersistentEventLog, reduceRuntimeEvent, restoreRuntimeStateFromEvents, routeTaskForRuntime, isForegroundOnlyWritingFeedbackPlan, isHugoBlogPublishPlan, jobSnapshotToAgentEvent, buildPlanChildJobSpecs, buildPlanCoordinatorPrompt, buildPlanExecutionPrompt, planWithStatus } from '../../../agent'
 import type { AgentEvent, ApprovalResultEvent, EventLog, JobEvent, OrchestrationEvent, PlanEvent, TraceDiagnostics } from '../../../agent'
 import type { FailureHintEvent, InitiativeEvent } from '../../../agent/contracts'
 
@@ -46,10 +46,10 @@ export type ChatPageConnectionProps = {
 }
 
 const DEFAULT_STARTERS: ExpertStarter[] = [
-  { label: '先听我说', prompt: '我先说一段，你不用急着给方案。' },
-  { label: '有点卡住', prompt: '我现在有点卡住，想先说一段。' },
-  { label: '轻轻复盘', prompt: '帮我轻轻复盘一下刚才这件事。' },
-  { label: '继续那条线', prompt: '我们继续刚才那条线。' },
+  { label: '倾听', prompt: '我先说一段，你不用急着给方案。' },
+  { label: '卡住了', prompt: '我现在有点卡住，想先说一段。' },
+  { label: '复盘', prompt: '帮我轻轻复盘一下刚才这件事。' },
+  { label: '继续', prompt: '我们继续刚才那条线。' },
 ]
 
 function isAbortError(error: unknown): boolean {
@@ -214,8 +214,10 @@ export function ChatPage({
   const activeSidebarJobCount = sidebarJobs.filter((job) => (
     job.status === 'queued' || job.status === 'running' || job.status === 'waiting_approval'
   )).length
+  const hugoPlanContextText = React.useMemo(() => messages.slice(-6).map((message) => message.text).join(' '), [messages])
   const runtimePlans = Object.values(runtimeState.plans)
-    .filter((plan) => !isMisroutedHugoPublishPlan(plan))
+    .filter((plan) => !isHugoBlogPublishPlan(plan, hugoPlanContextText))
+    .filter((plan) => !isForegroundOnlyWritingFeedbackPlan(plan))
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
   const recentTraceId = React.useMemo(
     () => [...runtimeState.events].reverse().find((event) => event.traceId)?.traceId,
@@ -311,6 +313,7 @@ export function ChatPage({
     const staleIds = toolEvents
       .filter((e) => {
         const result = runtimeState.toolResults[e.id]
+        if (e.name === 'hugo_blog') return false
         if (result?.receipt) return false
         return e.status === 'complete' || e.status === 'denied' || e.status === 'blocked' || result
       })
@@ -604,6 +607,16 @@ export function ChatPage({
 
   async function executeConfirmedPlan(plan: PlanEvent) {
     if (plan.status !== 'proposed' || isBackgrounding || data.status.adapter !== 'local') return
+    if (isHugoBlogPublishPlan(plan, hugoPlanContextText)) {
+      recordAgentEvent(planWithStatus(plan, 'dismissed'))
+      setToolNotice('这类博客发布计划不能放到后台执行，请使用枫弋札记确认卡继续。')
+      return
+    }
+    if (isForegroundOnlyWritingFeedbackPlan(plan)) {
+      recordAgentEvent(planWithStatus(plan, 'dismissed'))
+      setToolNotice('这类只读写作反馈不能放到后台写入，请直接在当前对话里继续。')
+      return
+    }
     const prompt = buildPlanExecutionPrompt(plan)
     recordAgentEvent(planWithStatus(plan, 'accepted'))
 
@@ -875,21 +888,31 @@ export function ChatPage({
   async function decideTool(eventId: string, decision: 'approved' | 'denied') {
     setToolNotice('')
     if (data.status.adapter !== 'local') return
+    const restoredRequest = runtimeState.pendingApprovals.find((item) => item.id === eventId)
     const pendingEvent = toolEvents.find((item) => item.id === eventId)
+      || (restoredRequest ? toolEventFromRuntimeRequest(restoredRequest) : undefined)
+    if (pendingEvent && !toolEvents.some((item) => item.id === eventId)) {
+      setToolEvents((current) => [...current, pendingEvent])
+    }
     try {
-      const { result, event: approvalEvent } = await submitToolApprovalEvent(runtimeSessionId, eventId, decision)
+      const { result, event: approvalEvent } = await submitToolApprovalEvent(
+        runtimeSessionId,
+        eventId,
+        decision,
+        pendingEvent?.draft,
+      )
       // Runtime state is the single source of truth for approval decisions.
       // recordAgentEvent persists the approval.result and updates runtimeState.toolResults,
       // which the UI reads to determine decision state for each tool card.
       recordAgentEvent(approvalEvent)
       const notice = result.executed
         ? (result.output?.trim() || result.message)
-        : `未执行：${result.message}`
+        : decision === 'denied' ? (result.message || '已取消，未执行。') : `未执行：${result.message}`
       setToolNotice(notice)
       if (pendingEvent?.name === 'hugo_blog') {
         const followUp = result.executed
           ? (result.output?.trim() || result.message || '枫弋札记部署已完成。')
-          : `部署未完成：${result.message}`
+          : decision === 'denied' ? '已取消本次枫弋札记操作，未执行部署。' : `部署未完成：${result.message}`
         setMessages((current) => [
           ...current,
           { id: current.length + 1, role: 'assistant', text: followUp },
@@ -1799,6 +1822,15 @@ export function ChatPage({
           />
         ))}
 
+        {approvalToolEvents.map((event) => (
+          <ToolEventCard
+            key={event.id}
+            event={event}
+            decision={runtimeState.toolResults[event.id]?.decision}
+            onDecide={(nextDecision) => decideTool(event.id, nextDecision)}
+          />
+        ))}
+
         {displayToolEvents
           .map((event) => (
             <ToolEventCard
@@ -2311,12 +2343,6 @@ function dedupeFileRefs(refs: FileRef[]): FileRef[] {
     byPath.set(ref.path, ref)
   }
   return [...byPath.values()]
-}
-
-function isMisroutedHugoPublishPlan(plan: PlanEvent): boolean {
-  const hasObsidianWrite = plan.steps.some((step) => step.tool === 'obsidian_write' || step.action === 'write_obsidian')
-  const prompt = [plan.prompt, plan.detail, plan.title].filter(Boolean).join(' ')
-  return hasObsidianWrite && messageWantsHugoPublish(prompt)
 }
 
 function fileAttachLabel(file: FileRef): string {

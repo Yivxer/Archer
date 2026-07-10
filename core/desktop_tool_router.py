@@ -330,14 +330,29 @@ _HUGO_CREATE_TERMS = (
     "写到博客", "发到博客", "发布到博客", "上传到博客",
     "新建博客", "博客文章", "博客草稿", "博文",
 )
+HUGO_INTENT_EXECUTE_PUBLISH = "execute_publish"
+HUGO_INTENT_ASK_CAPABILITY = "ask_capability"
+HUGO_INTENT_CONTENT_REVIEW = "content_review"
+HUGO_INTENT_HISTORICAL_MENTION = "historical_mention"
+HUGO_INTENT_DELETE_OR_UNPUBLISH = "delete_or_unpublish"
+HUGO_INTENT_NONE = "none"
 
 
 def is_hugo_capability_question(query: str) -> bool:
-    return bool(re.search(
+    if re.search(
         r"(?:可以|能不能|能否|是否|现在能|现在可以).{0,12}(?:部署|发布|上传).{0,12}(?:博客|枫弋札记|网站|站点)",
         query,
         re.IGNORECASE,
+    ):
+        return True
+    lowered = query.lower()
+    has_question_marker = bool(re.search(r"(?:吗|么|？|\?|可以|可不可以|能不能|能否|有没有办法|支持|怎么|如何)", query))
+    has_blog_target = any(term in lowered for term in _HUGO_BLOG_TARGET_TERMS)
+    has_deploy_term = any(term in lowered for term in _HUGO_DEPLOY_TERMS)
+    has_asset_term = any(term in lowered for term in (
+        "图片", "图像", "封面", "配图", "静态资源", "static/images", "image", "images", "cover",
     ))
+    return has_question_marker and has_blog_target and has_deploy_term and has_asset_term
 
 
 def has_hugo_blog_target(query: str) -> bool:
@@ -367,24 +382,57 @@ _HUGO_PUBLISH_HINT_TERMS = (
 )
 
 
-def wants_hugo_publish(query: str, file_refs: list | None = None) -> bool:
-    """是否应走枫弋札记发布/部署工作流（含附件 Markdown）。"""
-    if is_hugo_capability_question(query):
-        return False
-    if wants_hugo_deploy(query) or wants_hugo_creation(query):
-        return True
+def _has_active_hugo_publish_command(query: str) -> bool:
+    return bool(re.search(
+        r"(?:帮我|请|麻烦|直接|现在|立刻|马上|给我).{0,16}(?:部署|发布|上传|上线|发到|写到|推送)(?!了)",
+        query,
+        re.IGNORECASE,
+    ))
+
+
+def is_hugo_content_review_request(query: str) -> bool:
     lowered = query.lower()
+    has_review_intent = any(term in lowered for term in (
+        "帮我分析", "分析一下", "帮我看看", "看一下", "看看这", "读后感如何",
+        "读后感怎么样", "读后感", "如何", "怎么样", "评价", "建议", "优化", "调整",
+    ))
+    has_local_markdown = bool(re.search(r"/Users/[^\n\r`'\"]+?\.md", query))
+    mentions_past_publish = bool(re.search(r"(?:部署|发布|上传|上线)了", query))
+    return has_review_intent and (has_local_markdown or mentions_past_publish) and not _has_active_hugo_publish_command(query)
+
+
+def classify_hugo_intent(query: str, file_refs: list | None = None) -> str:
+    if is_hugo_capability_question(query):
+        return HUGO_INTENT_ASK_CAPABILITY
+    if is_hugo_content_review_request(query):
+        return HUGO_INTENT_CONTENT_REVIEW
+
+    lowered = query.lower()
+    if has_hugo_blog_target(query) and any(term in lowered for term in ("删除", "下架", "移除", "撤回", "删掉")):
+        return HUGO_INTENT_DELETE_OR_UNPUBLISH
+    if wants_hugo_deploy(query) or wants_hugo_creation(query):
+        return HUGO_INTENT_EXECUTE_PUBLISH
     if has_hugo_blog_target(query) and any(term in lowered for term in _HUGO_PUBLISH_HINT_TERMS):
-        return True
+        return HUGO_INTENT_EXECUTE_PUBLISH
     if re.search(r"/Users/[^\n\r`'\"]+?\.md", query) and any(
         term in lowered for term in (*_HUGO_BLOG_TARGET_TERMS, "发布", "部署", "上线", "文章", "笔记")
     ):
-        return True
+        return HUGO_INTENT_EXECUTE_PUBLISH
     if file_refs:
         has_md = any(str(ref.get("path", "")).lower().endswith(".md") for ref in file_refs if isinstance(ref, dict))
         if has_md and any(term in lowered for term in _HUGO_PUBLISH_HINT_TERMS + _HUGO_BLOG_TARGET_TERMS):
-            return True
-    return False
+            return HUGO_INTENT_EXECUTE_PUBLISH
+    if re.search(r"(?:部署|发布|上传|上线)了", query):
+        return HUGO_INTENT_HISTORICAL_MENTION
+    return HUGO_INTENT_NONE
+
+
+def wants_hugo_publish(query: str, file_refs: list | None = None) -> bool:
+    """是否应走枫弋札记发布/部署工作流（含附件 Markdown）。"""
+    return classify_hugo_intent(query, file_refs) in (
+        HUGO_INTENT_EXECUTE_PUBLISH,
+        HUGO_INTENT_DELETE_OR_UNPUBLISH,
+    )
 
 
 # ── 技能意图过滤（自 _tools.py 迁入，与 skill_router 串联）────────────────────

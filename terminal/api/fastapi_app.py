@@ -177,8 +177,6 @@ def create_app(desktop_api_token: str = "", active_context_mgr=None) -> FastAPI:
                 desktop_pid = _read_desktop_pid_from_env()
                 is_crash, reason, crash_count = active_context_mgr.on_startup(desktop_pid=desktop_pid)
                 active_context_mgr.start_heartbeat()
-                from core.active_context import install_sigterm_handler
-                install_sigterm_handler(active_context_mgr)
                 app.state.startup_crash_info = (is_crash, reason, crash_count)
                 logger.info(
                     "[startup] active_context initialized: is_crash=%s reason=%s crash_count=%d",
@@ -228,7 +226,11 @@ def create_app(desktop_api_token: str = "", active_context_mgr=None) -> FastAPI:
             return _json_response(401, {"error": "unauthorized", "message": "desktop API token is required"})
 
         client_ip = _client_ip(request)
-        if request.method != "OPTIONS" and path not in RATE_LIMIT_EXEMPT_PATHS and not check_rate_limit(client_ip, path):
+        rate_limit_required = (
+            request.method not in {"OPTIONS", "GET"}
+            and path not in RATE_LIMIT_EXEMPT_PATHS
+        )
+        if rate_limit_required and not check_rate_limit(client_ip, path):
             status, body = error_response(429, "rate_limited", "请求过于频繁，请稍后重试")
             return _json_response(status, body)
 

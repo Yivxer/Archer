@@ -145,6 +145,32 @@ class TestOrchestratorSnapshot(unittest.TestCase):
 
         self.assertIsNone(build_task_plan(text, result))
 
+    def test_readonly_writing_feedback_from_obsidian_path_does_not_create_write_plan(self):
+        text = (
+            "/Users/Yivxer/Library/Mobile Documents/iCloud~md~obsidian/Documents/"
+            "个人知识管理系统/40创作输出/401文字/AI 心得/AI 算不出命，但能找见你.md"
+            "这是 ChatGPT 写出来的初稿，我觉得 AI 味道太重，而且字数有点多，"
+            "我需要你先用写作技能优化处理一下，先不要更改原文件，说说你的想法，我看看"
+        )
+        result = orchestrate_user_input(text)
+
+        self.assertIsNone(build_task_plan(text, result))
+
+    def test_article_review_from_obsidian_path_does_not_create_write_plan(self):
+        text = (
+            "/Users/Yivxer/Library/Mobile Documents/iCloud~md~obsidian/Documents/"
+            "个人知识管理系统/40创作输出/401文字/AI 心得/AI 算不出命，但能照见你.md"
+            "这厮最后的精修版本，你觉得怎么样？如果要调整的话还有哪些可以调整的地方？"
+        )
+        result = orchestrate_user_input(text)
+
+        self.assertEqual(result.sub_intent, "writing_assistance")
+        self.assertEqual(result.mode, "writer")
+        self.assertEqual(result.side_effect_level, "none")
+        self.assertFalse(result.needs_job)
+        self.assertFalse(has_actionable_side_effect(text))
+        self.assertIsNone(build_task_plan(text, result))
+
     def test_formats_plan_for_prompt_with_approval_marker(self):
         text = "帮我把这篇文章提炼成方法论，并写入 Obsidian"
         result = orchestrate_user_input(text)
@@ -399,6 +425,19 @@ class TestNegatedSideEffects(unittest.TestCase):
         self.assertFalse(result.needs_job)
         self.assertFalse(has_actionable_side_effect(text))
         self.assertTrue(keyword_is_negated(text, "发布"))
+
+    def test_obsidian_path_with_readonly_writing_feedback_has_no_side_effect(self):
+        text = (
+            "/Users/Yivxer/Library/Mobile Documents/iCloud~md~obsidian/Documents/"
+            "个人知识管理系统/40创作输出/401文字/AI 心得/AI 算不出命，但能找见你.md"
+            "这是初稿，AI 味太重，先不要更改原文件，说说你的想法"
+        )
+        result = orchestrate_user_input(text)
+
+        self.assertEqual(result.sub_intent, "writing_assistance")
+        self.assertEqual(result.side_effect_level, "none")
+        self.assertFalse(result.needs_job)
+        self.assertFalse(has_actionable_side_effect(text))
 
     def test_actionable_publish_still_requires_approval(self):
         text = "帮我把这篇文章发布到 Obsidian"

@@ -109,7 +109,7 @@ def _runtime_context_event(
     trace_id: str = "",
 ) -> dict:
     matched_skills = list(getattr(orchestration, "matched_skills", []) or [])
-    wants_blog = _wants_hugo_publish(query, file_refs or []) or "hugo_blog" in matched_skills
+    wants_blog = _wants_hugo_publish(query, file_refs or [])
     task = "blog_publish" if wants_blog else str(getattr(orchestration, "sub_intent", "") or intent_info.get("intent", "chat"))
     return {
         "id": f"runtime-context-{uuid4().hex[:8]}",
@@ -206,6 +206,26 @@ def _trim_model_messages_for_context(
         "content": f"[长上下文保护] 旧对话已省略 {omitted} 条，仅保留最近 {keep_recent} 条消息。",
     }
     return [*system_prefix, summary, *rest[-keep_recent:]]
+
+
+def _plain_chat_message(message) -> dict:
+    """Convert SDK chat message objects to plain dicts before reusing them."""
+    if isinstance(message, dict):
+        return message
+    model_dump = getattr(message, "model_dump", None)
+    if callable(model_dump):
+        data = model_dump(exclude_none=True)
+        if isinstance(data, dict):
+            return data
+    legacy_dict = getattr(message, "dict", None)
+    if callable(legacy_dict):
+        data = legacy_dict(exclude_none=True)
+        if isinstance(data, dict):
+            return data
+    return {
+        "role": str(getattr(message, "role", "assistant") or "assistant"),
+        "content": getattr(message, "content", "") or "",
+    }
 
 
 def _iter_model_stream_with_heartbeat(messages: list[dict], **kwargs):
@@ -1247,7 +1267,7 @@ def _run_hugo_agent_turn(
                 final_text = (msg.content or "").strip()
             break
 
-        agent_messages.append(msg)
+        agent_messages.append(_plain_chat_message(msg))
 
         for tc in msg.tool_calls:
             fn_name = tc.function.name
@@ -1377,7 +1397,7 @@ def _run_desktop_tool_loop(
         if not msg.tool_calls:
             break
 
-        messages.append(msg)
+        messages.append(_plain_chat_message(msg))
 
         for tc in msg.tool_calls:
             fn_name = tc.function.name
@@ -2300,6 +2320,7 @@ def _iter_simple_chat_path(
     # 清洗 tool_calls / tool 角色消息
     clean_messages: list[dict] = []
     for m in enriched_messages:
+        m = _plain_chat_message(m)
         role = m.get("role")
         if role == "tool":
             continue
@@ -3018,6 +3039,7 @@ def _iter_chat_chunks(
     # DeepSeek 在历史含 tool_calls 但当前请求不带 tools 时会 400 或输出异常
     clean_messages: list[dict] = []
     for m in enriched_messages:
+        m = _plain_chat_message(m)
         role = m.get("role")
         if role == "tool":
             continue  # 工具结果消息直接丢弃

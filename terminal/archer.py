@@ -3,6 +3,7 @@ import json
 import re
 import sys
 import threading
+import argparse
 from pathlib import Path
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -624,5 +625,34 @@ def run():
         if turn_count % 6 == 0 and len(session.history) >= 6:
             _bg_extract(session.history[-8:])
 
-if __name__ == "__main__":
+
+def run_smoke() -> int:
+    """Non-interactive terminal smoke used by journey tests.
+
+    It verifies the terminal entrypoint can initialize local dependencies without
+    entering the REPL or calling a model.
+    """
+    init_db()
+    cfg = load_config()
+    skills = load_skills()
+    mode = cfg.get("persona", {}).get("current_mode") or cfg.get("persona", {}).get("default_mode", "listener")
+    console.print(f"ARCHER_TERMINAL_SMOKE_OK mode={mode} skills={len(skills)}")
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Archer terminal client")
+    parser.add_argument(
+        "--smoke",
+        action="store_true",
+        help="run a non-interactive startup smoke and exit",
+    )
+    args = parser.parse_args(argv)
+    if args.smoke:
+        return run_smoke()
     run()
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -6,6 +6,7 @@ runtime can gradually consume the same turn contract.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Literal
 
@@ -108,6 +109,8 @@ _WRITING_KEYWORDS = (
     "抖音文案",
     "ai味",
     "AI味",
+    "ai 味",
+    "AI 味",
     "语气",
     "结构",
     "大纲",
@@ -157,8 +160,6 @@ _SIDE_EFFECT_KEYWORDS = (
     "发布",
     "部署",
     "上线",
-    "Obsidian",
-    "obsidian",
     "shell",
     "git",
 )
@@ -187,6 +188,14 @@ def keyword_is_negated(text: str, keyword: str, *, window: int = 8) -> bool:
 
 def has_actionable_side_effect(text: str) -> bool:
     """Detect side-effect intent while ignoring negated requests like「不要发布」."""
+    if _is_readonly_writing_feedback_turn(text):
+        return False
+    if re.search(
+        r"(?:帮我|请|并|然后|再|直接|把|将).{0,12}更新.{0,12}obsidian",
+        text,
+        re.IGNORECASE,
+    ) and not keyword_is_negated(text, "更新"):
+        return True
     for keyword in _SIDE_EFFECT_KEYWORDS:
         if keyword in text and not keyword_is_negated(text, keyword):
             return True
@@ -212,6 +221,8 @@ def _unique(items: list[str]) -> list[str]:
 
 
 def _sub_intent(text: str, base_intent: str) -> SubIntent:
+    if _is_readonly_writing_feedback_turn(text):
+        return "writing_assistance"
     if base_intent == "emotional":
         return "emotional_reflection"
     if _contains_any(text, _KNOWLEDGE_KEYWORDS) and has_actionable_side_effect(text):
@@ -487,6 +498,52 @@ def _is_hugo_publish_turn(user_input: str) -> bool:
     return False
 
 
+_READONLY_FEEDBACK_TERMS = (
+    "不要更改",
+    "先不要改",
+    "不要修改",
+    "不改原文",
+    "不改文件",
+    "不直接改",
+    "先别改",
+    "先说说",
+    "说说你的想法",
+    "看看你的想法",
+    "我看看",
+)
+
+_WRITING_FEEDBACK_TERMS = (
+    "ai 味",
+    "ai味",
+    "初稿",
+    "写作",
+    "文风",
+    "语气",
+    "优化处理",
+    "润色",
+    "修改思路",
+    "精修版本",
+    "你觉得",
+    "怎么样",
+    "调整",
+    "优化",
+    "分析一下",
+    "可以调整",
+)
+
+
+def _is_readonly_writing_feedback_turn(user_input: str) -> bool:
+    """Path mentions Obsidian, but user asks for feedback only, not a write."""
+    lowered = user_input.lower()
+    has_markdown_path = "/users/" in lowered and ".md" in lowered
+    readonly_intent = any(term in lowered for term in _READONLY_FEEDBACK_TERMS)
+    writing_feedback = any(term in lowered for term in _WRITING_FEEDBACK_TERMS)
+    explicit_side_effect = any(term in user_input for term in _SIDE_EFFECT_KEYWORDS)
+    return has_markdown_path and writing_feedback and not explicit_side_effect or (
+        has_markdown_path and readonly_intent and writing_feedback
+    )
+
+
 def build_task_plan(
     user_input: str,
     orchestration: OrchestrationResult,
@@ -501,6 +558,8 @@ def build_task_plan(
 
     text = user_input.strip()
     if _is_hugo_publish_turn(text):
+        return None
+    if _is_readonly_writing_feedback_turn(text):
         return None
 
     if "Obsidian" in text or "obsidian" in text:

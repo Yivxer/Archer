@@ -5,8 +5,14 @@ import unittest
 from unittest.mock import patch
 
 from core.desktop_tool_router import (
+    HUGO_INTENT_ASK_CAPABILITY,
+    HUGO_INTENT_CONTENT_REVIEW,
+    HUGO_INTENT_DELETE_OR_UNPUBLISH,
+    HUGO_INTENT_EXECUTE_PUBLISH,
+    classify_hugo_intent,
     filter_skills_for_intent,
     is_hugo_capability_question,
+    is_hugo_content_review_request,
     is_plain_content_request,
     parse_obsidian_write_request,
     plan_desktop_tools,
@@ -66,9 +72,17 @@ class TestToolRouterScoring(unittest.TestCase):
     def test_hugo_capability_question_does_not_publish(self):
         query = "现在可以部署博客了吗？"
         self.assertTrue(is_hugo_capability_question(query))
+        self.assertEqual(classify_hugo_intent(query), HUGO_INTENT_ASK_CAPABILITY)
+        self.assertFalse(wants_hugo_publish(query))
+
+    def test_hugo_image_capability_question_does_not_publish(self):
+        query = "枫弋札记里好像没有办法部署图片你这边可以部署图片么？"
+        self.assertTrue(is_hugo_capability_question(query))
+        self.assertEqual(classify_hugo_intent(query), HUGO_INTENT_ASK_CAPABILITY)
         self.assertFalse(wants_hugo_publish(query))
 
     def test_explicit_hugo_deploy_still_publishes(self):
+        self.assertEqual(classify_hugo_intent("帮我部署枫弋札记"), HUGO_INTENT_EXECUTE_PUBLISH)
         self.assertTrue(wants_hugo_publish("帮我部署枫弋札记"))
 
     def test_hugo_publish_path_with_spaces_still_publishes(self):
@@ -76,10 +90,23 @@ class TestToolRouterScoring(unittest.TestCase):
             "帮我部署一篇文章到枫弋札记上"
             "/Users/Yivxer/Library/Mobile Documents/iCloud~md~obsidian/Documents/Archer 初衍的诞生日记·第一篇.md"
         )
+        self.assertEqual(classify_hugo_intent(query), HUGO_INTENT_EXECUTE_PUBLISH)
         self.assertTrue(wants_hugo_publish(query))
 
     def test_hugo_delete_request_uses_hugo_workflow(self):
+        self.assertEqual(classify_hugo_intent("把枫弋札记里的测试发布文章删除"), HUGO_INTENT_DELETE_OR_UNPUBLISH)
         self.assertTrue(wants_hugo_publish("把枫弋札记里的测试发布文章删除"))
+
+    def test_hugo_content_review_with_past_deploy_mention_does_not_publish(self):
+        query = (
+            "我今天刚写完而妙的读后感，/Users/Yivxer/Library/Mobile Documents/"
+            "iCloud~md~obsidian/Documents/个人知识管理系统/40创作输出/401文字/"
+            "读书笔记/不存在另一半的灵魂，只有慢慢看清的自己.md，"
+            "但是让你部署有点太慢了，我让 Codex 帮我部署了，你可以看看这一篇读后感如何"
+        )
+        self.assertTrue(is_hugo_content_review_request(query))
+        self.assertEqual(classify_hugo_intent(query), HUGO_INTENT_CONTENT_REVIEW)
+        self.assertFalse(wants_hugo_publish(query))
 
 
 class TestTurnPlanIntegration(unittest.TestCase):
@@ -124,6 +151,26 @@ class TestTurnPlanIntegration(unittest.TestCase):
 
         self.assertEqual(list(turn.filtered_skills.keys()), ["hugo_blog"])
         self.assertFalse(turn.tool_plan.obsidian_write)
+
+    def test_hugo_image_capability_question_filters_hugo_tool(self):
+        query = "枫弋札记里好像没有办法部署图片你这边可以部署图片么？"
+        skills = {"hugo_blog": object(), "web_search": object()}
+
+        turn = plan_desktop_turn(query, skills, intent="chat", needs_tools=True, llm_fallback=False)
+
+        self.assertNotIn("hugo_blog", turn.filtered_skills)
+
+    def test_hugo_content_review_filters_hugo_tool(self):
+        query = (
+            "我让 Codex 帮我部署了，/Users/Yivxer/Library/Mobile Documents/"
+            "iCloud~md~obsidian/Documents/读书笔记/不存在另一半的灵魂.md，"
+            "你可以看看这一篇读后感如何"
+        )
+        skills = {"hugo_blog": object(), "obsidian_search": object()}
+
+        turn = plan_desktop_turn(query, skills, intent="writing", needs_tools=True, llm_fallback=False)
+
+        self.assertNotIn("hugo_blog", turn.filtered_skills)
 
 
 class TestToolPlanLlmFallback(unittest.TestCase):

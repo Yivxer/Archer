@@ -7,6 +7,7 @@ APP="${ARCHER_APP_PATH:-/Applications/Archer.app}"
 TOKEN_FILE="${ARCHER_TOKEN_FILE:-${HOME}/Library/Application Support/archer-desktop/security/desktop-api-token}"
 API_BASE="${ARCHER_API_BASE:-http://127.0.0.1:8765}"
 OPEN_APP="${VERIFY_OPEN_APP:-0}"
+ASAR_BIN="${ARCHER_ASAR_BIN:-${ROOT}/client/desktop/node_modules/.bin/asar}"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -35,6 +36,37 @@ if [[ -d "$APP" ]]; then
   ok "已安装: $APP"
 else
   fail "未找到 $APP（先运行 client/desktop 下 npm run build:mac:local）"
+fi
+
+APP_ASAR="${APP}/Contents/Resources/app.asar"
+if [[ -f "$APP_ASAR" && -x "$ASAR_BIN" ]]; then
+  TMP_DIR="$(mktemp -d)"
+  RENDERER_REQUIRE_HITS=""
+  while IFS= read -r asset; do
+    asset="${asset#/}"
+    (
+      cd "$TMP_DIR"
+      "$ASAR_BIN" extract-file "$APP_ASAR" "$asset" >/dev/null
+    )
+    extracted="$TMP_DIR/$(basename "$asset")"
+    if [[ -f "$extracted" ]] && rg -n "require\\(" "$extracted" >/dev/null 2>&1; then
+      RENDERER_REQUIRE_HITS="${RENDERER_REQUIRE_HITS}${asset}"$'\n'
+    fi
+  done < <("$ASAR_BIN" list "$APP_ASAR" | rg '^/out/renderer/assets/.*\.js$' || true)
+  rm -rf "$TMP_DIR"
+  if [[ -n "$RENDERER_REQUIRE_HITS" ]]; then
+    fail "renderer bundle 含 CommonJS require，生产环境可能白屏: $(printf '%s' "$RENDERER_REQUIRE_HITS" | head -n 1)"
+  else
+    ok "renderer bundle sanity：未发现 require("
+  fi
+elif [[ -d "$ROOT/client/desktop/out/renderer" ]]; then
+  if rg -n "require\\(" "$ROOT/client/desktop/out/renderer" >/dev/null 2>&1; then
+    fail "本地 renderer 产物含 CommonJS require，生产环境可能白屏"
+  else
+    ok "renderer bundle sanity：未发现 require("
+  fi
+else
+  warn "跳过 renderer bundle sanity（缺少 app.asar/asar 工具/本地产物）"
 fi
 
 if [[ -f "$TOKEN_FILE" ]]; then

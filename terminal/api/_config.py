@@ -356,7 +356,7 @@ def _inject_thread_context(messages: list[dict], raw: object) -> list[dict]:
     return [{"role": "system", "content": "\n".join(parts)}] + messages
 
 
-def _clean_session_messages(raw: object) -> list[dict]:
+def _clean_session_messages(raw: object, *, min_messages: int = 2) -> list[dict]:
     if not isinstance(raw, list):
         raise ValueError("messages must be a list")
     messages: list[dict] = []
@@ -370,6 +370,8 @@ def _clean_session_messages(raw: object) -> list[dict]:
         if not isinstance(content, str) or not content.strip():
             continue
         messages.append({"role": role, "content": content.strip()})
-    if len(messages) < 2:
+    if len(messages) < min_messages:
+        if min_messages <= 1:
+            raise ValueError("session must include at least one message")
         raise ValueError("session must include at least two messages")
     return messages

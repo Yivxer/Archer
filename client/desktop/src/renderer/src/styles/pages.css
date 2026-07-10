@@ -2315,6 +2315,10 @@
   line-height: 1.5;
 }
 
+.setting-row-copy span:empty {
+  display: none;
+}
+
 .setting-row-control {
   display: grid;
   justify-items: stretch;

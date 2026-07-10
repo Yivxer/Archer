@@ -424,7 +424,7 @@ export function SettingsPage({
         </header>
 
         {activeTab === 'model' && (
-          <SettingsGroup icon={Settings2} title="模型配置" note="保存到 archer.toml。密钥不回显。">
+          <SettingsGroup icon={Settings2} title="模型配置" note="写入 archer.toml；密钥不回显。">
             <SettingRow title="模型档位" description="选择后保存即可切换聊天默认模型；也可以在输入框的模型按钮里快速切换。">
               <div className="model-profile-grid">
                 {modelProfiles.map((profile) => (
@@ -446,16 +446,16 @@ export function SettingsPage({
                 当前模型：{modelProfileShortLabel(draft.activeProfile)} · {modelProfiles.find((item) => item.id === draft.activeProfile)?.provider || draft.provider}
               </span>
             </SettingRow>
-            <SettingRow title="服务商" description="当前模型提供方。">
+            <SettingRow title="服务商" description="">
               <FormField label="服务商" value={draft.provider} onChange={(value) => updateDraft('provider', value)} />
             </SettingRow>
-            <SettingRow title="接口地址" description="兼容 OpenAI API 的 base URL。">
+            <SettingRow title="接口地址" description="">
               <FormField label="接口地址" value={draft.baseUrl} onChange={(value) => updateDraft('baseUrl', value)} />
             </SettingRow>
-            <SettingRow title="模型" description="聊天请求默认使用的模型名。">
+            <SettingRow title="模型" description="">
               <FormField label="模型" value={draft.model} onChange={(value) => updateDraft('model', value)} />
             </SettingRow>
-            <SettingRow title="API key" description="密钥只在本地配置里保存。">
+            <SettingRow title="API key" description="仅本地存储。">
               <FormField label="API key 状态" value={draft.apiKeyPreview} readOnly />
               <FormField
                 label="新 API key"
@@ -465,7 +465,7 @@ export function SettingsPage({
                 placeholder="留空则保留当前 key"
               />
             </SettingRow>
-            <SettingRow title="连通测试" description="保存当前档位后，发送一次最短 ping 请求验证可用性。">
+            <SettingRow title="连通测试" description="保存后发送最短 ping 验证。">
               <button className="quiet-button strong" type="button" onClick={() => void testCurrentModelProfile()} disabled={testingModel || saving}>
                 {testingModel ? '测试中' : `测试 ${modelProfileShortLabel(draft.activeProfile)}`}
               </button>
@@ -475,8 +475,8 @@ export function SettingsPage({
         )}
 
         {activeTab === 'context' && (
-          <SettingsGroup icon={SlidersHorizontal} title="上下文偏好" note="对话姿态（高级）与专家工作台（日常）是两层；专家管技能池与记忆偏好，模型档位在输入框单独切换。">
-            <SettingRow title="对话姿态" description="高级选项：锁定 12 种姿态之一；自动 = 每轮按内容选姿态。日常场景请在聊天区切换专家。">
+          <SettingsGroup icon={SlidersHorizontal} title="上下文偏好" note="姿态=对话风格；专家=技能池与记忆。模型档位在输入框切换。">
+            <SettingRow title="对话姿态" description="锁定姿态或自动选择；日常切专家在聊天区。">
               <div className="segmented mode-segmented">
                 <button
                   className={activeConversationMode === 'auto' ? 'active' : ''}
@@ -536,7 +536,7 @@ export function SettingsPage({
                 {' · '}模型档位在聊天输入框单独切换
               </span>
             </SettingRow>
-            <SettingRow title="笔记搜索" description="summary 摘要 / full 注入上下文。">
+            <SettingRow title="笔记搜索" description="summary=摘要 / full=注入上下文">
               <div className="segmented compact-segmented">
                 {(['off', 'summary', 'full'] as ObsidianContextMode[]).map((mode) => (
                   <button key={mode} className={obsidianMode === mode ? 'active' : ''} type="button" onClick={() => setObsidianMode(mode)}>
@@ -549,7 +549,7 @@ export function SettingsPage({
         )}
 
         {activeTab === 'local' && (
-          <SettingsGroup icon={Database} title="本地连接" note="打开 Archer 会自动拉起本机大脑，无需手动拨号。">
+          <SettingsGroup icon={Database} title="本地连接" note="应用启动时自动连接本地 API。">
             <div className="connection-guide">
               <div className={`connection-status connection-state-${connectionState}`}>
                 <span>连接状态</span>
@@ -574,9 +574,9 @@ export function SettingsPage({
                 {restartingApi ? '重启中…' : '重启本地大脑'}
               </button>
             </SettingRow>
-            <SettingRow title="权限审计" description="最近工具审批记录，只展示摘要。">
+            <SettingRow title="权限审计" description="最近审批摘要。">
               <div className="settings-note expert-settings-list">
-                {data.toolApprovalAudit.items.length === 0 && <p>暂无工具审批记录。</p>}
+                {data.toolApprovalAudit.items.length === 0 && <p>无审批记录。</p>}
                 {data.toolApprovalAudit.items.slice(0, 5).map((item) => (
                   <p key={`${item.eventId}-${item.timestamp}`}>
                     <strong>{item.skillName || 'unknown'}</strong>
@@ -592,7 +592,7 @@ export function SettingsPage({
                 ))}
               </div>
             </SettingRow>
-            <SettingRow title="连接口令" description="由应用自动管理，一般不需要填写。只有手动调试 API 时才用。">
+            <SettingRow title="连接口令" description="自动管理；仅手动调试时填写。">
               <label className="token-field">
                 <span>高级口令（可选）</span>
                 <input
@@ -621,13 +621,13 @@ export function SettingsPage({
             </SettingRow>
             <div className="settings-policy">
               <strong>保存策略</strong>
-              <span>保存 provider / base URL / model / API key / local paths 到 archer.toml。API key 只写入本地，不回显明文。</span>
+              <span>写入 archer.toml：provider/base_url/model/api_key/paths。密钥仅本地存储。</span>
             </div>
           </SettingsGroup>
         )}
 
         {activeTab === 'appearance' && (
-          <SettingsGroup icon={Eye} title="外观" note="主题立即生效，保存在本地。">
+          <SettingsGroup icon={Eye} title="外观" note="立即生效，本地持久化。">
             <SettingRow title="主题" description="立即生效，并保存在当前桌面端。">
               <div className="segmented theme-choice">
                 <button className={theme === 'light' ? 'active' : ''} type="button" onClick={() => setTheme('light')}>
@@ -640,10 +640,10 @@ export function SettingsPage({
                 </button>
               </div>
             </SettingRow>
-            <SettingRow title="背景密度" description="第一轮固定为柔和，避免设置项过早膨胀。">
+            <SettingRow title="背景密度" description="固定柔和，防止设置膨胀。">
               <span className="setting-static-value">柔和</span>
             </SettingRow>
-            <SettingRow title="次级入口" description="不放在主侧边栏。">
+            <SettingRow title="次级入口" description="从主侧边栏移除。">
               <div className="settings-shortcut-row">
                 <button className="quiet-button" type="button" onClick={() => onNavigate?.('Today')}>
                   <CalendarDays size={14} />
@@ -671,7 +671,7 @@ export function SettingsPage({
               <p className="schedule-empty">加载中…</p>
             )}
             {data.status.adapter === 'local' && !scheduleLoading && scheduleTasks.length === 0 && (
-              <p className="schedule-empty">暂无定时任务。下方添加，或在终端使用 /schedule add。</p>
+              <p className="schedule-empty">无定时任务。下方添加，或终端 /schedule add。</p>
             )}
             {data.status.adapter === 'local' && scheduleTasks.length > 0 && (
               <div className="schedule-list">
@@ -738,7 +738,7 @@ export function SettingsPage({
                   <span className="diagnostics-doctor-count">{data.configDoctor.summary.info} 提示</span>
                 </div>
                 {data.configDoctor.issues.length === 0 ? (
-                  <p className="diagnostics-doctor-empty">配置检查通过，未发现问题。</p>
+                  <p className="diagnostics-doctor-empty">配置检查通过。</p>
                 ) : (
                   <ul className="diagnostics-doctor-list">
                     {data.configDoctor.issues.map((issue, index) => (
@@ -758,7 +758,7 @@ export function SettingsPage({
             <SettingRow title="工具审批审计" description="最近工具调用的审批记录，按时间倒序。">
               <div className="diagnostics-audit">
                 {data.toolApprovalAudit.items.length === 0 ? (
-                  <p className="diagnostics-audit-empty">暂无工具审批记录。</p>
+                  <p className="diagnostics-audit-empty">无审批记录。</p>
                 ) : (
                   <table className="diagnostics-audit-table">
                     <thead>
@@ -960,7 +960,7 @@ function connectionStatusHelp(state: ConnectionState, deadReason = ''): string {
       return '多次重启失败，可点击「手动恢复」或重启 Archer。'
     case 'disconnected':
     default:
-      return '尚未连接本地 API。'
+      return '本地 API 未连接。'
   }
 }
 

@@ -2500,6 +2500,8 @@ def _tool_approval(payload: dict) -> dict:
         return cached_result
 
     draft = get_tool_draft(event_id)
+    if not draft:
+        draft = _tool_draft_from_approval_fallback(event_id, payload.get("draftFallback"))
     if not draft and event_id.startswith("hugo-blog-deploy-"):
         from core.api_tool_service import make_tool_request
         from skills.loader import load_skills
@@ -2625,7 +2627,7 @@ def _tool_approval(payload: dict) -> dict:
                 executed = True
                 message = "github operation executed"
         else:
-            message = "draft denied and discarded"
+            message = "已取消，未执行。"
         response = {
             "ok": True, "eventId": event_id, "decision": decision,
             "executed": executed, "output": result_output, "message": message,
@@ -2657,6 +2659,38 @@ def _tool_approval(payload: dict) -> dict:
             "请重新说「部署枫弋札记」，或直接点当前确认卡上的发布按钮。"
         ),
     }
+
+
+def _tool_draft_from_approval_fallback(event_id: str, fallback: object) -> dict | None:
+    if not isinstance(fallback, dict):
+        return None
+    skill_name = str(fallback.get("skillName") or "").strip()
+    args = fallback.get("args")
+    if not skill_name or not isinstance(args, dict):
+        return None
+
+    from core.api_tool_service import make_tool_request
+    from skills.loader import load_skills
+
+    skills = load_skills()
+    if skill_name not in skills:
+        return None
+    display_name = str(fallback.get("displayName") or skill_name)
+    extra = {
+        key: value
+        for key, value in fallback.items()
+        if key not in {"kind", "eventId", "skillName", "displayName", "args", "argsPreview", "policy", "permissionLevel", "requiresApproval", "blocked"}
+    }
+    return make_tool_request(
+        skill_name,
+        args,
+        skills,
+        cfg=_load_config(),
+        event_id=event_id,
+        display_name=display_name,
+        extra=extra,
+        force_approval=False,
+    )
 
 
 # ---------------------------------------------------------------------------

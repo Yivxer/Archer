@@ -1018,17 +1018,19 @@ export async function pollBackgroundJobEvents(
 
 export async function submitToolApproval(
   eventId: string,
-  decision: 'approved' | 'denied'
+  decision: 'approved' | 'denied',
+  draftFallback?: ToolEvent['draft']
 ): Promise<ToolApprovalResult> {
-  return postJson<ToolApprovalResult>('/tool-approvals', { eventId, decision })
+  return postJson<ToolApprovalResult>('/tool-approvals', { eventId, decision, draftFallback })
 }
 
 export async function submitToolApprovalEvent(
   sessionId: string,
   eventId: string,
-  decision: 'approved' | 'denied'
+  decision: 'approved' | 'denied',
+  draftFallback?: ToolEvent['draft']
 ): Promise<{ result: ToolApprovalResult; event: AgentEvent }> {
-  const result = await submitToolApproval(eventId, decision)
+  const result = await submitToolApproval(eventId, decision, draftFallback)
   return {
     result,
     event: pythonApprovalToAgentEvent(sessionId, result),
@@ -1067,37 +1069,49 @@ export async function streamLocalChat(
   let buffer = ''
   // SSE 读超时需要长于后端模型请求超时，避免长文本/换模型时前端先于 API 判定失败。
   const READ_TIMEOUT_MS = 90_000
+  // 整体最大流时长：防止后端持续发心跳但不结束，导致 isSending 永远卡住
+  const MAX_STREAM_DURATION_MS = 300_000
+  const streamStart = Date.now()
 
   try {
     while (true) {
+      // 整体超时守卫：超过 5 分钟强制中止
+      if (Date.now() - streamStart > MAX_STREAM_DURATION_MS) {
+        throw new StreamIdleTimeoutError()
+      }
       // 用 Promise.race 实现读超时，防止 API 进程崩溃后 SSE 流卡住
       const readPromise = reader.read()
+      let timeoutId: ReturnType<typeof setTimeout> | null = null
       const timeoutPromise = new Promise<never>((_, reject) => {
-        setTimeout(() => reject(new Error('SSE_READ_TIMEOUT')), READ_TIMEOUT_MS)
+        timeoutId = setTimeout(() => reject(new Error('SSE_READ_TIMEOUT')), READ_TIMEOUT_MS)
       })
-      const { value, done } = await Promise.race([readPromise, timeoutPromise])
-      if (done) break
-      buffer += decoder.decode(value, { stream: true })
-      const frames = buffer.split('\n\n')
-      buffer = frames.pop() ?? ''
-      for (const frame of frames) {
-        const line = frame
-          .split('\n')
-          .find((part) => part.startsWith('data: '))
-        if (!line) continue
-        const payload = JSON.parse(line.slice(6)) as PythonStreamPayload & {
-          text?: string
-          done?: boolean
-          error?: string
-          toolEvent?: ToolEvent
+      try {
+        const { value, done } = await Promise.race([readPromise, timeoutPromise])
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        const frames = buffer.split('\n\n')
+        buffer = frames.pop() ?? ''
+        for (const frame of frames) {
+          const line = frame
+            .split('\n')
+            .find((part) => part.startsWith('data: '))
+          if (!line) continue
+          const payload = JSON.parse(line.slice(6)) as PythonStreamPayload & {
+            text?: string
+            done?: boolean
+            error?: string
+            toolEvent?: ToolEvent
+          }
+          if (payload.error) throw new Error(`[server] ${payload.error}`)
+          if (payload.toolEvent) {
+            onToolEvent?.(payload.toolEvent)
+          }
+          for (const event of pythonStreamPayloadToAgentEvents(runtimeSessionId, payload)) onAgentEvent?.(event)
+          if (payload.text) onText(payload.text)
+          if (payload.done) return
         }
-        if (payload.error) throw new Error(`[server] ${payload.error}`)
-        if (payload.toolEvent) {
-          onToolEvent?.(payload.toolEvent)
-        }
-        for (const event of pythonStreamPayloadToAgentEvents(runtimeSessionId, payload)) onAgentEvent?.(event)
-        if (payload.text) onText(payload.text)
-        if (payload.done) return
+      } finally {
+        if (timeoutId) clearTimeout(timeoutId)
       }
     }
   } catch (err) {

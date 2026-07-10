@@ -3,10 +3,12 @@ from __future__ import annotations
 
 import json
 import threading
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
+from core.active_context import ActiveContextManager
 from terminal.api.fastapi_app import create_app
 
 
@@ -29,12 +31,42 @@ def test_ready_is_public(client):
     assert response.json() == {"ok": True, "ready": True, "runtime": "fastapi"}
 
 
+def test_active_context_startup_does_not_override_sigterm_handler(tmp_path, monkeypatch):
+    """Desktop normal quit sends SIGTERM; uvicorn should handle it as graceful shutdown."""
+    import core.active_context as active_context
+
+    calls: list[ActiveContextManager] = []
+
+    def _unexpected_install(mgr: ActiveContextManager) -> None:
+        calls.append(mgr)
+        raise AssertionError("startup must not install a custom SIGTERM handler")
+
+    monkeypatch.setattr(active_context, "install_sigterm_handler", _unexpected_install)
+
+    mgr = ActiveContextManager(Path(tmp_path) / "journal")
+    app = create_app("test-token", active_context_mgr=mgr)
+
+    with TestClient(app) as test_client:
+        response = test_client.get("/active-context", headers={"Authorization": "Bearer test-token"})
+
+    assert response.status_code == 200
+    assert calls == []
+
+
 def test_health_ready_and_status_are_not_rate_limited(client, monkeypatch):
     monkeypatch.setattr("terminal.api.fastapi_app.check_rate_limit", lambda _client_ip, _path: False)
 
     assert client.get("/health").status_code == 200
     assert client.get("/ready").status_code == 200
     assert client.get("/status", headers={"Authorization": "Bearer test-token"}).status_code == 200
+
+
+def test_authenticated_get_reads_are_not_rate_limited(client, monkeypatch):
+    monkeypatch.setattr("terminal.api.fastapi_app.check_rate_limit", lambda _client_ip, _path: False)
+
+    response = client.get("/config/doctor", headers={"Authorization": "Bearer test-token"})
+
+    assert response.status_code == 200
 
 
 def test_status_requires_bearer_token(client):

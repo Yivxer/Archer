@@ -1205,6 +1205,64 @@ class TestApiSkillRouting:
         assert hugo_events[0]["draft"]["args"]["sourcePath"] == str(note)
         assert not any(event.get("toolEvent", {}).get("name") == "obsidian_write" for event in events)
 
+    def test_desktop_tool_loop_normalizes_sdk_messages(self, monkeypatch):
+        from types import SimpleNamespace
+        from core.policy import Decision
+        from terminal.api import _tools as tools
+
+        calls = {"count": 0}
+        tool_call = SimpleNamespace(
+            id="call_1",
+            function=SimpleNamespace(name="demo_skill", arguments='{"value": "ok"}'),
+        )
+
+        class SdkMessage:
+            role = "assistant"
+            content = ""
+            tool_calls = [tool_call]
+
+            def model_dump(self, exclude_none=True):
+                return {
+                    "role": self.role,
+                    "content": self.content,
+                    "tool_calls": self.tool_calls,
+                }
+
+        def fake_call_with_tools(messages, tool_defs):
+            calls["count"] += 1
+            if calls["count"] == 1:
+                return SdkMessage()
+            return SimpleNamespace(content="done", tool_calls=[])
+
+        monkeypatch.setattr("core.llm.call_with_tools", fake_call_with_tools)
+        monkeypatch.setattr(
+            "skills.loader.load_skills",
+            lambda: {"demo_skill": SimpleNamespace(SKILL={})},
+        )
+        monkeypatch.setattr("skills.loader.get_tools", lambda skills: [{"name": "demo_skill"}])
+        monkeypatch.setattr(
+            "core.policy.check",
+            lambda *args, **kwargs: SimpleNamespace(decision=Decision.ALLOW),
+        )
+        monkeypatch.setattr(
+            "core.tool_runtime.invoke",
+            lambda *args, **kwargs: SimpleNamespace(
+                ok=True,
+                summary="demo ok",
+                to_message_content=lambda: "demo ok",
+            ),
+        )
+
+        updated_messages, events = tools._run_desktop_tool_loop(
+            [{"role": "user", "content": "run demo"}],
+            {"demo_skill"},
+            "run demo",
+        )
+
+        assert events == []
+        assert all(isinstance(message, dict) for message in updated_messages)
+        assert any(message.get("role") == "assistant" for message in updated_messages)
+
     def test_model_stream_suppresses_dsml_tokens_before_rescue(self, monkeypatch):
         from terminal.api import _tools as tools
 
@@ -1355,6 +1413,21 @@ class TestApiSkillRouting:
         assert "部署成功" in result["output"]
         assert "已部署《Test》到枫弋札记" in result["output"]
         assert "hugo deploy 已自动执行并验证单页可访问" in result["message"]
+
+    def test_tool_approval_denied_uses_cancelled_message(self):
+        PENDING_TOOL_DRAFTS.clear()
+        event_id = "hugo-blog-denied-test"
+        PENDING_TOOL_DRAFTS[event_id] = {
+            "kind": "tool_request",
+            "eventId": event_id,
+            "skillName": "hugo_blog",
+            "args": {"action": "deploy", "filename": "test.md"},
+        }
+
+        result = _tool_approval({"eventId": event_id, "decision": "denied"})
+
+        assert result["executed"] is False
+        assert result["message"] == "已取消，未执行。"
 
     def test_file_ops_blog_approval_runs_hugo_workflow_after_write(self, monkeypatch):
         PENDING_TOOL_DRAFTS.clear()
@@ -1911,6 +1984,51 @@ class TestToolApproval:
         assert _config.get_tool_draft(event_id) is None
         assert event_id not in _config.PENDING_TOOL_DRAFTS
         assert not _config._draft_path(event_id).exists()
+
+    def test_tool_approval_uses_draft_fallback_when_cache_missing(self, monkeypatch):
+        PENDING_TOOL_DRAFTS.clear()
+        event_id = "hugo-blog-restored-card"
+
+        def fake_make_tool_request(skill_name, args, skills, cfg=None, **kwargs):
+            assert skill_name == "hugo_blog"
+            assert args == {"action": "deploy", "filename": "restored.md"}
+            return {
+                "kind": "tool_request",
+                "eventId": kwargs["event_id"],
+                "skillName": skill_name,
+                "displayName": kwargs["display_name"],
+                "args": args,
+                "policy": {"decision": "confirm", "risk": "medium", "reason": ""},
+                "requiresApproval": True,
+                "blocked": False,
+            }
+
+        def fake_execute(request, skills, cfg=None):
+            assert request["eventId"] == event_id
+            return {
+                "ok": True,
+                "executed": True,
+                "summary": "hugo_blog 完成",
+                "output": "部署成功",
+                "policy": {"decision": "confirm", "risk": "medium", "reason": ""},
+            }
+
+        monkeypatch.setattr("skills.loader.load_skills", lambda: {"hugo_blog": object()})
+        monkeypatch.setattr("core.api_tool_service.make_tool_request", fake_make_tool_request)
+        monkeypatch.setattr("core.api_tool_service.execute_tool_request", fake_execute)
+
+        result = _tool_approval({
+            "eventId": event_id,
+            "decision": "approved",
+            "draftFallback": {
+                "skillName": "hugo_blog",
+                "displayName": "hugo_blog",
+                "args": {"action": "deploy", "filename": "restored.md"},
+            },
+        })
+
+        assert result["executed"] is True
+        assert result["output"] == "部署成功"
 
     def test_tool_result_cache_expires(self, monkeypatch):
         from terminal.api import _config
@@ -3047,6 +3165,33 @@ def test_chat_stream_emits_runtime_context_event(monkeypatch):
     }
     assert len(trace_ids) == 1
     assert next(iter(trace_ids)).startswith("trace-")
+
+
+def test_runtime_context_ignores_filtered_hugo_skill_for_review_request(monkeypatch):
+    """Raw skill hits should not mark content review turns as blog_publish."""
+    from terminal.api._tools import _runtime_context_event
+    from core.orchestrator import OrchestrationResult
+
+    query = (
+        "我让 Codex 帮我部署了，/Users/Yivxer/Library/Mobile Documents/"
+        "iCloud~md~obsidian/Documents/读书笔记/不存在另一半的灵魂.md，"
+        "你可以看看这一篇读后感如何"
+    )
+    context = _runtime_context_event(
+        query=query,
+        intent_info={"intent": "writing"},
+        orchestration=OrchestrationResult(
+            intent="writing",
+            sub_intent="writing_assist",
+            mode="adaptive",
+            depth="deep",
+            needs_memory=False,
+            needs_tools=True,
+            matched_skills=["hugo_blog"],
+            memory_scope=[],
+        ),
+    )
+    assert context["task"] == "writing_assist"
 
 
 def test_tool_event_trace_id_is_copied_into_draft():

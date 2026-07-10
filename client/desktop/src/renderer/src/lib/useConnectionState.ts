@@ -18,6 +18,7 @@ import React from 'react'
 
 import {
   badgeLabel,
+  badgeVisual,
   type BrainStatusReason,
   type ConnectionBadgeVisual,
   type ConnectionState,
@@ -293,9 +294,6 @@ function applyTransition(
 
 export function snapshotBadgeVisual(snap: ConnectionStateSnapshot): ConnectionBadgeVisual {
   // 复用 connectionState.badgeVisual 的视觉定义，但 label 用动态原因
-  // 这里直接 import badgeVisual 并扩展
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const { badgeVisual } = require('./connectionState') as typeof import('./connectionState')
   const v = badgeVisual(snap.state)
   return {
     ...v,
@@ -394,6 +392,17 @@ async function defaultFetchDoctorWarn(): Promise<{ warn: boolean; reason: string
   }
 }
 
+export async function refreshConnectionEngine(
+  engine: ConnectionStateEngine,
+  fetchBrainStatus: () => Promise<BrainStatusSnapshot | null>,
+  doctorWarn: { warn: boolean; reason: string },
+  now: () => number,
+): Promise<ConnectionStateSnapshot> {
+  const brain = await fetchBrainStatus()
+  if (!brain) return engine.get()
+  return engine.onBrainStatus(brain, doctorWarn.warn, now())
+}
+
 export function useConnectionState(options: UseConnectionStateOptions = {}): UseConnectionStateResult {
   const {
     fetchBrainStatus = defaultFetchBrainStatus,
@@ -427,9 +436,7 @@ export function useConnectionState(options: UseConnectionStateOptions = {}): Use
   }, [dispatch])
 
   const refresh = React.useCallback(async (): Promise<ConnectionStateSnapshot> => {
-    const brain = await fetchBrainStatus()
-    if (!brain) return engineRef.current.get()
-    const next = engineRef.current.onBrainStatus(brain, doctorWarnRef.current.warn, now())
+    const next = await refreshConnectionEngine(engineRef.current, fetchBrainStatus, doctorWarnRef.current, now)
     setSnapshot(next)
     return next
   }, [fetchBrainStatus, now])
@@ -438,6 +445,7 @@ export function useConnectionState(options: UseConnectionStateOptions = {}): Use
   React.useEffect(() => {
     if (!autoStart) return
     dispatch({ kind: 'start' })
+    void refresh()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -445,9 +453,8 @@ export function useConnectionState(options: UseConnectionStateOptions = {}): Use
   React.useEffect(() => {
     let cancelled = false
     const timer = setInterval(async () => {
-      const brain = await fetchBrainStatus()
-      if (cancelled || !brain) return
-      const next = engineRef.current.onBrainStatus(brain, doctorWarnRef.current.warn, now())
+      const next = await refreshConnectionEngine(engineRef.current, fetchBrainStatus, doctorWarnRef.current, now)
+      if (cancelled) return
       setSnapshot(next)
     }, heartbeatMs)
     return () => {
@@ -464,9 +471,8 @@ export function useConnectionState(options: UseConnectionStateOptions = {}): Use
       if (cancelled) return
       doctorWarnRef.current = result
       // doctor warn 变化时，触发一次 brain status 刷新（让 engine 重新决策）
-      const brain = await fetchBrainStatus()
-      if (cancelled || !brain) return
-      const next = engineRef.current.onBrainStatus(brain, result.warn, now())
+      const next = await refreshConnectionEngine(engineRef.current, fetchBrainStatus, result, now)
+      if (cancelled) return
       setSnapshot(next)
     }, doctorPollMs)
     return () => {

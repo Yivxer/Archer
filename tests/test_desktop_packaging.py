@@ -135,3 +135,73 @@ esac
     assert "PROFILE:" in result.stdout
     assert "ready_ms=" in result.stdout
     assert "doctor_ms=" in result.stdout
+
+
+def test_verify_desktop_live_fails_on_renderer_commonjs_require(tmp_path):
+    app_path = tmp_path / "Applications" / "Archer.app"
+    resources_dir = app_path / "Contents" / "Resources"
+    token_file = tmp_path / "desktop-api-token"
+    bin_dir = tmp_path / "bin"
+    calls_file = tmp_path / "curl-calls.txt"
+    resources_dir.mkdir(parents=True)
+    (resources_dir / "app.asar").write_text("fake archive", encoding="utf-8")
+    token_file.write_text("test-token", encoding="utf-8")
+    bin_dir.mkdir()
+
+    fake_asar = bin_dir / "asar"
+    fake_asar.write_text(
+        """#!/usr/bin/env bash
+set -euo pipefail
+cmd="$1"
+case "$cmd" in
+  list)
+    printf '/out/renderer/assets/index-bad.js\\n'
+    ;;
+  extract-file)
+    printf 'const value = require("./connectionState");\\n' > index-bad.js
+    ;;
+esac
+""",
+        encoding="utf-8",
+    )
+    fake_asar.chmod(0o755)
+
+    fake_curl = bin_dir / "curl"
+    fake_curl.write_text(
+        """#!/usr/bin/env bash
+set -euo pipefail
+url="${@: -1}"
+printf '%s\n' "$url" >> "$ARCHER_FAKE_CURL_CALLS"
+case "$url" in
+  */health) exit 0 ;;
+  */ready) printf '{"ok":true,"ready":true}' ;;
+  */status) printf '{"mode":"auto"}' ;;
+  */modes) printf '{"current":"auto","modes":[1,2,3,4,5,6,7,8,9,10,11,12]}' ;;
+  */config/doctor) printf '{"ok":true,"summary":{"error":0,"warn":0,"info":0},"issues":[]}' ;;
+  *) printf '{}' ;;
+esac
+""",
+        encoding="utf-8",
+    )
+    fake_curl.chmod(0o755)
+
+    env = {
+        **os.environ,
+        "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        "ARCHER_APP_PATH": str(app_path),
+        "ARCHER_TOKEN_FILE": str(token_file),
+        "ARCHER_ASAR_BIN": str(fake_asar),
+        "ARCHER_FAKE_CURL_CALLS": str(calls_file),
+    }
+
+    result = subprocess.run(
+        ["bash", str(VERIFY_SCRIPT)],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    assert "renderer bundle 含 CommonJS require" in result.stdout

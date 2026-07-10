@@ -13,6 +13,7 @@ import {
   CONNECTING_TIMEOUT_MS,
   ConnectionStateEngine,
   RECOVERING_TIMEOUT_MS,
+  refreshConnectionEngine,
   type BrainStatusSnapshot,
 } from '../useConnectionState'
 
@@ -82,6 +83,21 @@ describe('ConnectionStateEngine — 10 条测试矩阵 T1-T10', () => {
 
     // 第二次心跳：ready + doctor clear
     e.onBrainStatus(brainReady(), false, 2000)
+    expect(e.get().state).toBe('ready')
+  })
+
+  it('启动后可立即刷新到 ready，不必等待首个 5s 心跳', async () => {
+    const e = new ConnectionStateEngine()
+    e.dispatch({ kind: 'start' })
+
+    const next = await refreshConnectionEngine(
+      e,
+      async () => brainReady(),
+      { warn: false, reason: '' },
+      () => 1000,
+    )
+
+    expect(next.state).toBe('ready')
     expect(e.get().state).toBe('ready')
   })
 
