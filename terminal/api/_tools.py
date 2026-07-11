@@ -26,6 +26,7 @@ from terminal.api.turn_context import (
     clean_memory_mode as _clean_memory_mode,
     clean_obsidian_mode as _clean_obsidian_mode,
 )
+from terminal.api.turn_pipeline import classify_turn
 
 logger = logging.getLogger("archer_api")
 MODEL_STREAM_HEARTBEAT_SECONDS = 8.0
@@ -2371,15 +2372,16 @@ def _iter_chat_chunks(
     file_refs: list[dict] | None = None,
     runtime_context=None,
 ):
-    from core.context import classify_query_intent, augment_retrieval_query
+    from core.context import augment_retrieval_query
     from core.llm import stream_chat
 
-    query = _latest_user_text(messages)
+    classified_turn = classify_turn(messages)
+    query = classified_turn.query
     trace_id = f"trace-{uuid4().hex[:12]}"
     _record_part8_shadow_material(messages, runtime_context)
     # 历史（不含当前这条用户消息），用于历史感知意图与检索改写
-    prior_history = messages[:-1] if (messages and messages[-1].get("role") == "user") else messages
-    intent_info = classify_query_intent(query, history=prior_history, llm_fallback=False)
+    prior_history = classified_turn.prior_history
+    intent_info = classified_turn.intent_info
     # ── B5.1: simple path 分叉（轻量闲聊跳过 orchestration/router/memory/vault/tool_loop） ──
     try:
         from core.desktop_tool_router import is_simple_chat_path
