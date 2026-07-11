@@ -2625,28 +2625,31 @@ def _tool_approval(payload: dict) -> dict:
             record_tool_approval_audit(event_id=event_id, decision=decision, draft=draft, response=response)
             set_tool_result(event_id, response)
             return response
-        response = {
-            "ok": True, "eventId": event_id, "decision": decision,
-            "executed": executed, "output": result_output, "message": message,
-        }
-        if isinstance(work_receipt, dict):
-            response["workReceipt"] = work_receipt
-            response["receipt"] = work_receipt
+        from terminal.api.tool_stage import ApprovalExecution, build_approval_response, persist_approval_response
+        permission_level = ""
         if draft.get("kind") == "tool_request":
-            response["permissionLevel"] = permission_level_for_tool(
+            permission_level = permission_level_for_tool(
                 str(draft.get("skillName", "")),
                 draft.get("args") if isinstance(draft.get("args"), dict) else {},
             )
-        if request_fingerprint:
-            response["fingerprint"] = request_fingerprint
-        trace_id = str(draft.get("traceId") or "").strip()
-        if trace_id:
-            response["traceId"] = trace_id
-        record_tool_approval_audit(event_id=event_id, decision=decision, draft=draft, response=response)
-        set_tool_result(event_id, response)
-        if request_fingerprint and decision == "approved" and executed:
-            set_tool_fingerprint_result(request_fingerprint, response)
-        return response
+        response = build_approval_response(
+            event_id=event_id,
+            decision=decision,
+            execution=ApprovalExecution(executed, result_output, message, work_receipt),
+            draft=draft,
+            fingerprint=request_fingerprint,
+            permission_level=permission_level,
+        )
+        return persist_approval_response(
+            response,
+            event_id=event_id,
+            decision=decision,
+            draft=draft,
+            fingerprint=request_fingerprint,
+            record_audit=record_tool_approval_audit,
+            set_event_result=set_tool_result,
+            set_fingerprint_result=set_tool_fingerprint_result,
+        )
 
     return {
         "ok": True, "eventId": event_id, "decision": decision,

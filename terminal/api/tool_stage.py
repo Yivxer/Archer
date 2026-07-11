@@ -12,6 +12,15 @@ class ToolEventSummary:
     tool_notes: list[str]
 
 
+@dataclass(frozen=True, slots=True)
+class ApprovalExecution:
+    executed: bool
+    output: str
+    message: str
+    work_receipt: dict | None = None
+    raw_result: dict | None = None
+
+
 def parse_approval_decision(payload: dict) -> tuple[str, str]:
     event_id = str(payload.get("eventId", "")).strip()
     decision = str(payload.get("decision", "")).strip()
@@ -40,6 +49,69 @@ def reuse_fingerprint_approval(event_id: str, fingerprint: str, cached: dict | N
 
 def build_denied_response(event_id: str) -> dict:
     return {"ok": True, "eventId": event_id, "decision": "denied", "executed": False, "output": "", "message": "已取消，未执行。"}
+
+
+def execute_approved_draft(
+    draft: dict,
+    *,
+    execute_tool_request: Callable[[dict], dict],
+    append_obsidian: Callable[[dict], str],
+    execute_shell: Callable[[str, int], dict],
+    execute_github: Callable[[dict], str],
+) -> ApprovalExecution:
+    if draft.get("kind") == "tool_request":
+        result = execute_tool_request(draft)
+        executed = bool(result.get("executed"))
+        receipt = result.get("workReceipt") if isinstance(result.get("workReceipt"), dict) else None
+        return ApprovalExecution(
+            executed,
+            str(result.get("output", "")),
+            str(result.get("summary") or ("tool executed" if executed else "tool execution failed")),
+            receipt,
+            result,
+        )
+    if "path" in draft:
+        return ApprovalExecution(True, append_obsidian(draft), "draft approved and appended to Obsidian")
+    if "command" in draft and "action" not in draft:
+        result = execute_shell(str(draft["command"]), int(draft.get("timeout", 30)))
+        return ApprovalExecution(bool(result["ok"]), str(result["output"]), "shell command executed" if result["ok"] else "shell command failed")
+    if "action" in draft:
+        return ApprovalExecution(True, execute_github(draft), "github operation executed")
+    return ApprovalExecution(False, "", "tool execution failed")
+
+
+def build_approval_response(
+    *, event_id: str, decision: str, execution: ApprovalExecution,
+    draft: dict, fingerprint: str = "", permission_level: str = "",
+) -> dict:
+    response = {
+        "ok": True, "eventId": event_id, "decision": decision,
+        "executed": execution.executed, "output": execution.output,
+        "message": execution.message,
+    }
+    if execution.work_receipt:
+        response["workReceipt"] = execution.work_receipt
+        response["receipt"] = execution.work_receipt
+    if permission_level:
+        response["permissionLevel"] = permission_level
+    if fingerprint:
+        response["fingerprint"] = fingerprint
+    trace_id = str(draft.get("traceId") or "").strip()
+    if trace_id:
+        response["traceId"] = trace_id
+    return response
+
+
+def persist_approval_response(
+    response: dict, *, event_id: str, decision: str, draft: dict,
+    fingerprint: str, record_audit: Callable, set_event_result: Callable,
+    set_fingerprint_result: Callable,
+) -> dict:
+    record_audit(event_id=event_id, decision=decision, draft=draft, response=response)
+    set_event_result(event_id, response)
+    if fingerprint and decision == "approved" and response.get("executed"):
+        set_fingerprint_result(fingerprint, response)
+    return response
 
 
 def summarize_api_tool_events(

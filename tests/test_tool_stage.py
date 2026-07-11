@@ -1,6 +1,6 @@
 import pytest
 
-from terminal.api.tool_stage import build_denied_response, reuse_fingerprint_approval, parse_approval_decision, reuse_cached_approval, summarize_api_tool_events
+from terminal.api.tool_stage import ApprovalExecution, build_approval_response, build_denied_response, execute_approved_draft, persist_approval_response, reuse_fingerprint_approval, parse_approval_decision, reuse_cached_approval, summarize_api_tool_events
 
 
 def test_parse_approval_decision_accepts_only_explicit_choices():
@@ -28,6 +28,22 @@ def test_fingerprint_reuse_rebinds_event_without_execution():
     assert result["eventId"] == "new"
     assert result["reused"] is True
     assert result["idempotencyReason"] == "same_fingerprint"
+
+
+def test_execute_approved_standard_tool_preserves_receipt():
+    execution = execute_approved_draft(
+        {"kind": "tool_request"},
+        execute_tool_request=lambda _: {"executed": True, "output": "ok", "summary": "done", "workReceipt": {"id": "r1"}},
+        append_obsidian=lambda _: "", execute_shell=lambda *_: {}, execute_github=lambda _: "",
+    )
+    assert execution == ApprovalExecution(True, "ok", "done", {"id": "r1"}, {"executed": True, "output": "ok", "summary": "done", "workReceipt": {"id": "r1"}})
+
+
+def test_persist_fingerprint_only_after_success():
+    fingerprints = []
+    response = build_approval_response(event_id="e1", decision="approved", execution=ApprovalExecution(True, "ok", "done"), draft={"traceId": "t1"}, fingerprint="fp", permission_level="write")
+    persist_approval_response(response, event_id="e1", decision="approved", draft={}, fingerprint="fp", record_audit=lambda **_: None, set_event_result=lambda *_: None, set_fingerprint_result=lambda *args: fingerprints.append(args))
+    assert fingerprints == [("fp", response)]
 
 
 def test_tool_event_summary_distinguishes_execution_from_approval():
