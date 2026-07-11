@@ -118,3 +118,92 @@ def orchestrate_turn(
         )
     except Exception:
         return OrchestratedTurn(None, None, "", "", "", None, None)
+
+
+def plain_chat_message(message) -> dict:
+    if isinstance(message, dict):
+        return message
+    model_dump = getattr(message, "model_dump", None)
+    if callable(model_dump):
+        data = model_dump(exclude_none=True)
+        if isinstance(data, dict):
+            return data
+    legacy_dict = getattr(message, "dict", None)
+    if callable(legacy_dict):
+        data = legacy_dict(exclude_none=True)
+        if isinstance(data, dict):
+            return data
+    return {
+        "role": str(getattr(message, "role", "assistant") or "assistant"),
+        "content": getattr(message, "content", "") or "",
+    }
+
+
+def trim_model_messages(
+    messages: list[dict], *, keep_recent: int = 20, threshold: int = 36
+) -> list[dict]:
+    if len(messages) <= threshold or keep_recent <= 0:
+        return messages
+    system_prefix: list[dict] = []
+    rest = list(messages)
+    while rest and rest[0].get("role") == "system":
+        system_prefix.append(rest.pop(0))
+    if len(rest) <= keep_recent:
+        return [*system_prefix, *rest]
+    omitted = len(rest) - keep_recent
+    summary = {
+        "role": "system",
+        "content": f"[长上下文保护] 旧对话已省略 {omitted} 条，仅保留最近 {keep_recent} 条消息。",
+    }
+    return [*system_prefix, summary, *rest[-keep_recent:]]
+
+
+def assemble_model_messages(
+    enriched_messages: list[dict],
+    *,
+    core_persona: str,
+    tool_notes: list[str] | None = None,
+    obsidian_hint: str = "",
+    simple: bool = False,
+) -> list[dict]:
+    clean_messages: list[dict] = []
+    for raw_message in enriched_messages:
+        message = plain_chat_message(raw_message)
+        role = message.get("role")
+        if role == "tool":
+            continue
+        if role == "assistant" and message.get("tool_calls"):
+            content = message.get("content")
+            if content:
+                clean_messages.append({"role": "assistant", "content": content})
+            continue
+        clean_messages.append(message)
+
+    notes = tool_notes or []
+    if simple:
+        instruction = "\n\n请直接自然回答，不要输出 XML、function_call、tool_call。"
+    elif not notes:
+        instruction = "\n\n工具事件由本地客户端处理；请直接自然回答，不要输出 XML、function_call、tool_call。"
+    else:
+        tool_context = "\n\n本轮本地客户端已经处理以下工具事件：\n- " + "\n- ".join(notes)
+        instruction = (
+            "本轮已触发的工具能力："
+            + tool_context
+            + "\n\n你可以自然地使用这些能力完成用户的要求——"
+            + "在你的回复中用自然语言描述你想做什么，客户端会自动处理执行细节。"
+            + "不要输出 XML 伪标签或 function call 语法。"
+        )
+    return trim_model_messages(
+        [
+            {
+                "role": "system",
+                "content": (
+                    "你正在 Archer Desktop 中回复用户。\n\n"
+                    + core_persona
+                    + instruction
+                    + obsidian_hint
+                ),
+            },
+            *clean_messages,
+        ]
+    )

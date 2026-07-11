@@ -26,7 +26,13 @@ from terminal.api.turn_context import (
     clean_memory_mode as _clean_memory_mode,
     clean_obsidian_mode as _clean_obsidian_mode,
 )
-from terminal.api.turn_pipeline import classify_turn, orchestrate_turn
+from terminal.api.turn_pipeline import (
+    assemble_model_messages,
+    classify_turn,
+    orchestrate_turn,
+    plain_chat_message as _plain_chat_message,
+    trim_model_messages as _trim_model_messages_for_context,
+)
 
 logger = logging.getLogger("archer_api")
 MODEL_STREAM_HEARTBEAT_SECONDS = 8.0
@@ -156,47 +162,6 @@ def _with_trace_id(event: dict, trace_id: str) -> dict:
         if payload_key == "toolEvent" and isinstance(payload.get("draft"), dict):
             payload["draft"].setdefault("traceId", trace_id)
     return event
-
-
-def _trim_model_messages_for_context(
-    messages: list[dict], *, keep_recent: int = 20, threshold: int = 36,
-) -> list[dict]:
-    if len(messages) <= threshold:
-        return messages
-    if keep_recent <= 0:
-        return messages
-    system_prefix: list[dict] = []
-    rest = list(messages)
-    while rest and rest[0].get("role") == "system":
-        system_prefix.append(rest.pop(0))
-    if len(rest) <= keep_recent:
-        return [*system_prefix, *rest]
-    omitted = len(rest) - keep_recent
-    summary = {
-        "role": "system",
-        "content": f"[长上下文保护] 旧对话已省略 {omitted} 条，仅保留最近 {keep_recent} 条消息。",
-    }
-    return [*system_prefix, summary, *rest[-keep_recent:]]
-
-
-def _plain_chat_message(message) -> dict:
-    """Convert SDK chat message objects to plain dicts before reusing them."""
-    if isinstance(message, dict):
-        return message
-    model_dump = getattr(message, "model_dump", None)
-    if callable(model_dump):
-        data = model_dump(exclude_none=True)
-        if isinstance(data, dict):
-            return data
-    legacy_dict = getattr(message, "dict", None)
-    if callable(legacy_dict):
-        data = legacy_dict(exclude_none=True)
-        if isinstance(data, dict):
-            return data
-    return {
-        "role": str(getattr(message, "role", "assistant") or "assistant"),
-        "content": getattr(message, "content", "") or "",
-    }
 
 
 def _iter_model_stream_with_heartbeat(messages: list[dict], **kwargs):
@@ -2224,32 +2189,11 @@ def _iter_simple_chat_path(
     except Exception:
         core_persona = "Archer 的核心身份是长期陪伴型 AI 灵魂伴生体。"
 
-    # 清洗 tool_calls / tool 角色消息
-    clean_messages: list[dict] = []
-    for m in enriched_messages:
-        m = _plain_chat_message(m)
-        role = m.get("role")
-        if role == "tool":
-            continue
-        if role == "assistant" and m.get("tool_calls"):
-            content = m.get("content")
-            if content:
-                clean_messages.append({"role": "assistant", "content": content})
-            continue
-        clean_messages.append(m)
-
-    model_messages = [
-        {
-            "role": "system",
-            "content": (
-                "你正在 Archer Desktop 中回复用户。\n\n"
-                + core_persona
-                + "\n\n请直接自然回答，不要输出 XML、function_call、tool_call。"
-            ),
-        },
-        *clean_messages,
-    ]
-    model_messages = _trim_model_messages_for_context(model_messages)
+    model_messages = assemble_model_messages(
+        enriched_messages,
+        core_persona=core_persona,
+        simple=True,
+    )
 
     # 主模型 stream
     has_images = bool(file_refs and any(r.get("type") == "image" for r in file_refs))
@@ -2911,9 +2855,6 @@ def _iter_chat_chunks(
         except Exception:
             core_persona = "Archer 的核心身份是长期陪伴型 AI 灵魂伴生体。"
 
-    tool_context = ""
-    if tool_notes:
-        tool_context = "\n\n本轮本地客户端已经处理以下工具事件：\n- " + "\n- ".join(tool_notes)
     obsidian_hint = ""
     if obsidian_write_intent:
         obsidian_hint = (
@@ -2921,40 +2862,12 @@ def _iter_chat_chunks(
             "并告知用户回复完成后客户端会自动生成写入草稿卡片，用户点击「写入」后才会真正执行。"
             f"当前识别到的目标路径：{obsidian_target_path or '（待确认）'}。"
         )
-    # 清洗工具循环残留：剥离 tool_calls / tool 角色消息，避免污染主回复上下文
-    # DeepSeek 在历史含 tool_calls 但当前请求不带 tools 时会 400 或输出异常
-    clean_messages: list[dict] = []
-    for m in enriched_messages:
-        m = _plain_chat_message(m)
-        role = m.get("role")
-        if role == "tool":
-            continue  # 工具结果消息直接丢弃
-        if role == "assistant" and m.get("tool_calls"):
-            # 保留 assistant 文本内容（如果有），剥离 tool_calls 字段
-            content = m.get("content")
-            if content:
-                clean_messages.append({"role": "assistant", "content": content})
-            continue
-        clean_messages.append(m)
-
-    model_messages = [
-        {
-            "role": "system",
-            "content": (
-                "你正在 Archer Desktop 中回复用户。\n\n"
-                + core_persona
-                + ("\n\n工具事件由本地客户端处理；请直接自然回答，不要输出 XML、function_call、tool_call。"
-                   if not tool_notes else
-                   "本轮已触发的工具能力：" + tool_context
-                   + "\n\n你可以自然地使用这些能力完成用户的要求——"
-                   + "在你的回复中用自然语言描述你想做什么，客户端会自动处理执行细节。"
-                   + "不要输出 XML 伪标签或 function call 语法。")
-                + (obsidian_hint if obsidian_hint else "")
-            ),
-        },
-        *clean_messages,
-    ]
-    model_messages = _trim_model_messages_for_context(model_messages)
+    model_messages = assemble_model_messages(
+        enriched_messages,
+        core_persona=core_persona,
+        tool_notes=tool_notes,
+        obsidian_hint=obsidian_hint,
+    )
 
     # ── AI 主回复（收集完整回复用于后续草稿生成） ──
     from core.model_select import resolve_active_model

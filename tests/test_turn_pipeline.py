@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from terminal.api.turn_pipeline import classify_turn, orchestrate_turn
+from terminal.api.turn_pipeline import (
+    assemble_model_messages,
+    classify_turn,
+    orchestrate_turn,
+)
 
 
 def test_classify_turn_separates_current_user_message_from_history():
@@ -82,3 +86,36 @@ def test_orchestrate_turn_degrades_to_empty_plan(monkeypatch):
     assert result.memory_scope is None
     assert result.task_plan_block == ""
     assert result.plan_event is None
+
+
+def test_assemble_model_messages_removes_tool_residue_and_keeps_text():
+    messages = assemble_model_messages(
+        [
+            {"role": "user", "content": "question"},
+            {"role": "assistant", "content": "useful", "tool_calls": [{"id": "1"}]},
+            {"role": "tool", "content": "raw result"},
+        ],
+        core_persona="persona",
+        tool_notes=["read file"],
+        obsidian_hint="\nobsidian hint",
+    )
+
+    assert messages[0]["role"] == "system"
+    assert "persona" in messages[0]["content"]
+    assert "read file" in messages[0]["content"]
+    assert messages[0]["content"].endswith("obsidian hint")
+    assert messages[1:] == [
+        {"role": "user", "content": "question"},
+        {"role": "assistant", "content": "useful"},
+    ]
+
+
+def test_assemble_model_messages_uses_simple_path_instruction():
+    messages = assemble_model_messages(
+        [{"role": "user", "content": "hello"}],
+        core_persona="persona",
+        simple=True,
+    )
+
+    assert "请直接自然回答" in messages[0]["content"]
+    assert "本轮已触发的工具能力" not in messages[0]["content"]
