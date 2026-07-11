@@ -1,6 +1,6 @@
 import pytest
 
-from terminal.api.tool_stage import ApprovalExecution, build_approval_response, build_denied_response, execute_approved_draft, persist_approval_response, reuse_fingerprint_approval, parse_approval_decision, reuse_cached_approval, summarize_api_tool_events
+from terminal.api.tool_stage import ApprovalExecution, apply_approval_followup, build_approval_response, build_denied_response, execute_approved_draft, persist_approval_response, reuse_fingerprint_approval, parse_approval_decision, reuse_cached_approval, summarize_api_tool_events
 
 
 def test_parse_approval_decision_accepts_only_explicit_choices():
@@ -44,6 +44,17 @@ def test_persist_fingerprint_only_after_success():
     response = build_approval_response(event_id="e1", decision="approved", execution=ApprovalExecution(True, "ok", "done"), draft={"traceId": "t1"}, fingerprint="fp", permission_level="write")
     persist_approval_response(response, event_id="e1", decision="approved", draft={}, fingerprint="fp", record_audit=lambda **_: None, set_event_result=lambda *_: None, set_fingerprint_result=lambda *args: fingerprints.append(args))
     assert fingerprints == [("fp", response)]
+
+
+def test_hugo_followup_uses_created_filename():
+    calls = []
+    result = apply_approval_followup(
+        {"kind": "tool_request", "skillName": "hugo_blog", "args": {"action": "new", "title": "Post"}},
+        ApprovalExecution(True, "created", "done", raw_result={"metadata": {"filename": "post.md"}}),
+        deploy=lambda **kwargs: (calls.append(kwargs) or "部署成功", "验证：ok"),
+    )
+    assert calls == [{"title": "Post", "deploy_args": {"action": "deploy", "filename": "post.md"}}]
+    assert "验证单页可访问" in result.message
 
 
 def test_tool_event_summary_distinguishes_execution_from_approval():

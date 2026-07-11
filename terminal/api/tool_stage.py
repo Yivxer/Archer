@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
+import re
 from typing import Callable
 
 
@@ -112,6 +114,53 @@ def persist_approval_response(
     if fingerprint and decision == "approved" and response.get("executed"):
         set_fingerprint_result(fingerprint, response)
     return response
+
+
+def apply_approval_followup(
+    draft: dict,
+    execution: ApprovalExecution,
+    *,
+    deploy: Callable[..., tuple[object, str]],
+) -> ApprovalExecution:
+    """Apply the existing Hugo deploy follow-up without owning approval dispatch."""
+    if not execution.executed or draft.get("kind") != "tool_request":
+        return execution
+    skill_name = str(draft.get("skillName") or "")
+    args = draft.get("args") if isinstance(draft.get("args"), dict) else {}
+    deploy_args: dict | None = None
+    title = "博客文章"
+    if skill_name == "hugo_blog" and str(args.get("action") or "") == "new":
+        result = execution.raw_result or {}
+        metadata = result.get("metadata") if isinstance(result.get("metadata"), dict) else {}
+        filename = str(metadata.get("filename") or "").strip()
+        created_path = str(metadata.get("createdFile") or "").strip()
+        deploy_args = {"action": "deploy"}
+        if filename or created_path:
+            deploy_args["filename"] = Path(filename or created_path).name
+        else:
+            match = re.search(r"文章已创建：(.+?\.md)", execution.output)
+            if match:
+                deploy_args["filename"] = Path(match.group(1)).name
+        if "filename" not in deploy_args and args.get("slug"):
+            deploy_args["slug"] = args["slug"]
+        title = str(args.get("title") or title)
+    elif skill_name == "file_ops":
+        target = str(args.get("path") or "")
+        if "/yivxer-blog/content/posts/" in target and args.get("action") == "write":
+            deploy_args = {"action": "deploy", "filename": Path(target).name}
+            title = Path(target).stem or title
+    if deploy_args is None:
+        return execution
+    try:
+        deploy_result, workflow_summary = deploy(title=title, deploy_args=deploy_args)
+        output = execution.output + "\n\n" + str(deploy_result)
+        if workflow_summary and workflow_summary not in output:
+            output += "\n\n" + workflow_summary
+        verified = "单页验证成功" in str(deploy_result) or "验证：" in workflow_summary
+        message = execution.message + (" | hugo deploy 已自动执行并验证单页可访问" if verified else " | hugo deploy 已自动执行")
+        return ApprovalExecution(True, output, message, execution.work_receipt, execution.raw_result)
+    except Exception as exc:
+        return ApprovalExecution(True, execution.output + f"\n\n部署失败：{exc}", execution.message + " | 部署失败", execution.work_receipt, execution.raw_result)
 
 
 def summarize_api_tool_events(
