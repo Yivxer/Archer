@@ -37,6 +37,7 @@ from terminal.api.turn_pipeline import (
     assemble_model_messages,
     classify_turn,
     orchestrate_turn,
+    select_turn_tools,
     plain_chat_message as _plain_chat_message,
     trim_model_messages as _trim_model_messages_for_context,
 )
@@ -2244,15 +2245,16 @@ def _iter_chat_chunks(
     _scoped_skills = _expert_scoped_skills(_cfg)
     for event in _yield_shadow_initiative_events(runtime_context):
         yield event
-    _turn_plan = _plan_desktop_turn(
+    selected_turn_tools = select_turn_tools(
         query,
         _scoped_skills,
         intent=intent,
         needs_tools=needs_tools,
-        llm_fallback=needs_tools,
+        planner=_plan_desktop_turn,
     )
-    _selected_tools = _turn_plan.filtered_skills
-    _tool_plan = _turn_plan.tool_plan
+    _turn_plan = selected_turn_tools.turn_plan
+    _selected_tools = selected_turn_tools.selected_tools
+    _tool_plan = selected_turn_tools.tool_plan
     # 动态对话姿态：优先使用 orchestrator 的 mode；手动锁定时让位
     active_stance = orchestration.mode if orchestration else None
     stance_prompt = ""

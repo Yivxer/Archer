@@ -28,6 +28,14 @@ class OrchestratedTurn:
     orchestration_event: dict | None
 
 
+@dataclass(frozen=True, slots=True)
+class SelectedTurnTools:
+    scoped_skills: object
+    turn_plan: object
+    selected_tools: object
+    tool_plan: object
+
+
 def _latest_user_text(messages: list[dict]) -> str:
     for message in reversed(messages):
         if message.get("role") == "user":
@@ -118,6 +126,33 @@ def orchestrate_turn(
         )
     except Exception:
         return OrchestratedTurn(None, None, "", "", "", None, None)
+
+
+def select_turn_tools(
+    query: str,
+    scoped_skills,
+    *,
+    intent: str,
+    needs_tools: bool,
+    planner: Callable | None = None,
+) -> SelectedTurnTools:
+    if planner is None:
+        from core.desktop_tool_router import plan_desktop_turn
+
+        planner = plan_desktop_turn
+    turn_plan = planner(
+        query,
+        scoped_skills,
+        intent=intent,
+        needs_tools=needs_tools,
+        llm_fallback=needs_tools,
+    )
+    return SelectedTurnTools(
+        scoped_skills=scoped_skills,
+        turn_plan=turn_plan,
+        selected_tools=turn_plan.filtered_skills,
+        tool_plan=turn_plan.tool_plan,
+    )
 
 
 def plain_chat_message(message) -> dict:

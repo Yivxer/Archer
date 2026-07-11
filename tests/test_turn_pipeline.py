@@ -6,6 +6,7 @@ from terminal.api.turn_pipeline import (
     assemble_model_messages,
     classify_turn,
     orchestrate_turn,
+    select_turn_tools,
 )
 
 
@@ -119,3 +120,30 @@ def test_assemble_model_messages_uses_simple_path_instruction():
 
     assert "请直接自然回答" in messages[0]["content"]
     assert "本轮已触发的工具能力" not in messages[0]["content"]
+
+
+def test_select_turn_tools_uses_one_server_side_plan():
+    calls = []
+    plan = SimpleNamespace(
+        filtered_skills={"obsidian_write": object()},
+        tool_plan=SimpleNamespace(obsidian_write=True),
+    )
+
+    def planner(query, scoped_skills, *, intent, needs_tools, llm_fallback):
+        calls.append((query, scoped_skills, intent, needs_tools, llm_fallback))
+        return plan
+
+    result = select_turn_tools(
+        "save this",
+        {"obsidian_write": object()},
+        intent="task",
+        needs_tools=True,
+        planner=planner,
+    )
+
+    assert calls == [
+        ("save this", result.scoped_skills, "task", True, True),
+    ]
+    assert result.turn_plan is plan
+    assert result.selected_tools is plan.filtered_skills
+    assert result.tool_plan is plan.tool_plan
