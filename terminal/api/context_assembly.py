@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import re
 from typing import Callable
+from uuid import uuid4
 
 
 @dataclass(frozen=True, slots=True)
@@ -101,3 +103,133 @@ def assemble_memory_context(
             "本地记忆检索失败，已跳过", str(exc)[:240],
         ))
         return ContextAssemblyResult(messages, events)
+
+
+def assemble_obsidian_context(
+    messages: list[dict],
+    *,
+    query: str,
+    obsidian_mode: str,
+    preview_requested: bool,
+    event_factory: Callable[..., dict],
+    extract_target_path: Callable[[str], str | None],
+    search: Callable | None = None,
+    read: Callable | None = None,
+    event_id_factory: Callable[[], str] | None = None,
+) -> ContextAssemblyResult:
+    if obsidian_mode == "off":
+        return ContextAssemblyResult(messages, [event_factory(
+            "obsidian-search", "obsidian_search", "complete", "low",
+            "Obsidian 搜索上下文已关闭", "mode: off",
+        )])
+
+    events: list[dict] = []
+    if search is None:
+        from skills.obsidian_search import run as obsidian_search
+
+        search = obsidian_search
+    if event_id_factory is None:
+        event_id_factory = lambda: uuid4().hex[:8]
+
+    if obsidian_mode in ("summary", "full") and preview_requested:
+        events.append(event_factory(
+            "obsidian-search", "obsidian_search", "running", "low",
+            "检索 Obsidian 笔记", f"mode: {obsidian_mode}, max_results: 5",
+        ))
+        try:
+            result = str(search({"keyword": query[:80], "max_results": 5}))
+            events.append(event_factory(
+                "obsidian-search", "obsidian_search", "complete", "low",
+                "Obsidian 搜索完成", f"mode: {obsidian_mode}, {result[:300]}",
+            ))
+            targeted_path = extract_target_path(query)
+            has_targeted = bool(
+                targeted_path
+                and targeted_path != "Archer/客户端写入草稿.md"
+            )
+            injected_read = False
+            enriched = messages
+            if has_targeted:
+                try:
+                    if read is None:
+                        from skills.obsidian_read import run as obsidian_read
+
+                        read = obsidian_read
+                    content = str(read({"path": targeted_path, "max_chars": 6000}))
+                    if not content.startswith(("路径被拒绝", "笔记不存在")):
+                        enriched = [{
+                            "role": "system",
+                            "content": (
+                                "用户指定读取以下 Obsidian 笔记，请基于此内容回答：\n\n"
+                                f"### {targeted_path}\n{content}"
+                            ),
+                        }, *messages]
+                        injected_read = True
+                        events.append(event_factory(
+                            f"obsidian-read-{event_id_factory()}",
+                            "obsidian_read", "complete", "low",
+                            f"已读取并注入：{targeted_path}",
+                            f"path: {targeted_path}, chars: {len(content)}",
+                        ))
+                except Exception:
+                    pass
+            if obsidian_mode == "full" and not injected_read:
+                note_paths = re.findall(r"  - (.+\.md)", result)
+                context_parts: list[str] = []
+                if note_paths:
+                    if read is None:
+                        from skills.obsidian_read import run as obsidian_read
+
+                        read = obsidian_read
+                    for note_path in note_paths[:3]:
+                        try:
+                            content = read({"path": note_path, "max_chars": 3000})
+                            context_parts.append(f"### {note_path}\n{content}")
+                        except Exception:
+                            continue
+                if context_parts:
+                    obsidian_context = (
+                        "以下是 Obsidian vault 中与当前对话相关的笔记内容。"
+                        "请在回答时参考这些笔记，但不要逐条陈列搜索结果。\n\n"
+                        + "\n\n---\n\n".join(context_parts)
+                    )
+                    enriched = [{"role": "system", "content": obsidian_context}, *messages]
+                elif "未找到" not in result:
+                    enriched = [{
+                        "role": "system",
+                        "content": f"Obsidian vault 搜索结果：\n{result}",
+                    }, *messages]
+            return ContextAssemblyResult(enriched, events)
+        except Exception as exc:
+            events.append(event_factory(
+                "obsidian-search", "obsidian_search", "blocked", "low",
+                f"Obsidian 搜索{'失败' if obsidian_mode == 'full' else '预览失败'}",
+                str(exc)[:240],
+            ))
+            return ContextAssemblyResult(messages, events)
+
+    if obsidian_mode == "full":
+        events.append(event_factory(
+            "obsidian-search", "obsidian_search", "running", "low",
+            "检索 Obsidian 笔记（full 模式）",
+            f"mode: full, keyword: {query[:80]}",
+        ))
+        try:
+            result = str(search({"keyword": query[:80], "max_results": 5}))
+            events.append(event_factory(
+                "obsidian-search", "obsidian_search", "complete", "low",
+                "Obsidian 搜索完成", f"mode: full, {result[:300]}",
+            ))
+            enriched = messages
+            if "未找到" not in result:
+                enriched = [{
+                    "role": "system",
+                    "content": f"Obsidian vault 搜索结果：\n{result}",
+                }, *messages]
+            return ContextAssemblyResult(enriched, events)
+        except Exception as exc:
+            events.append(event_factory(
+                "obsidian-search", "obsidian_search", "blocked", "low",
+                "Obsidian 搜索失败", str(exc)[:240],
+            ))
+    return ContextAssemblyResult(messages, events)

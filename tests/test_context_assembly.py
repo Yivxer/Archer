@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from terminal.api.context_assembly import assemble_memory_context
+from terminal.api.context_assembly import (
+    assemble_memory_context,
+    assemble_obsidian_context,
+)
 
 
 def _event_factory(event_id, name, status, risk, summary, detail, *args, **kwargs):
@@ -71,4 +74,48 @@ def test_memory_context_injects_formatted_retrieval_before_messages():
     assert [event["toolEvent"]["status"] for event in result.events] == [
         "running",
         "complete",
+    ]
+
+
+def test_obsidian_context_off_mode_does_not_search():
+    result = assemble_obsidian_context(
+        [{"role": "user", "content": "hello"}],
+        query="hello",
+        obsidian_mode="off",
+        preview_requested=False,
+        event_factory=_event_factory,
+        extract_target_path=lambda _: None,
+        search=lambda _: (_ for _ in ()).throw(AssertionError("must not search")),
+    )
+
+    assert result.messages == [{"role": "user", "content": "hello"}]
+    assert result.events[0]["toolEvent"]["status"] == "complete"
+    assert "已关闭" in result.events[0]["toolEvent"]["summary"]
+
+
+def test_obsidian_context_reads_and_injects_explicit_target():
+    reads = []
+
+    def read(args):
+        reads.append(args)
+        return "note body"
+
+    result = assemble_obsidian_context(
+        [{"role": "user", "content": "read it"}],
+        query="read Project/note.md",
+        obsidian_mode="full",
+        preview_requested=True,
+        event_factory=_event_factory,
+        extract_target_path=lambda _: "Project/note.md",
+        search=lambda _: "  - Project/note.md",
+        read=read,
+        event_id_factory=lambda: "fixed",
+    )
+
+    assert reads == [{"path": "Project/note.md", "max_chars": 6000}]
+    assert "note body" in result.messages[0]["content"]
+    assert [event["toolEvent"]["name"] for event in result.events] == [
+        "obsidian_search",
+        "obsidian_search",
+        "obsidian_read",
     ]

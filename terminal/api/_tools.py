@@ -26,7 +26,10 @@ from terminal.api.turn_context import (
     clean_memory_mode as _clean_memory_mode,
     clean_obsidian_mode as _clean_obsidian_mode,
 )
-from terminal.api.context_assembly import assemble_memory_context
+from terminal.api.context_assembly import (
+    assemble_memory_context,
+    assemble_obsidian_context,
+)
 from terminal.api.turn_pipeline import (
     assemble_model_messages,
     classify_turn,
@@ -2452,103 +2455,16 @@ def _iter_chat_chunks(
     enriched_messages = memory_result.messages
     yield from memory_result.events
 
-    if obsidian_mode == "off":
-        yield _tool_event(
-            "obsidian-search", "obsidian_search", "complete", "low",
-            "Obsidian 搜索上下文已关闭", "mode: off",
-        )
-    elif obsidian_mode in ("summary", "full") and _tool_plan.obsidian_preview:
-        yield _tool_event(
-            "obsidian-search", "obsidian_search", "running", "low",
-            "检索 Obsidian 笔记",
-            f"mode: {obsidian_mode}, max_results: 5",
-        )
-        try:
-            from skills.obsidian_search import run as obsidian_search
-            result = obsidian_search({"keyword": query[:80], "max_results": 5})
-            yield _tool_event(
-                "obsidian-search", "obsidian_search", "complete", "low",
-                "Obsidian 搜索完成", f"mode: {obsidian_mode}, {result[:300]}",
-            )
-
-            # 检测用户是否给出了明确的笔记路径，若是则直接读取并注入
-            targeted_path = _extract_obsidian_target_path(query)
-            has_targeted = bool(targeted_path and targeted_path != "Archer/客户端写入草稿.md")
-            injected_read = False
-            if has_targeted:
-                try:
-                    from skills.obsidian_read import run as obsidian_read
-                    content = obsidian_read({"path": targeted_path, "max_chars": 6000})
-                    if not content.startswith("路径被拒绝") and not content.startswith("笔记不存在"):
-                        enriched_messages = [
-                            {"role": "system", "content": f"用户指定读取以下 Obsidian 笔记，请基于此内容回答：\n\n### {targeted_path}\n{content}"},
-                            *enriched_messages,
-                        ]
-                        injected_read = True
-                        yield _tool_event(
-                            f"obsidian-read-{uuid4().hex[:8]}",
-                            "obsidian_read", "complete", "low",
-                            f"已读取并注入：{targeted_path}",
-                            f"path: {targeted_path}, chars: {len(content)}",
-                        )
-                except Exception:
-                    pass
-
-            if obsidian_mode == "full" and not injected_read:
-                note_paths = re.findall(r"  - (.+\.md)", result)
-                context_parts: list[str] = []
-                if note_paths:
-                    from skills.obsidian_read import run as obsidian_read
-                    for note_path in note_paths[:3]:
-                        try:
-                            content = obsidian_read({"path": note_path, "max_chars": 3000})
-                            context_parts.append(f"### {note_path}\n{content}")
-                        except Exception:
-                            continue
-                if context_parts:
-                    obsidian_context = (
-                        "以下是 Obsidian vault 中与当前对话相关的笔记内容。"
-                        "请在回答时参考这些笔记，但不要逐条陈列搜索结果。\n\n"
-                        + "\n\n---\n\n".join(context_parts)
-                    )
-                    enriched_messages = [
-                        {"role": "system", "content": obsidian_context},
-                        *enriched_messages,
-                    ]
-                elif "未找到" not in result:
-                    enriched_messages = [
-                        {"role": "system", "content": f"Obsidian vault 搜索结果：\n{result}"},
-                        *enriched_messages,
-                    ]
-        except Exception as exc:
-            yield _tool_event(
-                "obsidian-search", "obsidian_search", "blocked", "low",
-                f"Obsidian 搜索{'失败' if obsidian_mode == 'full' else '预览失败'}", str(exc)[:240],
-            )
-    elif obsidian_mode == "full":
-        # full 模式下即使没命中关键词也做一次轻量搜索
-        yield _tool_event(
-            "obsidian-search", "obsidian_search", "running", "low",
-            "检索 Obsidian 笔记（full 模式）",
-            f"mode: full, keyword: {query[:80]}",
-        )
-        try:
-            from skills.obsidian_search import run as obsidian_search
-            result = obsidian_search({"keyword": query[:80], "max_results": 5})
-            yield _tool_event(
-                "obsidian-search", "obsidian_search", "complete", "low",
-                "Obsidian 搜索完成", f"mode: full, {result[:300]}",
-            )
-            if "未找到" not in result:
-                enriched_messages = [
-                    {"role": "system", "content": f"Obsidian vault 搜索结果：\n{result}"},
-                    *enriched_messages,
-                ]
-        except Exception as exc:
-            yield _tool_event(
-                "obsidian-search", "obsidian_search", "blocked", "low",
-                "Obsidian 搜索失败", str(exc)[:240],
-            )
+    obsidian_result = assemble_obsidian_context(
+        enriched_messages,
+        query=query,
+        obsidian_mode=obsidian_mode,
+        preview_requested=bool(_tool_plan.obsidian_preview),
+        event_factory=_tool_event,
+        extract_target_path=_extract_obsidian_target_path,
+    )
+    enriched_messages = obsidian_result.messages
+    yield from obsidian_result.events
 
     # ── Web Search 自动预检：当 skill_router 命中 web_search 时执行搜索并注入上下文 ──
     _pre_selected = _selected_tools
