@@ -12,6 +12,16 @@ class ToolEventSummary:
     tool_notes: list[str]
 
 
+def parse_approval_decision(payload: dict) -> tuple[str, str]:
+    event_id = str(payload.get("eventId", "")).strip()
+    decision = str(payload.get("decision", "")).strip()
+    if not event_id:
+        raise ValueError("eventId is required")
+    if decision not in ("approved", "denied"):
+        raise ValueError("decision must be approved or denied")
+    return event_id, decision
+
+
 def summarize_api_tool_events(
     events: list[dict],
     *,

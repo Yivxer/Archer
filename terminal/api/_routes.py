@@ -2487,12 +2487,8 @@ def _run_hugo_deploy_followup(*, title: str, deploy_args: dict) -> tuple[str, st
 
 
 def _tool_approval(payload: dict) -> dict:
-    event_id = str(payload.get("eventId", "")).strip()
-    decision = str(payload.get("decision", "")).strip()
-    if not event_id:
-        raise ValueError("eventId is required")
-    if decision not in ("approved", "denied"):
-        raise ValueError("decision must be approved or denied")
+    from terminal.api.tool_stage import parse_approval_decision
+    event_id, decision = parse_approval_decision(payload)
 
     cached_result = get_tool_result(event_id)
     if cached_result:
