@@ -26,6 +26,7 @@ from terminal.api.turn_context import (
     clean_memory_mode as _clean_memory_mode,
     clean_obsidian_mode as _clean_obsidian_mode,
 )
+from terminal.api.context_assembly import assemble_memory_context
 from terminal.api.turn_pipeline import (
     assemble_model_messages,
     classify_turn,
@@ -2295,7 +2296,6 @@ def _iter_chat_chunks(
     file_refs: list[dict] | None = None,
     runtime_context=None,
 ):
-    from core.context import augment_retrieval_query
     from core.llm import stream_chat
 
     classified_turn = classify_turn(messages)
@@ -2438,68 +2438,19 @@ def _iter_chat_chunks(
                 "expertLabel": str(_expert.get("label", "")),
             },
         }, trace_id)
-    if memory_mode == "off":
-        yield _tool_event(
-            "memory-retrieve", "memory.retrieve", "complete", "low",
-            "记忆上下文已关闭", "mode: off, injected: False",
-        )
-    elif memory_mode == "conservative" and not intent_info.get("needs_memory"):
-        yield _tool_event(
-            "memory-retrieve", "memory.retrieve", "complete", "low",
-            "保守模式：本轮未触发记忆检索",
-            f"mode: {memory_mode}, intent: {intent}, needs_memory: False",
-        )
-    else:
-        limit = context_limits.retrieve_total
-        yield _tool_event(
-            "memory-retrieve", "memory.retrieve", "running", "low",
-            "检索与当前输入相关的本地记忆",
-            f"mode: {memory_mode}, scope: local memory, limit: {limit}",
-        )
-        try:
-            from core.experts import expert_memory_tags
-            from memory.retrieve import for_context, format_for_prompt
-            retrieval_kwargs = {
-                "limit": limit,
-                "intent": intent,
-                "tag_hints": expert_memory_tags(_expert) or None,
-            }
-            try:
-                core, related = for_context(
-                    augment_retrieval_query(query, prior_history),
-                    **retrieval_kwargs,
-                )
-            except TypeError as exc:
-                if "tag_hints" not in str(exc):
-                    raise
-                retrieval_kwargs.pop("tag_hints", None)
-                core, related = for_context(
-                    augment_retrieval_query(query, prior_history),
-                    **retrieval_kwargs,
-                )
-            memory_context = format_for_prompt(core, related)
-            if memory_context:
-                enriched_messages = [
-                    {
-                        "role": "system",
-                        "content": (
-                            "以下是 Archer 本地记忆检索结果。只在明显相关时使用；"
-                            "不要主动逐条展示记忆内容，也不要声称已经展示全部记忆。\n\n"
-                            f"{memory_context}"
-                        ),
-                    },
-                    *enriched_messages,
-                ]
-            yield _tool_event(
-                "memory-retrieve", "memory.retrieve", "complete", "low",
-                "已完成本地记忆检索",
-                f"mode: {memory_mode}, core: {len(core)}, related: {len(related)}, injected: {bool(memory_context)}",
-            )
-        except Exception as exc:
-            yield _tool_event(
-                "memory-retrieve", "memory.retrieve", "blocked", "low",
-                "本地记忆检索失败，已跳过", str(exc)[:240],
-            )
+    memory_result = assemble_memory_context(
+        enriched_messages,
+        query=query,
+        prior_history=prior_history,
+        intent=intent,
+        needs_memory=bool(intent_info.get("needs_memory")),
+        memory_mode=memory_mode,
+        retrieve_limit=context_limits.retrieve_total,
+        expert=_expert,
+        event_factory=_tool_event,
+    )
+    enriched_messages = memory_result.messages
+    yield from memory_result.events
 
     if obsidian_mode == "off":
         yield _tool_event(
