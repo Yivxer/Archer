@@ -23,6 +23,36 @@ class ApprovalExecution:
     raw_result: dict | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class ApprovalPreparation:
+    draft: dict | None
+    fingerprint: str = ""
+    reused_response: dict | None = None
+
+
+def prepare_approval_draft(
+    *, event_id: str, decision: str, draft: dict | None,
+    idempotent_skills: set[str] | frozenset[str],
+    fingerprint_for: Callable[[str, dict], str],
+    get_fingerprint_result: Callable[[str], dict | None],
+    permission_for: Callable[[str, dict], str],
+) -> ApprovalPreparation:
+    if not draft:
+        return ApprovalPreparation(None)
+    skill_name = str(draft.get("skillName") or "")
+    if draft.get("kind") != "tool_request" or skill_name not in idempotent_skills:
+        return ApprovalPreparation(draft)
+    args = draft.get("args") if isinstance(draft.get("args"), dict) else {}
+    fingerprint = fingerprint_for(skill_name, args)
+    if decision != "approved":
+        return ApprovalPreparation(draft, fingerprint)
+    reused = reuse_fingerprint_approval(
+        event_id, fingerprint, get_fingerprint_result(fingerprint),
+        permission_level=permission_for(skill_name, args),
+    )
+    return ApprovalPreparation(draft, fingerprint, reused)
+
+
 def parse_approval_decision(payload: dict) -> tuple[str, str]:
     event_id = str(payload.get("eventId", "")).strip()
     decision = str(payload.get("decision", "")).strip()

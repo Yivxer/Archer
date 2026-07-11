@@ -1,6 +1,6 @@
 import pytest
 
-from terminal.api.tool_stage import ApprovalExecution, apply_approval_followup, build_approval_response, build_denied_response, execute_approved_draft, persist_approval_response, reuse_fingerprint_approval, parse_approval_decision, reuse_cached_approval, summarize_api_tool_events
+from terminal.api.tool_stage import ApprovalExecution, apply_approval_followup, build_approval_response, build_denied_response, execute_approved_draft, persist_approval_response, prepare_approval_draft, reuse_fingerprint_approval, parse_approval_decision, reuse_cached_approval, summarize_api_tool_events
 
 
 def test_parse_approval_decision_accepts_only_explicit_choices():
@@ -55,6 +55,12 @@ def test_hugo_followup_uses_created_filename():
     )
     assert calls == [{"title": "Post", "deploy_args": {"action": "deploy", "filename": "post.md"}}]
     assert "验证单页可访问" in result.message
+
+
+def test_prepare_approval_reuses_idempotent_fingerprint():
+    prepared = prepare_approval_draft(event_id="new", decision="approved", draft={"kind": "tool_request", "skillName": "write", "args": {"path": "a"}}, idempotent_skills={"write"}, fingerprint_for=lambda *_: "fp", get_fingerprint_result=lambda _: {"executed": True}, permission_for=lambda *_: "write")
+    assert prepared.fingerprint == "fp"
+    assert prepared.reused_response["eventId"] == "new"
 
 
 def test_tool_event_summary_distinguishes_execution_from_approval():
