@@ -2487,7 +2487,7 @@ def _run_hugo_deploy_followup(*, title: str, deploy_args: dict) -> tuple[str, st
 
 
 def _tool_approval(payload: dict) -> dict:
-    from terminal.api.tool_stage import build_denied_response, parse_approval_decision, reuse_cached_approval, reuse_fingerprint_approval
+    from terminal.api.tool_stage import build_denied_response, parse_approval_decision, reuse_cached_approval
     event_id, decision = parse_approval_decision(payload)
 
     cached_result = reuse_cached_approval(event_id, get_tool_result)
@@ -2512,30 +2512,21 @@ def _tool_approval(payload: dict) -> dict:
         )
     if draft:
         pop_tool_draft(event_id)
-        request_fingerprint = ""
-        if draft.get("kind") == "tool_request" and draft.get("skillName") in IDEMPOTENT_TOOL_SKILLS:
-            request_fingerprint = tool_request_fingerprint(
-                str(draft.get("skillName", "")),
-                draft.get("args") if isinstance(draft.get("args"), dict) else {},
-            )
-            if decision == "approved":
-                cached_by_fingerprint = get_tool_fingerprint_result(request_fingerprint)
-                if cached_by_fingerprint:
-                    cached_by_fingerprint = reuse_fingerprint_approval(
-                        event_id, request_fingerprint, cached_by_fingerprint,
-                        permission_level=permission_level_for_tool(
-                        str(draft.get("skillName", "")),
-                        draft.get("args") if isinstance(draft.get("args"), dict) else {},
-                        ),
-                    )
-                    record_tool_approval_audit(
-                        event_id=event_id,
-                        decision=decision,
-                        draft=draft,
-                        response=cached_by_fingerprint,
-                    )
-                    set_tool_result(event_id, cached_by_fingerprint)
-                    return cached_by_fingerprint
+        from terminal.api.tool_stage import prepare_approval_draft
+        prepared = prepare_approval_draft(
+            event_id=event_id,
+            decision=decision,
+            draft=draft,
+            idempotent_skills=IDEMPOTENT_TOOL_SKILLS,
+            fingerprint_for=tool_request_fingerprint,
+            get_fingerprint_result=get_tool_fingerprint_result,
+            permission_for=permission_level_for_tool,
+        )
+        request_fingerprint = prepared.fingerprint
+        if prepared.reused_response:
+            record_tool_approval_audit(event_id=event_id, decision=decision, draft=draft, response=prepared.reused_response)
+            set_tool_result(event_id, prepared.reused_response)
+            return prepared.reused_response
         executed = False
         result_output = ""
         work_receipt = None
