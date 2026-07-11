@@ -30,6 +30,18 @@ def reuse_cached_approval(event_id: str, get_result: Callable[[str], dict | None
     return cached_result
 
 
+def reuse_fingerprint_approval(event_id: str, fingerprint: str, cached: dict | None, *, permission_level: str) -> dict | None:
+    if not cached:
+        return None
+    response = dict(cached)
+    response.update({"eventId": event_id, "reused": True, "fingerprint": fingerprint, "idempotencyReason": "same_fingerprint", "permissionLevel": permission_level})
+    return response
+
+
+def build_denied_response(event_id: str) -> dict:
+    return {"ok": True, "eventId": event_id, "decision": "denied", "executed": False, "output": "", "message": "已取消，未执行。"}
+
+
 def summarize_api_tool_events(
     events: list[dict],
     *,

@@ -1,6 +1,6 @@
 import pytest
 
-from terminal.api.tool_stage import parse_approval_decision, reuse_cached_approval, summarize_api_tool_events
+from terminal.api.tool_stage import build_denied_response, reuse_fingerprint_approval, parse_approval_decision, reuse_cached_approval, summarize_api_tool_events
 
 
 def test_parse_approval_decision_accepts_only_explicit_choices():
@@ -17,6 +17,17 @@ def test_reuse_cached_approval_marks_result_without_execution():
         "reused": True,
     }
     assert reuse_cached_approval("missing", lambda event_id: None) is None
+
+
+def test_denied_response_is_always_zero_side_effect():
+    assert build_denied_response("e1") == {"ok": True, "eventId": "e1", "decision": "denied", "executed": False, "output": "", "message": "已取消，未执行。"}
+
+
+def test_fingerprint_reuse_rebinds_event_without_execution():
+    result = reuse_fingerprint_approval("new", "fp", {"ok": True, "executed": True}, permission_level="write")
+    assert result["eventId"] == "new"
+    assert result["reused"] is True
+    assert result["idempotencyReason"] == "same_fingerprint"
 
 
 def test_tool_event_summary_distinguishes_execution_from_approval():

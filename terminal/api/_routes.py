@@ -2487,7 +2487,7 @@ def _run_hugo_deploy_followup(*, title: str, deploy_args: dict) -> tuple[str, st
 
 
 def _tool_approval(payload: dict) -> dict:
-    from terminal.api.tool_stage import parse_approval_decision, reuse_cached_approval
+    from terminal.api.tool_stage import build_denied_response, parse_approval_decision, reuse_cached_approval, reuse_fingerprint_approval
     event_id, decision = parse_approval_decision(payload)
 
     cached_result = reuse_cached_approval(event_id, get_tool_result)
@@ -2521,13 +2521,12 @@ def _tool_approval(payload: dict) -> dict:
             if decision == "approved":
                 cached_by_fingerprint = get_tool_fingerprint_result(request_fingerprint)
                 if cached_by_fingerprint:
-                    cached_by_fingerprint["eventId"] = event_id
-                    cached_by_fingerprint["reused"] = True
-                    cached_by_fingerprint["fingerprint"] = request_fingerprint
-                    cached_by_fingerprint["idempotencyReason"] = "same_fingerprint"
-                    cached_by_fingerprint["permissionLevel"] = permission_level_for_tool(
+                    cached_by_fingerprint = reuse_fingerprint_approval(
+                        event_id, request_fingerprint, cached_by_fingerprint,
+                        permission_level=permission_level_for_tool(
                         str(draft.get("skillName", "")),
                         draft.get("args") if isinstance(draft.get("args"), dict) else {},
+                        ),
                     )
                     record_tool_approval_audit(
                         event_id=event_id,
@@ -2622,7 +2621,10 @@ def _tool_approval(payload: dict) -> dict:
                 executed = True
                 message = "github operation executed"
         else:
-            message = "已取消，未执行。"
+            response = build_denied_response(event_id)
+            record_tool_approval_audit(event_id=event_id, decision=decision, draft=draft, response=response)
+            set_tool_result(event_id, response)
+            return response
         response = {
             "ok": True, "eventId": event_id, "decision": decision,
             "executed": executed, "output": result_output, "message": message,
