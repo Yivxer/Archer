@@ -18,6 +18,56 @@ class ContextAssemblyResult:
     events: list[dict]
 
 
+def assemble_vault_focus(
+    messages: list[dict],
+    *,
+    obsidian_mode: str,
+    event_factory: Callable[..., dict],
+    load_focus: Callable | None = None,
+    include_tool_receipt: bool,
+) -> ContextAssemblyResult:
+    if obsidian_mode == "off":
+        return ContextAssemblyResult(messages, [])
+    if load_focus is None:
+        from knowledge.vault_sensor import build_focus_context
+
+        load_focus = build_focus_context
+    try:
+        vault_context, vault_source = load_focus()
+        if not vault_context or not vault_source:
+            return ContextAssemblyResult(messages, [])
+        events = [{
+            "type": "vault_sources",
+            "mode": obsidian_mode,
+            "current_focus": {
+                "title": vault_source.get("title", ""),
+                "path": vault_source.get("path", ""),
+            },
+            "sources": [vault_source],
+        }]
+        if include_tool_receipt:
+            events.append(event_factory(
+                "vault-context", "vault.context", "complete", "low",
+                "已注入当前 Obsidian 聚焦笔记",
+                f"path: {vault_source.get('path', '')}, mode: {obsidian_mode}",
+                draft={
+                    "path": vault_source.get("path", ""),
+                    "title": vault_source.get("title", ""),
+                },
+            ))
+        return ContextAssemblyResult(
+            [{"role": "system", "content": vault_context}, *messages],
+            events,
+        )
+    except Exception as exc:
+        if not include_tool_receipt:
+            return ContextAssemblyResult(messages, [])
+        return ContextAssemblyResult(messages, [event_factory(
+            "vault-context", "vault.context", "blocked", "low",
+            "Obsidian 聚焦上下文注入失败，已跳过", str(exc)[:240],
+        )])
+
+
 def file_reference_context(
     file_refs: list[dict],
     *,

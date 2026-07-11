@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from terminal.api.context_assembly import (
     assemble_memory_context,
     assemble_obsidian_context,
+    assemble_vault_focus,
     file_reference_context,
 )
 
@@ -143,3 +144,33 @@ def test_file_reference_context_injects_preloaded_text_without_disk_read(tmp_pat
         "running",
         "complete",
     ]
+
+
+def test_vault_focus_injects_source_and_optional_tool_receipt():
+    result = assemble_vault_focus(
+        [{"role": "user", "content": "hello"}],
+        obsidian_mode="summary",
+        event_factory=_event_factory,
+        load_focus=lambda: (
+            "focus body",
+            {"title": "Today", "path": "Daily/Today.md"},
+        ),
+        include_tool_receipt=True,
+    )
+
+    assert result.messages[0] == {"role": "system", "content": "focus body"}
+    assert result.events[0]["type"] == "vault_sources"
+    assert result.events[1]["toolEvent"]["name"] == "vault.context"
+
+
+def test_vault_focus_simple_mode_swallows_sensor_failure():
+    result = assemble_vault_focus(
+        [{"role": "user", "content": "hello"}],
+        obsidian_mode="summary",
+        event_factory=_event_factory,
+        load_focus=lambda: (_ for _ in ()).throw(RuntimeError("offline")),
+        include_tool_receipt=False,
+    )
+
+    assert result.messages == [{"role": "user", "content": "hello"}]
+    assert result.events == []

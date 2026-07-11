@@ -29,6 +29,7 @@ from terminal.api.turn_context import (
 from terminal.api.context_assembly import (
     assemble_memory_context,
     assemble_obsidian_context,
+    assemble_vault_focus,
     file_reference_context,
 )
 from terminal.api.turn_pipeline import (
@@ -2060,27 +2061,14 @@ def _iter_simple_chat_path(
         yield event
     if file_context:
         enriched_messages = [{"role": "system", "content": file_context}, *enriched_messages]
-    # vault focus（simple path 仍注入，因为它是被动的当前聚焦笔记，开销小）
-    if obsidian_mode != "off":
-        try:
-            from knowledge.vault_sensor import build_focus_context
-            vault_context, vault_source = build_focus_context()
-            if vault_context and vault_source:
-                enriched_messages = [
-                    {"role": "system", "content": vault_context},
-                    *enriched_messages,
-                ]
-                yield {
-                    "type": "vault_sources",
-                    "mode": obsidian_mode,
-                    "current_focus": {
-                        "title": vault_source.get("title", ""),
-                        "path": vault_source.get("path", ""),
-                    },
-                    "sources": [vault_source],
-                }
-        except Exception:
-            pass  # vault 上下文失败不影响 simple path
+    vault_result = assemble_vault_focus(
+        enriched_messages,
+        obsidian_mode=obsidian_mode,
+        event_factory=_tool_event,
+        include_tool_receipt=False,
+    )
+    enriched_messages = vault_result.messages
+    yield from vault_result.events
 
     # 构建 system prompt（简化版：core_persona + stance + expert_block，无 task_plan）
     try:
@@ -2285,38 +2273,15 @@ def _iter_chat_chunks(
             {"role": "system", "content": file_context},
             *enriched_messages,
         ]
-    if obsidian_mode != "off":
-        try:
-            from knowledge.vault_sensor import build_focus_context
-            vault_context, vault_source = build_focus_context()
-            if vault_context and vault_source:
-                enriched_messages = [
-                    {"role": "system", "content": vault_context},
-                    *enriched_messages,
-                ]
-                yield {
-                    "type": "vault_sources",
-                    "mode": obsidian_mode,
-                    "current_focus": {
-                        "title": vault_source.get("title", ""),
-                        "path": vault_source.get("path", ""),
-                    },
-                    "sources": [vault_source],
-                }
-                yield _with_trace_id(_tool_event(
-                    "vault-context", "vault.context", "complete", "low",
-                    "已注入当前 Obsidian 聚焦笔记",
-                    f"path: {vault_source.get('path', '')}, mode: {obsidian_mode}",
-                    draft={
-                        "path": vault_source.get("path", ""),
-                        "title": vault_source.get("title", ""),
-                    },
-                ), trace_id)
-        except Exception as exc:
-            yield _with_trace_id(_tool_event(
-                "vault-context", "vault.context", "blocked", "low",
-                "Obsidian 聚焦上下文注入失败，已跳过", str(exc)[:240],
-            ), trace_id)
+    vault_result = assemble_vault_focus(
+        enriched_messages,
+        obsidian_mode=obsidian_mode,
+        event_factory=_tool_event,
+        include_tool_receipt=True,
+    )
+    enriched_messages = vault_result.messages
+    for event in vault_result.events:
+        yield _with_trace_id(event, trace_id) if event.get("toolEvent") else event
     if orchestration_event:
         yield _with_trace_id({"type": "orchestrationEvent", "orchestrationEvent": orchestration_event}, trace_id)
     if plan_event:
