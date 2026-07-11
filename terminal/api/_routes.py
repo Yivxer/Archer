@@ -2494,22 +2494,27 @@ def _tool_approval(payload: dict) -> dict:
     if cached_result:
         return cached_result
 
-    draft = get_tool_draft(event_id)
-    if not draft:
-        draft = _tool_draft_from_approval_fallback(event_id, payload.get("draftFallback"))
-    if not draft and event_id.startswith("hugo-blog-deploy-"):
+    def build_hugo_deploy_draft(fallback_event_id: str) -> dict:
         from core.api_tool_service import make_tool_request
         from skills.loader import load_skills
-        draft = make_tool_request(
+        return make_tool_request(
             "hugo_blog",
             {"action": "deploy"},
             load_skills(),
             cfg=_load_config(),
-            event_id=event_id,
+            event_id=fallback_event_id,
             display_name="hugo_blog",
             extra={"action": "deploy", "title": "部署枫弋札记"},
             force_approval=False,
         )
+    from terminal.api.tool_stage import resolve_approval_draft
+    draft = resolve_approval_draft(
+        event_id,
+        payload.get("draftFallback"),
+        get_draft=get_tool_draft,
+        build_fallback=_tool_draft_from_approval_fallback,
+        build_hugo_deploy=build_hugo_deploy_draft,
+    )
     if draft:
         pop_tool_draft(event_id)
         from terminal.api.tool_stage import prepare_approval_draft

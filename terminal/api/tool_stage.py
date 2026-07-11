@@ -30,6 +30,22 @@ class ApprovalPreparation:
     reused_response: dict | None = None
 
 
+def resolve_approval_draft(
+    event_id: str,
+    fallback: object,
+    *,
+    get_draft: Callable[[str], dict | None],
+    build_fallback: Callable[[str, object], dict | None],
+    build_hugo_deploy: Callable[[str], dict],
+) -> dict | None:
+    draft = get_draft(event_id) or build_fallback(event_id, fallback)
+    if draft:
+        return draft
+    if event_id.startswith("hugo-blog-deploy-"):
+        return build_hugo_deploy(event_id)
+    return None
+
+
 def prepare_approval_draft(
     *, event_id: str, decision: str, draft: dict | None,
     idempotent_skills: set[str] | frozenset[str],
