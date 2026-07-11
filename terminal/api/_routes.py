@@ -2557,7 +2557,17 @@ def _tool_approval(payload: dict) -> dict:
             message = execution.message
             work_receipt = execution.work_receipt
             result = execution.raw_result or {}
-            if draft.get("kind") == "tool_request":
+            from terminal.api.tool_stage import apply_approval_followup
+            execution = apply_approval_followup(
+                draft,
+                execution,
+                deploy=_run_hugo_deploy_followup,
+            )
+            executed = execution.executed
+            result_output = execution.output
+            message = execution.message
+            work_receipt = execution.work_receipt
+            if False and draft.get("kind") == "tool_request":  # legacy branch removed after parity verification
                 if executed and draft.get("skillName") == "hugo_blog":
                     args = draft.get("args", {})
                     action = str(args.get("action", ""))
