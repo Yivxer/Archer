@@ -2512,6 +2512,23 @@ def _run_approved_draft(draft: dict):
     return apply_approval_followup(draft, execution, deploy=_run_hugo_deploy_followup)
 
 
+def _finalize_approval(event_id: str, decision: str, draft: dict, execution, fingerprint: str) -> dict:
+    from terminal.api.tool_stage import build_approval_response, persist_approval_response
+    permission_level = ""
+    if draft.get("kind") == "tool_request":
+        args = draft.get("args") if isinstance(draft.get("args"), dict) else {}
+        permission_level = permission_level_for_tool(str(draft.get("skillName", "")), args)
+    response = build_approval_response(
+        event_id=event_id, decision=decision, execution=execution, draft=draft,
+        fingerprint=fingerprint, permission_level=permission_level,
+    )
+    return persist_approval_response(
+        response, event_id=event_id, decision=decision, draft=draft,
+        fingerprint=fingerprint, record_audit=record_tool_approval_audit,
+        set_event_result=set_tool_result, set_fingerprint_result=set_tool_fingerprint_result,
+    )
+
+
 def _tool_approval(payload: dict) -> dict:
     from terminal.api.tool_stage import build_denied_response, parse_approval_decision, reuse_cached_approval
     event_id, decision = parse_approval_decision(payload)
@@ -2559,30 +2576,11 @@ def _tool_approval(payload: dict) -> dict:
             record_tool_approval_audit(event_id=event_id, decision=decision, draft=draft, response=response)
             set_tool_result(event_id, response)
             return response
-        from terminal.api.tool_stage import ApprovalExecution, build_approval_response, persist_approval_response
-        permission_level = ""
-        if draft.get("kind") == "tool_request":
-            permission_level = permission_level_for_tool(
-                str(draft.get("skillName", "")),
-                draft.get("args") if isinstance(draft.get("args"), dict) else {},
-            )
-        response = build_approval_response(
-            event_id=event_id,
-            decision=decision,
-            execution=ApprovalExecution(executed, result_output, message, work_receipt),
-            draft=draft,
-            fingerprint=request_fingerprint,
-            permission_level=permission_level,
-        )
-        return persist_approval_response(
-            response,
-            event_id=event_id,
-            decision=decision,
-            draft=draft,
-            fingerprint=request_fingerprint,
-            record_audit=record_tool_approval_audit,
-            set_event_result=set_tool_result,
-            set_fingerprint_result=set_tool_fingerprint_result,
+        from terminal.api.tool_stage import ApprovalExecution
+        return _finalize_approval(
+            event_id, decision, draft,
+            ApprovalExecution(executed, result_output, message, work_receipt),
+            request_fingerprint,
         )
 
     return {
