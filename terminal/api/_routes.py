@@ -2540,18 +2540,24 @@ def _tool_approval(payload: dict) -> dict:
         result_output = ""
         work_receipt = None
         if decision == "approved":
+            from core.api_tool_service import execute_tool_request
+            from skills.loader import load_skills
+            from terminal.api.tool_stage import execute_approved_draft
+            execution = execute_approved_draft(
+                draft,
+                execute_tool_request=lambda request: execute_tool_request(
+                    request, load_skills(), cfg=_load_config()
+                ),
+                append_obsidian=_append_obsidian_draft,
+                execute_shell=_execute_shell_command,
+                execute_github=_execute_github_operation,
+            )
+            executed = execution.executed
+            result_output = execution.output
+            message = execution.message
+            work_receipt = execution.work_receipt
+            result = execution.raw_result or {}
             if draft.get("kind") == "tool_request":
-                from core.api_tool_service import execute_tool_request
-                from skills.loader import load_skills
-                result = execute_tool_request(draft, load_skills(), cfg=_load_config())
-                executed = bool(result.get("executed"))
-                result_output = str(result.get("output", ""))
-                maybe_receipt = result.get("workReceipt")
-                if isinstance(maybe_receipt, dict):
-                    work_receipt = maybe_receipt
-                message = result.get("summary") or (
-                    "tool executed" if executed else "tool execution failed"
-                )
                 if executed and draft.get("skillName") == "hugo_blog":
                     args = draft.get("args", {})
                     action = str(args.get("action", ""))
@@ -2607,19 +2613,6 @@ def _tool_approval(payload: dict) -> dict:
                         except Exception as deploy_exc:
                             result_output += f"\n\n部署失败：{deploy_exc}"
                             message += " | 部署失败"
-            elif "path" in draft:  # legacy obsidian_write draft
-                result_output = _append_obsidian_draft(draft)
-                executed = True
-                message = "draft approved and appended to Obsidian"
-            elif "command" in draft and "action" not in draft:  # shell.execute draft
-                result = _execute_shell_command(draft["command"], draft.get("timeout", 30))
-                executed = result["ok"]
-                result_output = result["output"]
-                message = "shell command executed" if result["ok"] else "shell command failed"
-            elif "action" in draft:  # github draft
-                result_output = _execute_github_operation(draft)
-                executed = True
-                message = "github operation executed"
         else:
             response = build_denied_response(event_id)
             record_tool_approval_audit(event_id=event_id, decision=decision, draft=draft, response=response)
