@@ -26,7 +26,7 @@ from terminal.api.turn_context import (
     clean_memory_mode as _clean_memory_mode,
     clean_obsidian_mode as _clean_obsidian_mode,
 )
-from terminal.api.turn_pipeline import classify_turn
+from terminal.api.turn_pipeline import classify_turn, orchestrate_turn
 
 logger = logging.getLogger("archer_api")
 MODEL_STREAM_HEARTBEAT_SECONDS = 8.0
@@ -1833,27 +1833,6 @@ def _latest_user_text(messages: list[dict]) -> str:
     return ""
 
 
-def _plan_event_from_task_plan(plan, query: str = "") -> dict | None:
-    if plan is None:
-        return None
-    return {
-        "id": f"plan-{uuid4().hex[:8]}",
-        "title": plan.task_title,
-        "status": "proposed",
-        "detail": "先按计划处理；涉及写入、保存或发布的步骤需要用户确认。",
-        "prompt": query.strip(),
-        "steps": [
-            {
-                "id": step.id,
-                "action": step.action,
-                "tool": step.tool,
-                "requiresApproval": step.requires_approval,
-            }
-            for step in plan.steps
-        ],
-    }
-
-
 MAX_FILE_REF_BYTES = 1_000_000
 
 
@@ -2395,40 +2374,16 @@ def _iter_chat_chunks(
             return
     except Exception:
         pass  # simple path 判定异常 → 回退到 full path
-    try:
-        from core.orchestrator import (
-            build_task_plan,
-            format_matched_skills_for_prompt,
-            format_mode_constraints_for_prompt,
-            format_task_plan_for_prompt,
-            orchestrate_user_input,
-            orchestration_to_event_dict,
-        )
-        try:
-            orchestration = orchestrate_user_input(
-                query,
-                history=prior_history,
-                soul_insight=_soul_insight_for_orchestration(),
-            )
-        except TypeError as exc:
-            if "soul_insight" not in str(exc):
-                raise
-            orchestration = orchestrate_user_input(query, history=prior_history)
-        memory_scope = orchestration.memory_scope
-        task_plan = build_task_plan(query, orchestration)
-        task_plan_block = format_task_plan_for_prompt(task_plan)
-        mode_constraint_block = format_mode_constraints_for_prompt(orchestration)
-        matched_skills_block = format_matched_skills_for_prompt(orchestration.matched_skills)
-        plan_event = _plan_event_from_task_plan(task_plan, query)
-        orchestration_event = orchestration_to_event_dict(orchestration)
-    except Exception:
-        orchestration = None
-        memory_scope = None
-        task_plan_block = ""
-        mode_constraint_block = ""
-        matched_skills_block = ""
-        plan_event = None
-        orchestration_event = None
+    planned_turn = orchestrate_turn(
+        query, prior_history, _soul_insight_for_orchestration()
+    )
+    orchestration = planned_turn.orchestration
+    memory_scope = planned_turn.memory_scope
+    task_plan_block = planned_turn.task_plan_block
+    mode_constraint_block = planned_turn.mode_constraint_block
+    matched_skills_block = planned_turn.matched_skills_block
+    plan_event = planned_turn.plan_event
+    orchestration_event = planned_turn.orchestration_event
     intent = intent_info["intent"]
     classifier_needs_tools = bool(intent_info.get("needs_tools"))
     needs_tools = bool(orchestration.needs_tools) if orchestration is not None else classifier_needs_tools
