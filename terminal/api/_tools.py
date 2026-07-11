@@ -30,6 +30,7 @@ from terminal.api.context_assembly import (
     assemble_memory_context,
     assemble_obsidian_context,
     assemble_vault_focus,
+    assemble_web_context,
     file_reference_context,
 )
 from terminal.api.turn_pipeline import (
@@ -2339,57 +2340,16 @@ def _iter_chat_chunks(
     enriched_messages = obsidian_result.messages
     yield from obsidian_result.events
 
-    # ── Web Search 自动预检：当 skill_router 命中 web_search 时执行搜索并注入上下文 ──
     _pre_selected = _selected_tools
-    if "web_search" in _pre_selected:
-        yield _tool_event(
-            "web-search", "web_search", "running", "low",
-            "搜索互联网", f"query: {query[:80]}",
-        )
-        try:
-            from skills.web_search import run as web_search_run
-            search_result = web_search_run({"query": query[:200], "max_results": 5})
-            search_text = str(search_result)[:800]
-            yield _tool_event(
-                "web-search", "web_search", "complete", "low",
-                "搜索完成", search_text,
-            )
-            if search_result and not str(search_result).startswith("未找到"):
-                enriched_messages = [
-                    {"role": "system", "content": f"互联网搜索结果（{query[:80]}）：\n{search_result}"},
-                    *enriched_messages,
-                ]
-        except Exception as exc:
-            yield _tool_event(
-                "web-search", "web_search", "blocked", "low",
-                "搜索失败", str(exc)[:240],
-            )
-    if "web_fetch" in _pre_selected:
-        url_match = re.search(r'https?://[^\s）)>"\'<\]]+', query)
-        if url_match:
-            target_url = url_match.group(0).rstrip('.。，,;；')
-            yield _with_trace_id(_tool_event(
-                "web-fetch", "web_fetch", "running", "low",
-                "抓取网页", target_url[:100],
-            ), trace_id)
-            try:
-                from skills.web_fetch import run as web_fetch_run
-                fetch_result = web_fetch_run({"url": target_url, "max_chars": 4000})
-                fetch_text = str(fetch_result)[:800]
-                yield _with_trace_id(_tool_event(
-                    "web-fetch", "web_fetch", "complete", "low",
-                    "网页抓取完成", fetch_text,
-                ), trace_id)
-                if fetch_result:
-                    enriched_messages = [
-                        {"role": "system", "content": f"网页内容（{target_url}）：\n{fetch_result}"},
-                        *enriched_messages,
-                    ]
-            except Exception as exc:
-                yield _with_trace_id(_tool_event(
-                    "web-fetch", "web_fetch", "blocked", "low",
-                    "抓取失败", str(exc)[:240],
-                ), trace_id)
+    web_result = assemble_web_context(
+        enriched_messages,
+        query=query,
+        selected_tools=_pre_selected,
+        event_factory=_tool_event,
+        trace_event=lambda event: _with_trace_id(event, trace_id),
+    )
+    enriched_messages = web_result.messages
+    yield from web_result.events
 
     # ── 枫弋札记：附件/路径直发 或 LLM 工具链，自动执行，不弹确认卡
     if _wants_hugo_publish(query, file_refs) and "hugo_blog" in _selected_tools:

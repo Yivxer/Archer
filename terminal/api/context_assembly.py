@@ -68,6 +68,75 @@ def assemble_vault_focus(
         )])
 
 
+def assemble_web_context(
+    messages: list[dict],
+    *,
+    query: str,
+    selected_tools,
+    event_factory: Callable[..., dict],
+    trace_event: Callable[[dict], dict],
+    search: Callable | None = None,
+    fetch: Callable | None = None,
+) -> ContextAssemblyResult:
+    enriched = messages
+    events: list[dict] = []
+    if "web_search" in selected_tools:
+        events.append(event_factory(
+            "web-search", "web_search", "running", "low",
+            "搜索互联网", f"query: {query[:80]}",
+        ))
+        try:
+            if search is None:
+                from skills.web_search import run as web_search_run
+
+                search = web_search_run
+            search_result = search({"query": query[:200], "max_results": 5})
+            search_text = str(search_result)[:800]
+            events.append(event_factory(
+                "web-search", "web_search", "complete", "low",
+                "搜索完成", search_text,
+            ))
+            if search_result and not str(search_result).startswith("未找到"):
+                enriched = [{
+                    "role": "system",
+                    "content": f"互联网搜索结果（{query[:80]}）：\n{search_result}",
+                }, *enriched]
+        except Exception as exc:
+            events.append(event_factory(
+                "web-search", "web_search", "blocked", "low",
+                "搜索失败", str(exc)[:240],
+            ))
+    if "web_fetch" in selected_tools:
+        url_match = re.search(r'https?://[^\s）)>"\'<\]]+', query)
+        if url_match:
+            target_url = url_match.group(0).rstrip('.。，,;；')
+            events.append(trace_event(event_factory(
+                "web-fetch", "web_fetch", "running", "low",
+                "抓取网页", target_url[:100],
+            )))
+            try:
+                if fetch is None:
+                    from skills.web_fetch import run as web_fetch_run
+
+                    fetch = web_fetch_run
+                fetch_result = fetch({"url": target_url, "max_chars": 4000})
+                events.append(trace_event(event_factory(
+                    "web-fetch", "web_fetch", "complete", "low",
+                    "网页抓取完成", str(fetch_result)[:800],
+                )))
+                if fetch_result:
+                    enriched = [{
+                        "role": "system",
+                        "content": f"网页内容（{target_url}）：\n{fetch_result}",
+                    }, *enriched]
+            except Exception as exc:
+                events.append(trace_event(event_factory(
+                    "web-fetch", "web_fetch", "blocked", "low",
+                    "抓取失败", str(exc)[:240],
+                )))
+    return ContextAssemblyResult(enriched, events)
+
+
 def file_reference_context(
     file_refs: list[dict],
     *,

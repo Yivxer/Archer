@@ -6,6 +6,7 @@ from terminal.api.context_assembly import (
     assemble_memory_context,
     assemble_obsidian_context,
     assemble_vault_focus,
+    assemble_web_context,
     file_reference_context,
 )
 
@@ -174,3 +175,26 @@ def test_vault_focus_simple_mode_swallows_sensor_failure():
 
     assert result.messages == [{"role": "user", "content": "hello"}]
     assert result.events == []
+
+
+def test_web_context_injects_search_and_fetched_page():
+    result = assemble_web_context(
+        [{"role": "user", "content": "read https://example.com"}],
+        query="read https://example.com",
+        selected_tools={"web_search": {}, "web_fetch": {}},
+        event_factory=_event_factory,
+        trace_event=lambda event: {**event, "traced": True},
+        search=lambda _: "search result",
+        fetch=lambda _: "page body",
+    )
+
+    assert "page body" in result.messages[0]["content"]
+    assert "search result" in result.messages[1]["content"]
+    assert [event["toolEvent"]["status"] for event in result.events] == [
+        "running",
+        "complete",
+        "running",
+        "complete",
+    ]
+    assert result.events[2]["traced"] is True
+    assert result.events[3]["traced"] is True
