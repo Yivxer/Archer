@@ -2496,6 +2496,22 @@ def _build_hugo_approval_draft(event_id: str) -> dict:
     )
 
 
+def _run_approved_draft(draft: dict):
+    from core.api_tool_service import execute_tool_request
+    from skills.loader import load_skills
+    from terminal.api.tool_stage import apply_approval_followup, execute_approved_draft
+    execution = execute_approved_draft(
+        draft,
+        execute_tool_request=lambda request: execute_tool_request(
+            request, load_skills(), cfg=_load_config()
+        ),
+        append_obsidian=_append_obsidian_draft,
+        execute_shell=_execute_shell_command,
+        execute_github=_execute_github_operation,
+    )
+    return apply_approval_followup(draft, execution, deploy=_run_hugo_deploy_followup)
+
+
 def _tool_approval(payload: dict) -> dict:
     from terminal.api.tool_stage import build_denied_response, parse_approval_decision, reuse_cached_approval
     event_id, decision = parse_approval_decision(payload)
@@ -2533,29 +2549,7 @@ def _tool_approval(payload: dict) -> dict:
         result_output = ""
         work_receipt = None
         if decision == "approved":
-            from core.api_tool_service import execute_tool_request
-            from skills.loader import load_skills
-            from terminal.api.tool_stage import execute_approved_draft
-            execution = execute_approved_draft(
-                draft,
-                execute_tool_request=lambda request: execute_tool_request(
-                    request, load_skills(), cfg=_load_config()
-                ),
-                append_obsidian=_append_obsidian_draft,
-                execute_shell=_execute_shell_command,
-                execute_github=_execute_github_operation,
-            )
-            executed = execution.executed
-            result_output = execution.output
-            message = execution.message
-            work_receipt = execution.work_receipt
-            result = execution.raw_result or {}
-            from terminal.api.tool_stage import apply_approval_followup
-            execution = apply_approval_followup(
-                draft,
-                execution,
-                deploy=_run_hugo_deploy_followup,
-            )
+            execution = _run_approved_draft(draft)
             executed = execution.executed
             result_output = execution.output
             message = execution.message
