@@ -23,8 +23,6 @@ from terminal.api._config import (
     ALLOWED_DESKTOP_ORIGINS,
     PENDING_TOOL_DRAFTS,
     ROOT,
-    _clean_chat_messages,
-    _inject_thread_context,
 )
 from terminal.api._routes import (
     _append_session,
@@ -45,9 +43,6 @@ from terminal.api import _tools as _api_tools
 from terminal.api.contract import CONTRACT_VERSION, CONTRACT_VERSION_HEADER, versioned_dict
 from terminal.api._tools import (
     _bg_extract_api,
-    _clean_file_refs,
-    _clean_memory_mode,
-    _clean_obsidian_mode,
     _extract_github_args,
     _file_reference_context,
     _iter_chat_chunks,
@@ -56,6 +51,12 @@ from terminal.api._tools import (
     _select_api_skills,
     _should_trigger_github,
     _should_trigger_shell,
+)
+from terminal.api.turn_context import (
+    TurnContext,
+    clean_file_refs as _clean_file_refs,
+    clean_memory_mode as _clean_memory_mode,
+    clean_obsidian_mode as _clean_obsidian_mode,
 )
 
 
@@ -251,12 +252,12 @@ class Handler(BaseHTTPRequestHandler):
             if not isinstance(payload, dict):
                 raise ValueError("payload must be an object")
             if path == "/chat/stream":
-                messages = _inject_thread_context(_clean_chat_messages(payload.get("messages")), payload.get("threadContext"))
+                turn = TurnContext.from_payload(payload)
                 self._send_sse(
-                    messages,
-                    _clean_memory_mode(payload.get("memoryMode")),
-                    _clean_obsidian_mode(payload.get("obsidianMode")),
-                    _clean_file_refs(payload.get("fileRefs")),
+                    turn.messages,
+                    turn.memory_mode,
+                    turn.obsidian_mode,
+                    turn.file_refs,
                 )
                 return
             status, response = payload_post(path, payload)

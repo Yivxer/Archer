@@ -21,6 +21,11 @@ from terminal.api._config import (
     _clean_chat_messages,
     _load_config,
 )
+from terminal.api.turn_context import (
+    clean_file_refs as _clean_file_refs,
+    clean_memory_mode as _clean_memory_mode,
+    clean_obsidian_mode as _clean_obsidian_mode,
+)
 
 logger = logging.getLogger("archer_api")
 MODEL_STREAM_HEARTBEAT_SECONDS = 8.0
@@ -1848,34 +1853,6 @@ def _plan_event_from_task_plan(plan, query: str = "") -> dict | None:
     }
 
 
-def _clean_file_refs(raw: object) -> list[dict]:
-    if raw is None:
-        return []
-    if not isinstance(raw, list):
-        raise ValueError("fileRefs must be a list")
-    refs: list[dict] = []
-    for item in raw[:5]:
-        if not isinstance(item, dict):
-            continue
-        path = str(item.get("path", "")).strip()
-        if not path:
-            continue
-        name = str(item.get("name", "")).strip() or Path(path).name
-        size = item.get("size")
-        try:
-            clean_size = int(size) if size is not None else 0
-        except (TypeError, ValueError):
-            clean_size = 0
-        clean_ref = {"path": path, "name": name[:180], "size": max(0, clean_size)}
-        content = item.get("content")
-        if isinstance(content, str) and content:
-            clean_ref["content"] = content[:12000]
-            clean_ref["contentChars"] = len(clean_ref["content"])
-            clean_ref["truncated"] = bool(item.get("truncated"))
-        refs.append(clean_ref)
-    return refs
-
-
 MAX_FILE_REF_BYTES = 1_000_000
 
 
@@ -1983,22 +1960,6 @@ def _file_reference_context(
         + "\n\n---\n\n".join(sections),
         events,
     )
-
-
-# ---------------------------------------------------------------------------
-# Mode cleaners
-# ---------------------------------------------------------------------------
-
-def _clean_memory_mode(value: object) -> str:
-    if value in ("off", "conservative", "full"):
-        return str(value)
-    return "conservative"
-
-
-def _clean_obsidian_mode(value: object) -> str:
-    if value in ("off", "summary", "full"):
-        return str(value)
-    return "summary"
 
 
 # ---------------------------------------------------------------------------

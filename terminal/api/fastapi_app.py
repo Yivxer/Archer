@@ -20,7 +20,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.concurrency import run_in_threadpool
 from starlette.responses import Response
 
-from terminal.api._config import ALLOWED_DESKTOP_ORIGINS, ROOT, _clean_chat_messages, _inject_thread_context
+from terminal.api._config import ALLOWED_DESKTOP_ORIGINS, ROOT
 from terminal.api._routes import payload_get, payload_post
 from terminal.api._security import (
     MAX_CONTENT_LENGTH,
@@ -31,9 +31,6 @@ from terminal.api._security import (
 )
 from terminal.api._tools import (
     _bg_extract_api,
-    _clean_file_refs,
-    _clean_memory_mode,
-    _clean_obsidian_mode,
     _iter_chat_chunks,
 )
 from terminal.api.contract import (
@@ -42,6 +39,7 @@ from terminal.api.contract import (
     versioned_dict,
 )
 from core.runtime_context import RuntimeContext, create_runtime_context
+from terminal.api.turn_context import TurnContext
 
 logger = logging.getLogger("archer_api")
 
@@ -124,14 +122,12 @@ def _chat_stream_events(
     release_slot=None,
     runtime_context: RuntimeContext | None = None,
 ) -> Iterator[str]:
-    messages = _inject_thread_context(_clean_chat_messages(payload.get("messages")), payload.get("threadContext"))
-    memory_mode = _clean_memory_mode(payload.get("memoryMode"))
-    obsidian_mode = _clean_obsidian_mode(payload.get("obsidianMode"))
-    file_refs = _clean_file_refs(payload.get("fileRefs"))
+    turn = TurnContext.from_payload(payload)
+    messages = turn.messages
     reply_chunks: list[str] = []
     has_error = False
     chunk_iter = _iter_chat_chunks(
-        messages, memory_mode, obsidian_mode, file_refs, runtime_context
+        messages, turn.memory_mode, turn.obsidian_mode, turn.file_refs, runtime_context
     )
     try:
         try:
