@@ -36,7 +36,6 @@ import type {
 } from '../types'
 import { assertSupportedContractVersion, jobSnapshotToAgentEvent, pythonApprovalToAgentEvent, pythonStreamPayloadToAgentEvents } from '../../../agent'
 import type { AgentEvent, PythonStreamPayload } from '../../../agent'
-
 const BASE_URL = 'http://127.0.0.1:8765'
 const TOKEN_STORAGE_KEY = 'archer-desktop-api-token'
 const API_TIMEOUT_MS = 15_000
@@ -159,10 +158,8 @@ async function apiFetch(path: string, init: RequestInit = {}, auth = true, timeo
 
 export async function checkLocalApiReady(): Promise<boolean> {
   const response = await apiFetch('/ready', {}, false)
-  if (!response.ok) return false
-  const payload = await response.json() as { contractVersion?: unknown }
-  assertSupportedContractVersion(payload)
-  return true
+  if (response.ok) assertSupportedContractVersion(await response.json() as { contractVersion?: unknown })
+  return response.ok
 }
 
 async function getJson<T>(path: string): Promise<T> {
