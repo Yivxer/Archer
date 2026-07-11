@@ -41,6 +41,7 @@ from terminal.api.turn_pipeline import (
     plain_chat_message as _plain_chat_message,
     trim_model_messages as _trim_model_messages_for_context,
 )
+from terminal.api.tool_stage import summarize_api_tool_events
 
 logger = logging.getLogger("archer_api")
 MODEL_STREAM_HEARTBEAT_SECONDS = 8.0
@@ -2447,34 +2448,16 @@ def _iter_chat_chunks(
     for event in api_tool_events:
         yield _with_trace_id(event, trace_id)
 
-    direct_obsidian_writes: list[str] = []
-    tool_notes: list[str] = []
-    for event in api_tool_events:
-        tool_event = event.get("toolEvent", {}) if isinstance(event, dict) else {}
-        name = str(tool_event.get("name", ""))
-        draft = tool_event.get("draft", {}) if isinstance(tool_event.get("draft"), dict) else {}
-        if name == "obsidian_write" and tool_event.get("status") == "complete":
-            raw_path = draft.get('path') or '未指定'
-            try:
-                from skills.obsidian_write import _resolve_note_path
-                target_path = str(_resolve_note_path(raw_path))
-            except Exception:
-                target_path = str(raw_path)
-            direct_obsidian_writes.append(target_path)
-            tool_notes.append(f"已直接写入 Obsidian；目标路径：{target_path}。")
-        elif name == "hugo_blog" and tool_event.get("status") in ("waiting", "ready"):
-            tool_notes.append(
-                "hugo_blog 工具可用——可以在回复中自然撰写 Markdown 格式的博客文章。"
-                "客户端会在你回复完成后自动创建文章并直接部署到枫弋札记（无需确认卡片）。"
-                "如需新建文章请给出标题（## 开头）、分类和正文；如需部署已有文章请说明文件名。"
-            )
-        elif tool_event.get("requiresApproval") and "obsidian" in name:
-            tool_notes.append(
-                "已生成 Obsidian 写入草稿，正在等待用户在工具卡片点击「写入」确认；"
-                f"目标路径：{draft.get('path') or draft.get('args', {}).get('path') or '未指定'}。"
-            )
-        elif tool_event.get("requiresApproval") and name:
-            tool_notes.append(f"已生成 {name} 工具草稿，正在等待用户确认。")
+    def resolve_obsidian_event_path(path: str) -> str:
+        from skills.obsidian_write import _resolve_note_path
+        return str(_resolve_note_path(path))
+
+    tool_summary = summarize_api_tool_events(
+        api_tool_events,
+        resolve_obsidian_path=resolve_obsidian_event_path,
+    )
+    direct_obsidian_writes = tool_summary.direct_obsidian_writes
+    tool_notes = tool_summary.tool_notes
 
     # ── 通用技能宣告：告诉 LLM 所有被 skill_router 选中但无专用 event builder 的技能 ──
     _AUTO_EXECUTED_SKILLS = {"web_search", "web_fetch"}
