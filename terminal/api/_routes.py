@@ -2567,62 +2567,6 @@ def _tool_approval(payload: dict) -> dict:
             result_output = execution.output
             message = execution.message
             work_receipt = execution.work_receipt
-            if False and draft.get("kind") == "tool_request":  # legacy branch removed after parity verification
-                if executed and draft.get("skillName") == "hugo_blog":
-                    args = draft.get("args", {})
-                    action = str(args.get("action", ""))
-                    if action == "new":
-                        try:
-                            deploy_args = {"action": "deploy"}
-                            metadata = result.get("metadata") if isinstance(result.get("metadata"), dict) else {}
-                            filename = str(metadata.get("filename") or "").strip()
-                            created_file_path = str(metadata.get("createdFile") or "").strip()
-                            if filename:
-                                deploy_args["filename"] = Path(filename).name
-                            elif created_file_path:
-                                deploy_args["filename"] = Path(created_file_path).name
-                            else:
-                                created_file = re.search(r"文章已创建：(.+?\.md)", result_output)
-                                if created_file:
-                                    deploy_args["filename"] = Path(created_file.group(1)).name
-                            if "filename" not in deploy_args and args.get("slug"):
-                                deploy_args["slug"] = args.get("slug")
-                            deploy_result, workflow_summary = _run_hugo_deploy_followup(
-                                title=str(args.get("title") or "博客文章"),
-                                deploy_args=deploy_args,
-                            )
-                            result_output += "\n\n" + str(deploy_result)
-                            if workflow_summary and workflow_summary not in result_output:
-                                result_output += "\n\n" + workflow_summary
-                            if "单页验证成功" in str(deploy_result) or "验证：" in workflow_summary:
-                                message += " | hugo deploy 已自动执行并验证单页可访问"
-                            elif "部署成功" in str(deploy_result):
-                                message += " | hugo deploy 已自动执行"
-                            else:
-                                message += " | hugo deploy 执行完成但可能失败"
-                        except Exception as deploy_exc:
-                            result_output += f"\n\n部署失败：{deploy_exc}"
-                            message += " | 部署失败"
-                # 自动跟进：file_ops 写入博客目录后 → hugo build + rsync deploy
-                if executed and draft.get("skillName") == "file_ops":
-                    args = draft.get("args", {})
-                    target_path = str(args.get("path", ""))
-                    if "/yivxer-blog/content/posts/" in target_path and args.get("action") == "write":
-                        try:
-                            deploy_result, workflow_summary = _run_hugo_deploy_followup(
-                                title=Path(target_path).stem or "博客文章",
-                                deploy_args={"action": "deploy", "filename": Path(target_path).name},
-                            )
-                            result_output += "\n\n" + str(deploy_result)
-                            if workflow_summary and workflow_summary not in result_output:
-                                result_output += "\n\n" + workflow_summary
-                            if "单页验证成功" in str(deploy_result) or "验证：" in workflow_summary:
-                                message += " | hugo deploy 已自动执行并验证单页可访问"
-                            else:
-                                message += " | hugo deploy 已自动执行"
-                        except Exception as deploy_exc:
-                            result_output += f"\n\n部署失败：{deploy_exc}"
-                            message += " | 部署失败"
         else:
             response = build_denied_response(event_id)
             record_tool_approval_audit(event_id=event_id, decision=decision, draft=draft, response=response)
