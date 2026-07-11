@@ -1,12 +1,22 @@
 import pytest
 
-from terminal.api.tool_stage import parse_approval_decision, summarize_api_tool_events
+from terminal.api.tool_stage import parse_approval_decision, reuse_cached_approval, summarize_api_tool_events
 
 
 def test_parse_approval_decision_accepts_only_explicit_choices():
     assert parse_approval_decision({"eventId": " event-1 ", "decision": "approved"}) == ("event-1", "approved")
     with pytest.raises(ValueError, match="approved or denied"):
         parse_approval_decision({"eventId": "event-1", "decision": "yes"})
+
+
+def test_reuse_cached_approval_marks_result_without_execution():
+    cached = {"ok": True, "executed": True}
+    assert reuse_cached_approval("event-1", lambda event_id: cached) == {
+        "ok": True,
+        "executed": True,
+        "reused": True,
+    }
+    assert reuse_cached_approval("missing", lambda event_id: None) is None
 
 
 def test_tool_event_summary_distinguishes_execution_from_approval():

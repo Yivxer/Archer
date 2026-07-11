@@ -2487,12 +2487,11 @@ def _run_hugo_deploy_followup(*, title: str, deploy_args: dict) -> tuple[str, st
 
 
 def _tool_approval(payload: dict) -> dict:
-    from terminal.api.tool_stage import parse_approval_decision
+    from terminal.api.tool_stage import parse_approval_decision, reuse_cached_approval
     event_id, decision = parse_approval_decision(payload)
 
-    cached_result = get_tool_result(event_id)
+    cached_result = reuse_cached_approval(event_id, get_tool_result)
     if cached_result:
-        cached_result["reused"] = True
         return cached_result
 
     draft = get_tool_draft(event_id)

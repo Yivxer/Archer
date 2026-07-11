@@ -22,6 +22,14 @@ def parse_approval_decision(payload: dict) -> tuple[str, str]:
     return event_id, decision
 
 
+def reuse_cached_approval(event_id: str, get_result: Callable[[str], dict | None]) -> dict | None:
+    cached_result = get_result(event_id)
+    if not cached_result:
+        return None
+    cached_result["reused"] = True
+    return cached_result
+
+
 def summarize_api_tool_events(
     events: list[dict],
     *,
