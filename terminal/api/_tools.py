@@ -29,6 +29,7 @@ from terminal.api.turn_context import (
 from terminal.api.context_assembly import (
     assemble_memory_context,
     assemble_obsidian_context,
+    file_reference_context,
 )
 from terminal.api.turn_pipeline import (
     assemble_model_messages,
@@ -1802,112 +1803,19 @@ def _latest_user_text(messages: list[dict]) -> str:
     return ""
 
 
-MAX_FILE_REF_BYTES = 1_000_000
-
-
 def _file_reference_context(
     file_refs: list[dict],
     per_file_limit: int = 6000,
     total_limit: int = 12000,
-    max_file_bytes: int = MAX_FILE_REF_BYTES,
+    max_file_bytes: int = 1_000_000,
 ) -> tuple[str, list[dict]]:
-    events: list[dict] = []
-    sections: list[str] = []
-    used = 0
-
-    for idx, ref in enumerate(file_refs):
-        path_value = str(ref.get("path", ""))
-        display_name = str(ref.get("name") or Path(path_value).name or "未命名文件")
-        event_id = f"file-reference-{idx + 1}"
-        draft = {"path": path_value, "title": display_name, "size": ref.get("size", 0)}
-        events.append(_tool_event(
-            event_id, "file.reference", "running", "low",
-            f"读取本地文件：{display_name}", path_value, draft=draft,
-        ))
-        try:
-            declared_size = int(ref.get("size") or 0)
-            if declared_size > max_file_bytes:
-                events.append(_tool_event(
-                    event_id, "file.reference", "blocked", "low",
-                    f"已跳过超大文件：{display_name}",
-                    f"file size limit exceeded: {declared_size} > {max_file_bytes}", draft=draft,
-                ))
-                continue
-            path = Path(path_value).expanduser()
-            suffix = path.suffix.lower()
-            if suffix and suffix not in TEXT_FILE_EXTENSIONS:
-                events.append(_tool_event(
-                    event_id, "file.reference", "blocked", "low",
-                    f"已跳过非文本文件：{display_name}",
-                    f"extension: {suffix}", draft=draft,
-                ))
-                continue
-            if not path.exists() or not path.is_file():
-                events.append(_tool_event(
-                    event_id, "file.reference", "blocked", "low",
-                    f"文件不可读取：{display_name}", "file not found", draft=draft,
-                ))
-                continue
-            if used >= total_limit:
-                events.append(_tool_event(
-                    event_id, "file.reference", "blocked", "low",
-                    f"已跳过文件：{display_name}",
-                    "total file reference limit reached", draft=draft,
-                ))
-                continue
-            preloaded_text = ref.get("content")
-            if isinstance(preloaded_text, str) and preloaded_text:
-                raw_text = preloaded_text
-                source_detail = "preloaded"
-                preloaded_truncated = bool(ref.get("truncated"))
-            else:
-                raw_text = path.read_text(encoding="utf-8", errors="ignore")
-                source_detail = "disk"
-                preloaded_truncated = False
-            if "\x00" in raw_text[:2048]:
-                events.append(_tool_event(
-                    event_id, "file.reference", "blocked", "low",
-                    f"已跳过疑似二进制文件：{display_name}",
-                    "binary-like content", draft=draft,
-                ))
-                continue
-            remaining = max(0, total_limit - used)
-            limit = min(per_file_limit, remaining)
-            text = raw_text[:limit]
-            used += len(text)
-            truncated = preloaded_truncated or len(raw_text) > len(text)
-            sections.append(
-                f"### {display_name}\n"
-                f"path: {path}\n"
-                f"source: {source_detail}\n"
-                f"truncated: {str(truncated).lower()}\n\n"
-                f"{text}"
-            )
-            done_draft = {
-                **draft,
-                "contentPreview": text[:500],
-                "injectedChars": len(text),
-                "truncated": truncated,
-            }
-            events.append(_tool_event(
-                event_id, "file.reference", "complete", "low",
-                f"已注入本地文件：{display_name}",
-                f"injected_chars: {len(text)}, truncated: {truncated}",
-                draft=done_draft,
-            ))
-        except Exception as exc:
-            events.append(_tool_event(
-                event_id, "file.reference", "blocked", "low",
-                f"文件引用失败：{display_name}", str(exc)[:240], draft=draft,
-            ))
-
-    if not sections:
-        return "", events
-    return (
-        "以下是用户在桌面端明确选择并引用的本地文本文件内容。"
-        "只在回答当前问题明显相关时使用；如果内容被截断，需要说明只能基于片段判断。\n\n"
-        + "\n\n---\n\n".join(sections),
-        events,
+    return file_reference_context(
+        file_refs,
+        event_factory=_tool_event,
+        allowed_extensions=TEXT_FILE_EXTENSIONS,
+        per_file_limit=per_file_limit,
+        total_limit=total_limit,
+        max_file_bytes=max_file_bytes,
     )
 
 

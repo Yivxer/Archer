@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from terminal.api.context_assembly import (
     assemble_memory_context,
     assemble_obsidian_context,
+    file_reference_context,
 )
 
 
@@ -118,4 +119,27 @@ def test_obsidian_context_reads_and_injects_explicit_target():
         "obsidian_search",
         "obsidian_search",
         "obsidian_read",
+    ]
+
+
+def test_file_reference_context_injects_preloaded_text_without_disk_read(tmp_path):
+    note = tmp_path / "note.md"
+    note.write_text("disk body", encoding="utf-8")
+    context, events = file_reference_context(
+        [{
+            "path": str(note),
+            "name": "note.md",
+            "size": 4,
+            "content": "body",
+            "truncated": False,
+        }],
+        event_factory=_event_factory,
+        allowed_extensions={".md"},
+    )
+
+    assert "body" in context
+    assert "source: preloaded" in context
+    assert [event["toolEvent"]["status"] for event in events] == [
+        "running",
+        "complete",
     ]
