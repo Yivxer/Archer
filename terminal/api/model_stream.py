@@ -63,6 +63,33 @@ def build_rescue_messages(model_messages: list[dict], invalid_reply: str) -> lis
     ]
 
 
+def iter_rescue_stream(
+    model_messages: list[dict], invalid_reply: str, *, model: str,
+    heartbeat_seconds: float = 8.0, total_timeout_seconds: float = 180.0,
+    stream: Callable | None = None,
+) -> Iterator[dict]:
+    """Stream a natural-language retry and finish with its collected text."""
+    parts: list[str] = []
+    try:
+        for event in iter_model_stream(
+            build_rescue_messages(model_messages, invalid_reply),
+            heartbeat_seconds=heartbeat_seconds,
+            total_timeout_seconds=total_timeout_seconds,
+            stream=stream,
+            model=model,
+        ):
+            if event.get("type") == "heartbeat":
+                yield {"type": "heartbeat"}
+                continue
+            text = str(event.get("text") or "")
+            if text:
+                parts.append(text)
+                yield {"type": "chunk", "text": text}
+    except Exception:
+        parts.clear()
+    yield {"type": "done", "text": "".join(parts)}
+
+
 def select_model_for_turn(
     config: dict, *, query: str, intent: str, needs_tools: bool,
     file_refs: list[dict] | None, resolver: Callable | None = None,

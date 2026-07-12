@@ -42,7 +42,7 @@ from terminal.api.turn_pipeline import (
     trim_model_messages as _trim_model_messages_for_context,
 )
 from terminal.api.tool_stage import summarize_api_tool_events
-from terminal.api.model_stream import build_rescue_messages, has_fake_tool_markup as _has_fake_xml, iter_model_stream, select_model_for_turn, split_safe_model_chunk as _split_safe_model_chunk, stream_failure_events
+from terminal.api.model_stream import has_fake_tool_markup as _has_fake_xml, iter_model_stream, iter_rescue_stream, select_model_for_turn, split_safe_model_chunk as _split_safe_model_chunk, stream_failure_events
 from terminal.api.turn_receipt import MemoryExtractionScheduler, empty_reply_events, memory_compaction_events
 
 logger = logging.getLogger("archer_api")
@@ -2063,18 +2063,15 @@ def _iter_simple_chat_path(
 
     # DSML / 伪 XML 救援
     if _has_fake_xml(ai_reply):
-        rescue_messages = build_rescue_messages(model_messages, ai_reply)
-        rescue_parts: list[str] = []
-        try:
-            for item in _iter_model_stream_with_heartbeat(rescue_messages, model=active_model):
-                if item.get("type") == "heartbeat":
-                    continue
-                chunk = str(item.get("text") or "")
-                if chunk:
-                    rescue_parts.append(chunk)
-                    yield {"type": "token", "text": chunk}
-        except Exception:
-            pass  # 救援失败保留原回复
+        for item in iter_rescue_stream(
+            model_messages, ai_reply, model=active_model,
+            heartbeat_seconds=MODEL_STREAM_HEARTBEAT_SECONDS,
+            total_timeout_seconds=MODEL_STREAM_TOTAL_TIMEOUT_SECONDS,
+        ):
+            if item.get("type") == "chunk":
+                yield {"type": "token", "text": item["text"]}
+            elif item.get("type") == "done" and item.get("text"):
+                ai_reply = str(item["text"])
 
     # B1.1: 模型无回复兜底
     if not ai_reply.strip():
@@ -2498,34 +2495,28 @@ def _iter_chat_chunks(
     # ── DSML / 伪 XML 救援：DeepSeek 在多轮上下文中容易输出伪标签 ──
     # 移植自 terminal/archer.py:582-592，Desktop API 之前缺失此逻辑
     if _has_fake_xml(ai_reply):
-        rescue_messages = build_rescue_messages(model_messages, ai_reply)
-        rescue_parts: list[str] = []
-        try:
-            for item in _iter_model_stream_with_heartbeat(rescue_messages, model=active_model):
-                if item.get("type") == "heartbeat":
-                    yield {
-                        "type": "statusEvent",
-                        "statusEvent": {
-                            "id": f"model-rescue-wait-{uuid4().hex[:8]}",
-                            "intentType": intent,
-                            "intentLabel": "模型修正中",
-                            "matchedSkills": list(_selected_tools.keys()),
-                            "isBackground": False,
-                            "memoryScope": memory_scope,
-                            "traceId": trace_id,
-                        },
-                    }
-                    continue
-                chunk = str(item.get("text") or "")
-                if chunk:
-                    rescue_parts.append(chunk)
-                    yield {"type": "token", "text": chunk}
-        except Exception:
-            # 救援失败则保留原始回复
-            pass
-        else:
-            if rescue_parts:
-                ai_reply = "".join(rescue_parts)
+        for item in iter_rescue_stream(
+            model_messages, ai_reply, model=active_model,
+            heartbeat_seconds=MODEL_STREAM_HEARTBEAT_SECONDS,
+            total_timeout_seconds=MODEL_STREAM_TOTAL_TIMEOUT_SECONDS,
+        ):
+            if item.get("type") == "heartbeat":
+                yield {
+                    "type": "statusEvent",
+                    "statusEvent": {
+                        "id": f"model-rescue-wait-{uuid4().hex[:8]}",
+                        "intentType": intent,
+                        "intentLabel": "模型修正中",
+                        "matchedSkills": list(_selected_tools.keys()),
+                        "isBackground": False,
+                        "memoryScope": memory_scope,
+                        "traceId": trace_id,
+                    },
+                }
+            elif item.get("type") == "chunk":
+                yield {"type": "token", "text": item["text"]}
+            elif item.get("type") == "done" and item.get("text"):
+                ai_reply = str(item["text"])
 
     if not ai_reply.strip():
         yield from empty_reply_events(

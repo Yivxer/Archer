@@ -1,4 +1,14 @@
-from terminal.api.model_stream import build_rescue_messages, has_fake_tool_markup, iter_model_stream, select_model_for_turn, split_safe_model_chunk, stream_failure_events
+import time
+
+from terminal.api.model_stream import (
+    build_rescue_messages,
+    has_fake_tool_markup,
+    iter_model_stream,
+    iter_rescue_stream,
+    select_model_for_turn,
+    split_safe_model_chunk,
+    stream_failure_events,
+)
 
 
 def test_model_stream_stage_emits_chunks():
@@ -29,3 +39,48 @@ def test_rescue_messages_preserve_invalid_reply_as_assistant_context():
     messages = build_rescue_messages([{"role": "user", "content": "hi"}], "<tool_call>bad")
     assert messages[-2] == {"role": "assistant", "content": "<tool_call>bad"}
     assert "自然语言重新回答" in messages[-1]["content"]
+
+
+def test_rescue_stream_emits_chunks_and_final_text():
+    events = list(iter_rescue_stream(
+        [{"role": "user", "content": "hi"}],
+        "<tool_call>bad",
+        model="test-model",
+        stream=lambda messages, **kwargs: iter(["fixed ", "reply"]),
+    ))
+
+    assert events == [
+        {"type": "chunk", "text": "fixed "},
+        {"type": "chunk", "text": "reply"},
+        {"type": "done", "text": "fixed reply"},
+    ]
+
+
+def test_rescue_stream_heartbeat_is_preserved():
+    def delayed_stream(messages, **kwargs):
+        time.sleep(0.02)
+        yield "fixed"
+
+    events = list(iter_rescue_stream(
+        [{"role": "user", "content": "hi"}],
+        "<tool_call>bad",
+        model="test-model",
+        stream=delayed_stream,
+        heartbeat_seconds=0.001,
+    ))
+
+    assert {"type": "heartbeat"} in events
+    assert events[-1] == {"type": "done", "text": "fixed"}
+
+
+def test_rescue_stream_failure_returns_empty_done():
+    def failing_stream(messages, **kwargs):
+        raise RuntimeError("boom")
+        yield
+
+    assert list(iter_rescue_stream(
+        [{"role": "user", "content": "hi"}],
+        "<tool_call>bad",
+        model="test-model",
+        stream=failing_stream,
+    )) == [{"type": "done", "text": ""}]
