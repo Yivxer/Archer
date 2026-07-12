@@ -42,6 +42,7 @@ from terminal.api.turn_pipeline import (
     trim_model_messages as _trim_model_messages_for_context,
 )
 from terminal.api.tool_stage import summarize_api_tool_events
+from terminal.api.model_stream import iter_model_stream
 
 logger = logging.getLogger("archer_api")
 MODEL_STREAM_HEARTBEAT_SECONDS = 8.0
@@ -174,35 +175,10 @@ def _with_trace_id(event: dict, trace_id: str) -> dict:
 
 
 def _iter_model_stream_with_heartbeat(messages: list[dict], **kwargs):
-    """Run blocking model streaming in a worker so SSE can emit keepalive events."""
-    output: queue.Queue[tuple[str, object]] = queue.Queue()
-
-    def worker() -> None:
-        try:
-            from core.llm import stream_chat as model_stream_chat
-            for chunk in model_stream_chat(messages, **kwargs):
-                output.put(("chunk", chunk))
-            output.put(("done", None))
-        except Exception as exc:
-            output.put(("error", exc))
-
-    thread = threading.Thread(target=worker, daemon=True)
-    thread.start()
-    started = time.monotonic()
-    while True:
-        if time.monotonic() - started > MODEL_STREAM_TOTAL_TIMEOUT_SECONDS:
-            raise TimeoutError("model stream total timeout")
-        try:
-            kind, value = output.get(timeout=MODEL_STREAM_HEARTBEAT_SECONDS)
-        except queue.Empty:
-            yield {"type": "heartbeat"}
-            continue
-        if kind == "chunk":
-            yield {"type": "chunk", "text": value}
-        elif kind == "error":
-            raise value
-        elif kind == "done":
-            break
+    yield from iter_model_stream(
+        messages, heartbeat_seconds=MODEL_STREAM_HEARTBEAT_SECONDS,
+        total_timeout_seconds=MODEL_STREAM_TOTAL_TIMEOUT_SECONDS, **kwargs,
+    )
 
 # ---------------------------------------------------------------------------
 # Intent detection helpers（委托 core/desktop_tool_router，保留旧函数名兼容测试）
