@@ -33,6 +33,7 @@ from terminal.api.context_assembly import (
 from terminal.api.chat_turn_context import FullTurnDependencies, prepare_full_turn
 from terminal.api.hugo_turn import HugoTurnDependencies, iter_hugo_turn_events
 from terminal.api.chat_reply import ChatReplyDependencies, iter_chat_reply_events
+from terminal.api.post_reply_drafts import PostReplyDraftDependencies, iter_post_reply_draft_events
 from terminal.api.turn_pipeline import (
     assemble_model_messages,
     classify_turn,
@@ -1855,6 +1856,32 @@ def _chat_reply_dependencies() -> ChatReplyDependencies:
     )
 
 
+def _post_reply_draft_dependencies() -> PostReplyDraftDependencies:
+    def compute_preview(payload: dict) -> dict:
+        from skills.obsidian_write import compute_preview as preview
+
+        return preview(payload)
+
+    def execute_request(request: dict) -> dict:
+        from core.api_tool_service import execute_tool_request
+        from skills.loader import load_skills
+
+        return execute_tool_request(request, load_skills(), cfg=_load_config())
+
+    return PostReplyDraftDependencies(
+        parse_obsidian=_parse_obsidian_write_request,
+        generate_obsidian=_generate_obsidian_draft_with_ai,
+        compute_preview=compute_preview,
+        generate_hugo=_generate_hugo_draft_from_reply,
+        make_request=_make_api_tool_request,
+        event_from_request=_tool_event_from_request,
+        set_draft=set_tool_draft,
+        execute_request=execute_request,
+        tool_event=_tool_event,
+        obsidian_work_intent=_obsidian_work_intent,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Streaming chat with tool events
 # ---------------------------------------------------------------------------
@@ -2247,112 +2274,6 @@ def _iter_chat_chunks(
     if ai_reply is None:
         return
 
-    # ── AI 回复完成后：生成 Obsidian 写入草稿 ──
-    if obsidian_write_intent:
-        try:
-            parsed_write_request = _parse_obsidian_write_request(query)
-            write_mode = parsed_write_request.mode
-            ai_content = _generate_obsidian_draft_with_ai(query, enriched_messages, ai_reply)
-            if ai_content:
-                draft_event_id = f"obsidian-write-{uuid4().hex[:8]}"
-                content_with_tag = ai_content if write_mode == "overwrite" else (
-                    "\n<!-- Archer Desktop AI 生成 -->\n"
-                    f"{ai_content}\n"
-                )
-                # 计算 before/after 预览
-                try:
-                    from skills.obsidian_write import compute_preview
-                    preview = compute_preview({
-                        "path": obsidian_target_path,
-                        "content": content_with_tag,
-                        "mode": write_mode,
-                    })
-                except Exception:
-                    preview = None
-                request = _make_api_tool_request(
-                    "obsidian_write",
-                    {
-                        "path": obsidian_target_path,
-                        "content": content_with_tag,
-                        "mode": write_mode,
-                        "expected_mtime": preview["mtime"] if preview else None,
-                        "expected_size": preview["size"] if preview else None,
-                        "expected_fingerprint": preview["fingerprint"] if preview else None,
-                    },
-                    event_id=draft_event_id,
-                    display_name="obsidian_write",
-                    extra={
-                        "path": obsidian_target_path,
-                        "mode": write_mode,
-                        "contentPreview": ai_content[:500],
-                        "beforeText": preview["before"] if preview else "",
-                        "afterText": preview["after"] if preview else content_with_tag[:2000],
-                        "previewMode": write_mode,
-                        "previewExists": preview["exists"] if preview else False,
-                        "workIntent": _obsidian_work_intent(
-                            obsidian_target_path or "",
-                            write_mode,
-                            before_text=preview["before"] if preview else "",
-                        ),
-                    },
-                    force_approval=False,
-                )
-                if request.get("blocked"):
-                    yield _tool_event_from_request(
-                        request,
-                        summary="Obsidian 写入被策略阻止",
-                        detail_prefix=f"path: {obsidian_target_path}",
-                    )
-                elif request.get("requiresApproval"):
-                    set_tool_draft(draft_event_id, request)
-                    yield _tool_event_from_request(
-                        request,
-                        summary=f"确认 Obsidian 写入：{ai_content[:80].strip()}",
-                        detail_prefix=f"path: {obsidian_target_path}",
-                    )
-                else:
-                    from core.api_tool_service import execute_tool_request
-                    from skills.loader import load_skills
-                    result = execute_tool_request(request, load_skills(), cfg=_load_config())
-                    output = str(result.get("output") or result.get("summary") or "")
-                    executed = bool(result.get("executed")) and not output.startswith(("路径被拒绝", "写入失败"))
-                    yield _tool_event(
-                        draft_event_id,
-                        "obsidian_write",
-                        "complete" if executed else "blocked",
-                        str(result.get("policy", {}).get("risk", "low")),
-                        "已直接写入 Obsidian" if executed else "Obsidian 写入失败",
-                        output[:300],
-                        False,
-                        {
-                            "path": obsidian_target_path,
-                            "mode": write_mode,
-                            "contentPreview": ai_content[:500],
-                        },
-                    )
-            else:
-                # AI 生成草稿内容为空——告知用户
-                yield _tool_event(
-                    f"obsidian-write-{uuid4().hex[:8]}",
-                    "obsidian_write",
-                    "blocked",
-                    "low",
-                    "Obsidian 写入草稿内容为空，请重试或手动指定内容",
-                    f"path: {obsidian_target_path}, reason: AI content generation returned empty",
-                    False,
-                )
-        except Exception as exc:
-            yield _tool_event(
-                f"obsidian-write-{uuid4().hex[:8]}",
-                "obsidian_write",
-                "blocked",
-                "low",
-                "Obsidian 写入草稿生成失败",
-                str(exc)[:240],
-                False,
-            )
-
-    # ── AI 回复完成后：生成 Hugo 博客写入草稿（枫弋札记专向请求已在 agent 阶段处理） ──
     hugo_blog_triggered = (
         not _wants_hugo_publish(query, file_refs)
         and any(
@@ -2360,68 +2281,15 @@ def _iter_chat_chunks(
             for e in api_tool_events
         )
     )
-    if hugo_blog_triggered and ai_reply:
-        try:
-            hugo_draft = _generate_hugo_draft_from_reply(ai_reply)
-            if hugo_draft and hugo_draft.get("body"):
-                draft_event_id = f"hugo-blog-{uuid4().hex[:8]}"
-                title_preview = hugo_draft.get("title", "无标题")[:40]
-                request = _make_api_tool_request(
-                    "hugo_blog",
-                    {
-                        "action": "new",
-                        "title": hugo_draft.get("title", ""),
-                        "category": hugo_draft.get("category", "系统"),
-                        "description": hugo_draft.get("description", ""),
-                        "body": hugo_draft.get("body", ""),
-                    },
-                    event_id=draft_event_id,
-                    display_name="hugo_blog",
-                    extra={
-                        "title": hugo_draft.get("title", ""),
-                        "category": hugo_draft.get("category", "系统"),
-                        "contentPreview": hugo_draft.get("body", "")[:500],
-                    },
-                )
-                if request.get("blocked"):
-                    yield _tool_event_from_request(
-                        request,
-                        summary="博客发布被策略阻止",
-                        detail_prefix=f"title: {title_preview}",
-                    )
-                elif request.get("requiresApproval"):
-                    set_tool_draft(draft_event_id, request)
-                    yield _tool_event_from_request(
-                        request,
-                        summary=f"确认发布博客文章：{title_preview}",
-                        detail_prefix=f"action: new, title: {title_preview}, category: {hugo_draft.get('category', '系统')}",
-                    )
-                else:
-                    from core.api_tool_service import execute_tool_request
-                    from skills.loader import load_skills
-                    result = execute_tool_request(request, load_skills(), cfg=_load_config())
-                    output = str(result.get("output") or "")
-                    executed = bool(result.get("executed"))
-                    yield _tool_event(
-                        draft_event_id,
-                        "hugo_blog",
-                        "complete" if executed else "blocked",
-                        str(result.get("policy", {}).get("risk", "low")),
-                        "已创建博客文章" if executed else "博客创建失败",
-                        output[:300],
-                        False,
-                        {"title": hugo_draft.get("title", "")},
-                    )
-        except Exception as exc:
-            yield _tool_event(
-                f"hugo-blog-{uuid4().hex[:8]}",
-                "hugo_blog",
-                "blocked",
-                "low",
-                "博客草稿生成失败",
-                str(exc)[:240],
-                False,
-            )
+    yield from iter_post_reply_draft_events(
+        query=query,
+        messages=enriched_messages,
+        ai_reply=ai_reply,
+        obsidian_write_intent=obsidian_write_intent,
+        obsidian_target_path=obsidian_target_path,
+        hugo_blog_triggered=hugo_blog_triggered,
+        dependencies=_post_reply_draft_dependencies(),
+    )
 
     for event in _yield_memory_compaction_events():
         yield event
