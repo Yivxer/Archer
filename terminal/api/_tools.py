@@ -33,6 +33,7 @@ from terminal.api.context_assembly import (
     assemble_web_context,
     file_reference_context,
 )
+from terminal.api.chat_turn_context import FullTurnDependencies, prepare_full_turn
 from terminal.api.turn_pipeline import (
     assemble_model_messages,
     classify_turn,
@@ -1789,6 +1790,37 @@ def _soul_insight_for_orchestration() -> dict:
         return {}
 
 
+def _full_turn_dependencies() -> FullTurnDependencies:
+    from core.context import resolve_context_limits
+    from core.experts import active_expert, active_expert_id, expert_skill_allowlist, format_expert_block
+
+    return FullTurnDependencies(
+        classify=classify_turn,
+        orchestrate=orchestrate_turn,
+        soul_insight=_soul_insight_for_orchestration,
+        resolve_limits=resolve_context_limits,
+        load_config=_load_config,
+        active_expert=active_expert,
+        active_expert_id=active_expert_id,
+        expert_allowlist=expert_skill_allowlist,
+        format_expert=format_expert_block,
+        scoped_skills=_expert_scoped_skills,
+        select_tools=lambda query, scoped_skills, **kwargs: select_turn_tools(
+            query, scoped_skills, planner=_plan_desktop_turn, **kwargs,
+        ),
+        shadow_events=_yield_shadow_initiative_events,
+        file_context=_file_reference_context,
+        vault=assemble_vault_focus,
+        memory=assemble_memory_context,
+        obsidian=assemble_obsidian_context,
+        web=assemble_web_context,
+        event_factory=_tool_event,
+        trace_event=_with_trace_id,
+        runtime_event=_runtime_context_event,
+        extract_obsidian_path=_extract_obsidian_target_path,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Streaming chat with tool events
 # ---------------------------------------------------------------------------
@@ -1984,42 +2016,35 @@ def _iter_chat_chunks(
             return
     except Exception:
         pass  # simple path 判定异常 → 回退到 full path
-    planned_turn = orchestrate_turn(
-        query, prior_history, _soul_insight_for_orchestration()
-    )
-    orchestration = planned_turn.orchestration
-    memory_scope = planned_turn.memory_scope
-    task_plan_block = planned_turn.task_plan_block
-    mode_constraint_block = planned_turn.mode_constraint_block
-    matched_skills_block = planned_turn.matched_skills_block
-    plan_event = planned_turn.plan_event
-    orchestration_event = planned_turn.orchestration_event
-    intent = intent_info["intent"]
-    classifier_needs_tools = bool(intent_info.get("needs_tools"))
-    needs_tools = bool(orchestration.needs_tools) if orchestration is not None else classifier_needs_tools
-    from core.context import resolve_context_limits
-    context_limits = resolve_context_limits(
-        memory_scope,
-        needs_memory=intent_info["needs_memory"],
+    prepared_turn = prepare_full_turn(
+        messages,
         memory_mode=memory_mode,
+        obsidian_mode=obsidian_mode,
+        file_refs=file_refs,
+        runtime_context=runtime_context,
+        trace_id=trace_id,
+        dependencies=_full_turn_dependencies(),
+        classified_turn=classified_turn,
     )
-    _cfg = _load_config()
-    from core.experts import active_expert, format_expert_block, active_expert_id
-    _expert = active_expert(_cfg)
-    _expert_block = format_expert_block(_expert)
-    _scoped_skills = _expert_scoped_skills(_cfg)
-    for event in _yield_shadow_initiative_events(runtime_context):
+    query = prepared_turn.query
+    prior_history = prepared_turn.prior_history
+    intent_info = prepared_turn.intent_info
+    orchestration = prepared_turn.orchestration
+    memory_scope = prepared_turn.memory_scope
+    context_limits = prepared_turn.context_limits
+    _cfg = prepared_turn.config
+    _expert = prepared_turn.expert
+    _expert_block = prepared_turn.expert_block
+    task_plan_block = prepared_turn.task_plan_block
+    mode_constraint_block = prepared_turn.mode_constraint_block
+    matched_skills_block = prepared_turn.matched_skills_block
+    _turn_plan = prepared_turn.turn_plan
+    _selected_tools = prepared_turn.selected_tools
+    _tool_plan = prepared_turn.tool_plan
+    intent = intent_info["intent"]
+    enriched_messages = prepared_turn.enriched_messages
+    for event in prepared_turn.events:
         yield event
-    selected_turn_tools = select_turn_tools(
-        query,
-        _scoped_skills,
-        intent=intent,
-        needs_tools=needs_tools,
-        planner=_plan_desktop_turn,
-    )
-    _turn_plan = selected_turn_tools.turn_plan
-    _selected_tools = selected_turn_tools.selected_tools
-    _tool_plan = selected_turn_tools.tool_plan
     # 动态对话姿态：优先使用 orchestrator 的 mode；手动锁定时让位
     active_stance = orchestration.mode if orchestration else None
     stance_prompt = ""
@@ -2032,92 +2057,6 @@ def _iter_chat_chunks(
     except Exception:
         active_stance = None
         stance_prompt = ""
-    enriched_messages = list(messages)
-    file_context, file_events = _file_reference_context(file_refs or [])
-    for event in file_events:
-        yield event
-    if file_context:
-        enriched_messages = [
-            {"role": "system", "content": file_context},
-            *enriched_messages,
-        ]
-    vault_result = assemble_vault_focus(
-        enriched_messages,
-        obsidian_mode=obsidian_mode,
-        event_factory=_tool_event,
-        include_tool_receipt=True,
-    )
-    enriched_messages = vault_result.messages
-    for event in vault_result.events:
-        yield _with_trace_id(event, trace_id) if event.get("toolEvent") else event
-    if orchestration_event:
-        yield _with_trace_id({"type": "orchestrationEvent", "orchestrationEvent": orchestration_event}, trace_id)
-    if plan_event:
-        yield _with_trace_id({"type": "planEvent", "planEvent": plan_event}, trace_id)
-    if orchestration is not None:
-        yield _with_trace_id({
-            "type": "runtimeContextEvent",
-            "runtimeContextEvent": _runtime_context_event(
-                query=query,
-                intent_info=intent_info,
-                orchestration=orchestration,
-                file_refs=file_refs,
-                trace_id=trace_id,
-            ),
-        }, trace_id)
-        _matched_for_status = list(orchestration.matched_skills)
-        from core.experts import expert_skill_allowlist
-        _allowlist = expert_skill_allowlist(_expert)
-        if _allowlist:
-            _matched_for_status = [name for name in _matched_for_status if name in _allowlist]
-        yield _with_trace_id({
-            "type": "statusEvent",
-            "statusEvent": {
-                "intentType": intent_info["intent"],
-                "intentLabel": intent_info.get("intent_label", intent_info["intent"]),
-                "matchedSkills": _matched_for_status,
-                "isBackground": orchestration.needs_job,
-                "memoryScope": list(orchestration.memory_scope),
-                "expertId": active_expert_id(_cfg),
-                "expertLabel": str(_expert.get("label", "")),
-            },
-        }, trace_id)
-    memory_result = assemble_memory_context(
-        enriched_messages,
-        query=query,
-        prior_history=prior_history,
-        intent=intent,
-        needs_memory=bool(intent_info.get("needs_memory")),
-        memory_mode=memory_mode,
-        retrieve_limit=context_limits.retrieve_total,
-        expert=_expert,
-        event_factory=_tool_event,
-    )
-    enriched_messages = memory_result.messages
-    yield from memory_result.events
-
-    obsidian_result = assemble_obsidian_context(
-        enriched_messages,
-        query=query,
-        obsidian_mode=obsidian_mode,
-        preview_requested=bool(_tool_plan.obsidian_preview),
-        event_factory=_tool_event,
-        extract_target_path=_extract_obsidian_target_path,
-    )
-    enriched_messages = obsidian_result.messages
-    yield from obsidian_result.events
-
-    _pre_selected = _selected_tools
-    web_result = assemble_web_context(
-        enriched_messages,
-        query=query,
-        selected_tools=_pre_selected,
-        event_factory=_tool_event,
-        trace_event=lambda event: _with_trace_id(event, trace_id),
-    )
-    enriched_messages = web_result.messages
-    yield from web_result.events
-
     # ── 枫弋札记：附件/路径直发 或 LLM 工具链，自动执行，不弹确认卡
     if _wants_hugo_publish(query, file_refs) and "hugo_blog" in _selected_tools:
         output: queue.Queue[tuple[str, object]] = queue.Queue()
