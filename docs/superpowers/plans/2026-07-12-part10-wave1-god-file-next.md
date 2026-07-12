@@ -20,6 +20,8 @@
 
 ### Task 1: Extract full-turn context preparation
 
+**Status:** completed — commit `ea3c6ba`.
+
 **Files:**
 - Create: `terminal/api/chat_turn_context.py`
 - Modify: `terminal/api/_tools.py`
@@ -34,6 +36,8 @@
 - [ ] Commit: `refactor: extract full turn context preparation`.
 
 ### Task 2: Extract Hugo dedicated turn execution
+
+**Status:** completed — commit `1be068c`.
 
 **Files:**
 - Create: `terminal/api/hugo_turn.py`
@@ -50,6 +54,8 @@
 
 ### Task 3: Extract model reply and rescue delivery
 
+**Status:** completed — commit `4b69748`.
+
 **Files:**
 - Create: `terminal/api/chat_reply.py`
 - Modify: `terminal/api/_tools.py`
@@ -64,6 +70,8 @@
 - [ ] Commit: `refactor: extract chat reply delivery`.
 
 ### Task 4: Extract post-reply draft effects
+
+**Status:** completed — commit `f80ba8d`.
 
 **Files:**
 - Create: `terminal/api/post_reply_drafts.py`
@@ -80,6 +88,8 @@
 
 ### Task 5: Close the `_tools.py` facade batch
 
+**Status:** completed for this chat-turn batch — commit `5aa0d04`; `_tools.py` is 2297 lines, so the Wave 1 global `<800` gate remains open.
+
 **Files:**
 - Modify: `terminal/api/_tools.py`, `tests/test_architecture_boundaries.py`
 
@@ -90,6 +100,8 @@
 - [ ] Commit: `refactor: reduce chat turn compatibility facade`.
 
 ### Task 6: Split `_routes.py` by business domain, in this order
+
+**Status:** in progress — sessions/threads completed in commit `162d2b9`; jobs is the next isolated domain.
 
 **Files:**
 - Create: `terminal/api/session_routes.py`, `terminal/api/job_routes.py`, `terminal/api/memory_routes.py`, `terminal/api/profile_routes.py`, `terminal/api/initiative_routes.py`
