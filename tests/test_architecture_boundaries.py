@@ -147,3 +147,13 @@ def test_tools_facade_does_not_own_extracted_stage_executors():
     assert "def _do_extract_api(" not in source
     assert "def _bg_extract_api(" not in source
     assert "def _iter_model_stream_with_heartbeat(" not in source
+
+
+@pytest.mark.contract
+def test_tools_facade_does_not_redefine_chat_turn_stages():
+    source = (ROOT / "terminal/api/_tools.py").read_text(encoding="utf-8")
+
+    assert "def prepare_full_turn(" not in source
+    assert "def iter_hugo_turn_events(" not in source
+    assert "def iter_chat_reply_events(" not in source
+    assert "def iter_post_reply_draft_events(" not in source
