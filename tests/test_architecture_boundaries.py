@@ -130,3 +130,11 @@ def test_god_files_cannot_grow_beyond_part10_gate0_baseline():
         for path, lines in actual.items()
         if lines > GOD_FILE_LINE_BASELINE[path]
     } == {}
+
+
+@pytest.mark.contract
+def test_memory_extraction_stage_never_reads_global_store_db_path():
+    source = (ROOT / "terminal/api/memory_extraction.py").read_text(encoding="utf-8")
+
+    assert "memory.store.DB_PATH" not in source
+    assert "from memory.store import DB_PATH" not in source

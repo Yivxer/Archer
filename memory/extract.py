@@ -371,6 +371,7 @@ def extract(
     *,
     candidate_types: list[str] | None = None,
     sensitive: bool = False,
+    llm_client=None,
 ) -> tuple[list[dict], list[dict]]:
     """
     返回 (memories, obsidian_suggestions)
@@ -405,7 +406,8 @@ def extract(
     ]
 
     raw = ""
-    for chunk in stream_chat(messages, track_usage=False):
+    active_stream = llm_client.stream_chat if llm_client is not None else stream_chat
+    for chunk in active_stream(messages, track_usage=False):
         raw += chunk
 
     try:

@@ -134,7 +134,7 @@ def test_chat_stream_returns_sse(client, monkeypatch):
         "terminal.api.fastapi_app._iter_chat_chunks",
         lambda *args, **kwargs: iter([{"type": "token", "text": "hi"}]),
     )
-    monkeypatch.setattr("terminal.api.fastapi_app._bg_extract_api", lambda history: None)
+    monkeypatch.setattr("terminal.api.fastapi_app._bg_extract_api", lambda history, **kwargs: None)
 
     with client.stream(
         "POST",
@@ -178,7 +178,7 @@ def test_chat_stream_events_release_slot_when_client_closes(monkeypatch):
             yield {"type": "statusEvent", "statusEvent": {"id": "still-running"}}
 
     monkeypatch.setattr("terminal.api.fastapi_app._iter_chat_chunks", endless_chunks)
-    monkeypatch.setattr("terminal.api.fastapi_app._bg_extract_api", lambda history: None)
+    monkeypatch.setattr("terminal.api.fastapi_app._bg_extract_api", lambda history, **kwargs: None)
 
     semaphore = threading.BoundedSemaphore(1)
     assert semaphore.acquire(blocking=False) is True
@@ -201,7 +201,7 @@ def test_chat_stream_events_release_slot_on_generator_error(monkeypatch):
         raise RuntimeError("boom")
 
     monkeypatch.setattr("terminal.api.fastapi_app._iter_chat_chunks", failing_chunks)
-    monkeypatch.setattr("terminal.api.fastapi_app._bg_extract_api", lambda history: None)
+    monkeypatch.setattr("terminal.api.fastapi_app._bg_extract_api", lambda history, **kwargs: None)
 
     semaphore = threading.BoundedSemaphore(1)
     assert semaphore.acquire(blocking=False) is True
@@ -222,7 +222,7 @@ def test_websocket_chat_streams_events(client, monkeypatch):
         "terminal.api.fastapi_app._iter_chat_chunks",
         lambda *args, **kwargs: iter([{"type": "token", "text": "ws"}]),
     )
-    monkeypatch.setattr("terminal.api.fastapi_app._bg_extract_api", lambda history: None)
+    monkeypatch.setattr("terminal.api.fastapi_app._bg_extract_api", lambda history, **kwargs: None)
 
     with client.websocket_connect("/ws/chat?token=test-token") as websocket:
         websocket.send_json({"messages": [{"role": "user", "content": "hello"}]})

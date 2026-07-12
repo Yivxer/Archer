@@ -1,6 +1,13 @@
 from types import SimpleNamespace
+import sqlite3
 
-from terminal.api.memory_extraction import MemoryExtractionPorts, extract_memories
+from core.runtime_context import create_runtime_context
+from memory.store import init_db
+from terminal.api.memory_extraction import (
+    MemoryExtractionPorts,
+    build_runtime_memory_extraction_ports,
+    extract_memories,
+)
 
 
 def _ports(memories, *, saved=None, pending=None, duplicate=None, low_quality=None):
@@ -100,3 +107,36 @@ def test_memory_extraction_stages_sensitive_memory_with_session_summary():
     assert result.staged == 1
     assert pending[0]["suggest_reason"] == "candidate reason"
     assert pending[0]["session_summary"] == "a" * 80
+
+
+def test_runtime_memory_extraction_ports_isolate_database_and_llm(tmp_path):
+    class FakeClient:
+        def stream_chat(self, messages, **kwargs):
+            return iter(['{"memories":[{"content":"isolated stable preference","type":"preference","confidence":0.9,"depth":2}]}'])
+
+        def chat(self, messages, **kwargs):
+            return ""
+
+    first = create_runtime_context(
+        db_path=tmp_path / "first.db",
+        llm_client=FakeClient(),
+    )
+    second = create_runtime_context(
+        db_path=tmp_path / "second.db",
+        llm_client=FakeClient(),
+    )
+    init_db(first.db_path)
+    init_db(second.db_path)
+
+    ports = build_runtime_memory_extraction_ports(first)
+    result = _extract(
+        [{"role": "user", "content": "remember this preference"}, {"role": "assistant", "content": "ok"}],
+        ports,
+        _policy(),
+    )
+
+    assert result.staged == 1
+    with sqlite3.connect(first.db_path) as connection:
+        assert connection.execute("SELECT content FROM pending_memories").fetchone()[0] == "isolated stable preference"
+    with sqlite3.connect(second.db_path) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM pending_memories").fetchone()[0] == 0

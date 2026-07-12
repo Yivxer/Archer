@@ -149,7 +149,7 @@ def _chat_stream_events(
         # 只在流式正常结束且无错误时提取记忆
         if reply_chunks and not has_error:
             full_history = list(messages) + [{"role": "assistant", "content": "".join(reply_chunks)}]
-            _bg_extract_api(full_history)
+            _bg_extract_api(full_history, runtime_context=runtime_context)
     finally:
         if callable(release_slot):
             release_slot()

@@ -43,7 +43,7 @@ from terminal.api.turn_pipeline import (
 )
 from terminal.api.tool_stage import summarize_api_tool_events
 from terminal.api.model_stream import has_fake_tool_markup as _has_fake_xml, iter_model_stream, iter_rescue_stream, select_model_for_turn, split_safe_model_chunk as _split_safe_model_chunk, stream_failure_events
-from terminal.api.memory_extraction import MemoryExtractionPorts, extract_memories
+from terminal.api.memory_extraction import MemoryExtractionPorts, build_runtime_memory_extraction_ports, extract_memories
 from terminal.api.turn_receipt import MemoryExtractionScheduler, empty_reply_events, memory_compaction_events
 
 logger = logging.getLogger("archer_api")
@@ -1789,24 +1789,28 @@ def _yield_memory_compaction_events():
     )
 
 
-def _do_extract_api(history: list[dict]) -> None:
+def _do_extract_api(history: list[dict], *, runtime_context=None) -> None:
     try:
         from core.orchestrator import (
             build_memory_candidate_policy,
             format_memory_candidate_reason,
             orchestrate_user_input,
         )
-        from memory.extract import extract
-        from memory.store import add_pending, is_duplicate_pending, is_low_quality_memory, save
-        result = extract_memories(
-            history,
-            ports=MemoryExtractionPorts(
+        if runtime_context is not None:
+            ports = build_runtime_memory_extraction_ports(runtime_context)
+        else:
+            from memory.extract import extract
+            from memory.store import add_pending, is_duplicate_pending, is_low_quality_memory, save
+            ports = MemoryExtractionPorts(
                 extract=extract,
                 save=save,
                 add_pending=add_pending,
                 is_duplicate=is_duplicate_pending,
                 is_low_quality=is_low_quality_memory,
-            ),
+            )
+        result = extract_memories(
+            history,
+            ports=ports,
             orchestrate=orchestrate_user_input,
             build_policy=build_memory_candidate_policy,
             format_reason=format_memory_candidate_reason,
@@ -1825,8 +1829,14 @@ def _do_extract_api(history: list[dict]) -> None:
         logger.warning("[memory] desktop extract failed: %s", exc)
 
 
-def _bg_extract_api(history: list[dict]) -> None:
-    _memory_extraction_scheduler.schedule(history, _do_extract_api)
+def _bg_extract_api(history: list[dict], *, runtime_context=None) -> None:
+    target = _do_extract_api
+    if runtime_context is not None:
+        target = lambda active_history: _do_extract_api(
+            active_history,
+            runtime_context=runtime_context,
+        )
+    _memory_extraction_scheduler.schedule(history, target)
 
 
 def _soul_insight_for_orchestration() -> dict:

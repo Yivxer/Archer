@@ -3,13 +3,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from core.llm_client import LLMClient
+_client: Any | None = None
 
 
-_client: LLMClient | Any | None = None
-
-
-def configure_llm_client(client: LLMClient | Any) -> None:
+def configure_llm_client(client: Any) -> None:
     global _client
     if client is None:
         raise ValueError("llm client is required")

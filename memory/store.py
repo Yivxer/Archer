@@ -85,7 +85,8 @@ def _clamp_depth(value: object) -> int:
 def save(content: str, tags: str = "", type: str = "insight", importance: int = 3,
          source: str = "", scope: str = "user", confidence: float = 0.8,
          valid_until: str | None = None, session_id: str | None = None,
-         depth: int = 3, block_type: str | None = None, label: str | None = None) -> int:
+         depth: int = 3, block_type: str | None = None, label: str | None = None,
+         *, db_path: str | Path | None = None) -> int:
     content = content.strip()
     tags = tags.strip()
     if type not in MEMORY_TYPES:
@@ -99,7 +100,8 @@ def save(content: str, tags: str = "", type: str = "insight", importance: int = 
     resolved_block = infer_block_type(type, block_type)
     resolved_label = normalize_label(label)
 
-    conn = sqlite3.connect(DB_PATH)
+    resolved_db_path = db_path or DB_PATH
+    conn = sqlite3.connect(resolved_db_path)
     existing = conn.execute(
         "SELECT id FROM memories WHERE content = ? AND status = 'active' LIMIT 1",
         (content,),
@@ -124,9 +126,10 @@ def save(content: str, tags: str = "", type: str = "insight", importance: int = 
     conn.commit()
     mid = cur.lastrowid
     conn.close()
-    _try_embed(mid, content)
-    # P2: 新记忆入库后自动矛盾检测
-    contradiction_detect(mid, content)
+    if Path(resolved_db_path) == Path(DB_PATH):
+        _try_embed(mid, content)
+        # P2: 新记忆入库后自动矛盾检测
+        contradiction_detect(mid, content)
     return mid
 
 def _row_to_dict(r, has_date: bool = False, has_block: bool = False) -> dict:
@@ -385,7 +388,7 @@ def add_pending(content: str, type: str = "insight", importance: int = 3,
                 tags: str = "", source: str = "auto", confidence: float = 0.7,
                 depth: int = 3, suggest_reason: str = "",
                 block_type: str | None = None, label: str | None = None,
-                session_summary: str = "") -> int:
+                session_summary: str = "", *, db_path: str | Path | None = None) -> int:
     """将候选记忆写入 pending_memories 表，返回 ID。"""
     content = content.strip()
     if type not in MEMORY_TYPES:
@@ -401,7 +404,7 @@ def add_pending(content: str, type: str = "insight", importance: int = 3,
     resolved_block = infer_block_type(type, block_type)
     resolved_label = normalize_label(label)
 
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(db_path or DB_PATH)
     cur = conn.execute(
         "INSERT INTO pending_memories (content, type, importance, depth, tags, source, confidence, "
         "created_at, suggest_reason, block_type, label, session_summary) "
@@ -1039,13 +1042,15 @@ def _keyword_overlap(a: str, b: str, min_shared: int = 3) -> bool:
     return len(shared) >= min_shared
 
 
-def is_duplicate_pending(content: str, threshold: float = 0.25) -> bool:
+def is_duplicate_pending(
+    content: str, threshold: float = 0.25, *, db_path: str | Path | None = None,
+) -> bool:
     """检查 content 是否与已有的 pending_memories 或 active memories 高度相似。
     返回 True 表示存在重复，不应再添加。"""
     content = content.strip()
     if len(content) < 10:
         return False  # 太短的不做模糊匹配
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(db_path or DB_PATH)
     try:
         # 检查 pending_memories
         pending_rows = conn.execute(

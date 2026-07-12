@@ -5,6 +5,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from core.runtime_context import RuntimeContext
+
 
 @dataclass
 class MemoryExtractionPorts:
@@ -22,6 +24,31 @@ class MemoryExtractionResult:
     skipped_duplicate: int = 0
     skipped_low_quality: int = 0
     skip_reason: str = ""
+
+
+def build_runtime_memory_extraction_ports(
+    runtime_context: RuntimeContext,
+) -> MemoryExtractionPorts:
+    from memory.extract import extract
+    from memory.store import add_pending, is_duplicate_pending, is_low_quality_memory, save
+
+    return MemoryExtractionPorts(
+        extract=lambda history, **kwargs: extract(
+            history,
+            llm_client=runtime_context.llm_client,
+            **kwargs,
+        ),
+        save=lambda **kwargs: save(**kwargs, db_path=runtime_context.db_path),
+        add_pending=lambda **kwargs: add_pending(
+            **kwargs,
+            db_path=runtime_context.db_path,
+        ),
+        is_duplicate=lambda content: is_duplicate_pending(
+            content,
+            db_path=runtime_context.db_path,
+        ),
+        is_low_quality=is_low_quality_memory,
+    )
 
 
 def should_auto_save_memory(memory: dict, sensitive: bool) -> bool:
