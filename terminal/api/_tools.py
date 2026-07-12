@@ -43,6 +43,7 @@ from terminal.api.turn_pipeline import (
 )
 from terminal.api.tool_stage import summarize_api_tool_events
 from terminal.api.model_stream import has_fake_tool_markup as _has_fake_xml, iter_model_stream, iter_rescue_stream, select_model_for_turn, split_safe_model_chunk as _split_safe_model_chunk, stream_failure_events
+from terminal.api.memory_extraction import MemoryExtractionPorts, extract_memories
 from terminal.api.turn_receipt import MemoryExtractionScheduler, empty_reply_events, memory_compaction_events
 
 logger = logging.getLogger("archer_api")
@@ -1743,17 +1744,6 @@ def _execute_github_operation(draft: dict) -> str:
         return f"GitHub 操作失败：{exc}"
 
 
-# ---------------------------------------------------------------------------
-# File reference context
-# ---------------------------------------------------------------------------
-
-def _latest_user_text(messages: list[dict]) -> str:
-    for message in reversed(messages):
-        if message.get("role") == "user":
-            return str(message.get("content", "")).strip()
-    return ""
-
-
 def _file_reference_context(
     file_refs: list[dict],
     per_file_limit: int = 6000,
@@ -1799,116 +1789,37 @@ def _yield_memory_compaction_events():
     )
 
 
-def _should_auto_save_memory(memory: dict, sensitive: bool) -> bool:
-    if sensitive:
-        return False
-    mtype = str(memory.get("type", "insight") or "insight")
-    review_types = {
-        "emotion_pattern",
-        "value",
-        "value_conflict",
-        "life_theme",
-        "self_narrative",
-        "relationship_pattern",
-        "project_mythology",
-        "reflection_anchor",
-    }
-    if mtype in review_types:
-        return False
-    try:
-        confidence = float(memory.get("confidence", 0.7) or 0.7)
-    except Exception:
-        confidence = 0.0
-    try:
-        depth = int(memory.get("depth", 3) or 3)
-    except Exception:
-        depth = 3
-    return confidence >= 0.75 and depth <= 3
-
-
 def _do_extract_api(history: list[dict]) -> None:
-    if len(history) < 2:
-        return
     try:
         from core.orchestrator import (
             build_memory_candidate_policy,
             format_memory_candidate_reason,
             orchestrate_user_input,
         )
-        latest_user = _latest_user_text(history)
-        policy = None
-        suggest_reason = ""
-        if latest_user:
-            policy = build_memory_candidate_policy(
-                orchestrate_user_input(latest_user, history=history[:-1])
-            )
-            if not policy.should_extract:
-                logger.info("[memory] desktop extract skipped: no candidate policy")
-                return
-            suggest_reason = format_memory_candidate_reason(policy, latest_user)
         from memory.extract import extract
         from memory.store import add_pending, is_duplicate_pending, is_low_quality_memory, save
-        extract_kwargs = {}
-        if policy:
-            extract_kwargs = {
-                "candidate_types": policy.candidate_types,
-                "sensitive": policy.sensitive,
-            }
-        mems, _ = extract(history, **extract_kwargs)
-        staged = 0
-        saved = 0
-        skipped_dup = 0
-        skipped_low = 0
-        # Build session_summary: first user message, first 80 chars
-        session_summary = ""
-        for m in history:
-            if m.get("role") == "user":
-                content = str(m.get("content", "")).strip()
-                if content:
-                    session_summary = content[:80]
-                    break
-        for m in mems:
-            content = m.get("content", "")
-            mtype = m.get("type", "insight")
-            # 质量过滤
-            if is_low_quality_memory(content, mtype):
-                skipped_low += 1
-                continue
-            # 去重
-            if is_duplicate_pending(content):
-                skipped_dup += 1
-                continue
-            if _should_auto_save_memory(m, policy.sensitive if policy else False):
-                save(
-                    content=content,
-                    tags=m.get("tags", ""),
-                    type=mtype,
-                    importance=m.get("importance", 3),
-                    source="desktop",
-                    confidence=m.get("confidence", 0.7),
-                    depth=m.get("depth", 3),
-                    block_type=m.get("block_type"),
-                    label=m.get("label"),
-                )
-                saved += 1
-            else:
-                add_pending(
-                    content=content,
-                    type=mtype,
-                    importance=m.get("importance", 3),
-                    tags=m.get("tags", ""),
-                    source="desktop",
-                    confidence=m.get("confidence", 0.7),
-                    depth=m.get("depth", 3),
-                    suggest_reason=suggest_reason,
-                    block_type=m.get("block_type"),
-                    label=m.get("label"),
-                    session_summary=session_summary,
-                )
-                staged += 1
+        result = extract_memories(
+            history,
+            ports=MemoryExtractionPorts(
+                extract=extract,
+                save=save,
+                add_pending=add_pending,
+                is_duplicate=is_duplicate_pending,
+                is_low_quality=is_low_quality_memory,
+            ),
+            orchestrate=orchestrate_user_input,
+            build_policy=build_memory_candidate_policy,
+            format_reason=format_memory_candidate_reason,
+        )
+        if result.skip_reason == "candidate_policy":
+            logger.info("[memory] desktop extract skipped: no candidate policy")
+            return
         logger.info(
             "[memory] desktop extract: saved %d, staged %d, skipped %d dup, %d low-quality",
-            saved, staged, skipped_dup, skipped_low
+            result.saved,
+            result.staged,
+            result.skipped_duplicate,
+            result.skipped_low_quality,
         )
     except Exception as exc:
         logger.warning("[memory] desktop extract failed: %s", exc)
