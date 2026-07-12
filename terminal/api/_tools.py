@@ -32,6 +32,7 @@ from terminal.api.context_assembly import (
 )
 from terminal.api.chat_turn_context import FullTurnDependencies, prepare_full_turn
 from terminal.api.hugo_turn import HugoTurnDependencies, iter_hugo_turn_events
+from terminal.api.chat_reply import ChatReplyDependencies, iter_chat_reply_events
 from terminal.api.turn_pipeline import (
     assemble_model_messages,
     classify_turn,
@@ -1837,6 +1838,23 @@ def _hugo_turn_dependencies() -> HugoTurnDependencies:
     )
 
 
+def _chat_reply_dependencies() -> ChatReplyDependencies:
+    return ChatReplyDependencies(
+        select_model=select_model_for_turn,
+        load_config=_load_config,
+        iter_stream=iter_model_stream,
+        iter_rescue=iter_rescue_stream,
+        has_fake_markup=_has_fake_xml,
+        split_safe_chunk=_split_safe_model_chunk,
+        failure_events=lambda exc, *, trace_id: stream_failure_events(
+            exc,
+            trace_id=trace_id,
+            hint_factory=_failure_hint_event,
+        ),
+        empty_events=empty_reply_events,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Streaming chat with tool events
 # ---------------------------------------------------------------------------
@@ -2212,83 +2230,22 @@ def _iter_chat_chunks(
         obsidian_hint=obsidian_hint,
     )
 
-    # ── AI 主回复（收集完整回复用于后续草稿生成） ──
-    from core.model_select import resolve_active_model
-    active_model = select_model_for_turn(
-        _load_config(), query=query, intent=intent,
-        needs_tools=bool(intent_info.get("needs_tools")),
-        file_refs=file_refs, resolver=resolve_active_model,
+    ai_reply = yield from iter_chat_reply_events(
+        model_messages,
+        query=query,
+        intent=intent,
+        file_refs=file_refs,
+        selected_tools=_selected_tools,
+        memory_scope=memory_scope,
+        trace_id=trace_id,
+        had_tool_activity=bool(tool_loop_events or api_tool_events),
+        runtime_context=runtime_context,
+        dependencies=_chat_reply_dependencies(),
+        heartbeat_seconds=MODEL_STREAM_HEARTBEAT_SECONDS,
+        total_timeout_seconds=MODEL_STREAM_TOTAL_TIMEOUT_SECONDS,
     )
-    ai_reply_parts: list[str] = []
-    streamed_safe_text = ""
-    fake_markup_detected = False
-    try:
-        for item in iter_model_stream(
-            model_messages,
-            heartbeat_seconds=MODEL_STREAM_HEARTBEAT_SECONDS,
-            total_timeout_seconds=MODEL_STREAM_TOTAL_TIMEOUT_SECONDS,
-            model=active_model,
-        ):
-            if item.get("type") == "heartbeat":
-                yield {
-                    "type": "statusEvent",
-                    "statusEvent": {
-                        "id": f"model-wait-{uuid4().hex[:8]}",
-                        "intentType": intent,
-                        "intentLabel": "模型响应中",
-                        "matchedSkills": list(_selected_tools.keys()),
-                        "isBackground": False,
-                        "memoryScope": memory_scope,
-                        "traceId": trace_id,
-                    },
-                }
-                continue
-            chunk = str(item.get("text") or "")
-            if chunk:
-                ai_reply_parts.append(chunk)
-                if fake_markup_detected:
-                    continue
-                streamed_safe_text, safe_chunk, detected = _split_safe_model_chunk(streamed_safe_text, chunk)
-                if safe_chunk:
-                    yield {"type": "token", "text": safe_chunk}
-                if detected:
-                    fake_markup_detected = True
-    except Exception as stream_exc:
-        yield from stream_failure_events(stream_exc, trace_id=trace_id, hint_factory=_failure_hint_event)
+    if ai_reply is None:
         return
-    ai_reply = "".join(ai_reply_parts)
-
-    # ── DSML / 伪 XML 救援：DeepSeek 在多轮上下文中容易输出伪标签 ──
-    # 移植自 terminal/archer.py:582-592，Desktop API 之前缺失此逻辑
-    if _has_fake_xml(ai_reply):
-        for item in iter_rescue_stream(
-            model_messages, ai_reply, model=active_model,
-            heartbeat_seconds=MODEL_STREAM_HEARTBEAT_SECONDS,
-            total_timeout_seconds=MODEL_STREAM_TOTAL_TIMEOUT_SECONDS,
-        ):
-            if item.get("type") == "heartbeat":
-                yield {
-                    "type": "statusEvent",
-                    "statusEvent": {
-                        "id": f"model-rescue-wait-{uuid4().hex[:8]}",
-                        "intentType": intent,
-                        "intentLabel": "模型修正中",
-                        "matchedSkills": list(_selected_tools.keys()),
-                        "isBackground": False,
-                        "memoryScope": memory_scope,
-                        "traceId": trace_id,
-                    },
-                }
-            elif item.get("type") == "chunk":
-                yield {"type": "token", "text": item["text"]}
-            elif item.get("type") == "done" and item.get("text"):
-                ai_reply = str(item["text"])
-
-    if not ai_reply.strip():
-        yield from empty_reply_events(
-            had_tool_activity=bool(tool_loop_events or api_tool_events),
-            trace_id=trace_id,
-        )
 
     # ── AI 回复完成后：生成 Obsidian 写入草稿 ──
     if obsidian_write_intent:
