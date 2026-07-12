@@ -43,7 +43,7 @@ from terminal.api.turn_pipeline import (
 )
 from terminal.api.tool_stage import summarize_api_tool_events
 from terminal.api.model_stream import build_rescue_messages, has_fake_tool_markup as _has_fake_xml, iter_model_stream, select_model_for_turn, split_safe_model_chunk as _split_safe_model_chunk, stream_failure_events
-from terminal.api.turn_receipt import empty_reply_events, memory_compaction_events
+from terminal.api.turn_receipt import MemoryExtractionScheduler, empty_reply_events, memory_compaction_events
 
 logger = logging.getLogger("archer_api")
 MODEL_STREAM_HEARTBEAT_SECONDS = 8.0
@@ -1787,8 +1787,7 @@ def _chat(payload: dict) -> dict:
 # Background memory extraction
 # ---------------------------------------------------------------------------
 
-_api_extract_thread: threading.Thread | None = None
-_api_extract_lock = threading.Lock()
+_memory_extraction_scheduler = MemoryExtractionScheduler()
 
 
 def _yield_memory_compaction_events():
@@ -1916,15 +1915,7 @@ def _do_extract_api(history: list[dict]) -> None:
 
 
 def _bg_extract_api(history: list[dict]) -> None:
-    global _api_extract_thread
-    # 加锁避免多请求并发时 TOCTOU 竞态导致重复启动提取线程
-    with _api_extract_lock:
-        if _api_extract_thread and _api_extract_thread.is_alive():
-            return
-        _api_extract_thread = threading.Thread(
-            target=_do_extract_api, args=(list(history),), daemon=True
-        )
-        _api_extract_thread.start()
+    _memory_extraction_scheduler.schedule(history, _do_extract_api)
 
 
 def _soul_insight_for_orchestration() -> dict:

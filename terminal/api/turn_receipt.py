@@ -3,6 +3,23 @@
 from __future__ import annotations
 
 from uuid import uuid4
+import threading
+
+
+class MemoryExtractionScheduler:
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._thread: threading.Thread | None = None
+
+    def schedule(self, history: list[dict], target) -> bool:
+        with self._lock:
+            if self._thread and self._thread.is_alive():
+                return False
+            self._thread = threading.Thread(
+                target=target, args=(list(history),), daemon=True,
+            )
+            self._thread.start()
+            return True
 
 
 def empty_reply_events(*, had_tool_activity: bool, trace_id: str) -> list[dict]:
