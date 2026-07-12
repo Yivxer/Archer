@@ -9,6 +9,7 @@ import sys
 import threading
 from collections.abc import Iterator
 from pathlib import Path
+from uuid import uuid4
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(_PROJECT_ROOT) not in sys.path:
@@ -39,6 +40,10 @@ from terminal.api.contract import (
     versioned_dict,
 )
 from core.runtime_context import RuntimeContext, create_runtime_context
+from terminal.api.memory_extraction import (
+    MemoryExtractionSubscriber,
+    publish_memory_extraction_receipt,
+)
 from terminal.api.turn_context import TurnContext
 
 logger = logging.getLogger("archer_api")
@@ -126,12 +131,17 @@ def _chat_stream_events(
     messages = turn.messages
     reply_chunks: list[str] = []
     has_error = False
+    trace_id = ""
+    receipt_summary: dict = {}
     chunk_iter = _iter_chat_chunks(
         messages, turn.memory_mode, turn.obsidian_mode, turn.file_refs, runtime_context
     )
     try:
         try:
             for event in chunk_iter:
+                event_payload = event.get("runtimeContextEvent") or event.get("statusEvent") or {}
+                if not trace_id and isinstance(event_payload, dict):
+                    trace_id = str(event_payload.get("traceId", "") or "")
                 if event.get("type") == "token" and event.get("text"):
                     reply_chunks.append(str(event["text"]))
                 elif event.get("type") == "error":
@@ -149,7 +159,16 @@ def _chat_stream_events(
         # 只在流式正常结束且无错误时提取记忆
         if reply_chunks and not has_error:
             full_history = list(messages) + [{"role": "assistant", "content": "".join(reply_chunks)}]
-            _bg_extract_api(full_history, runtime_context=runtime_context)
+            if runtime_context is None:
+                _bg_extract_api(full_history)
+            else:
+                publish_memory_extraction_receipt(
+                    runtime_context,
+                    full_history,
+                    receipt_id=trace_id or f"turn-{uuid4().hex}",
+                    trace_id=trace_id,
+                    receipt=receipt_summary,
+                )
     finally:
         if callable(release_slot):
             release_slot()
@@ -199,6 +218,14 @@ def create_app(
             llm_client=DefaultLLMClient(),
         )
     configure_llm_client(resolved_runtime_context.llm_client)
+    memory_extraction_subscriber = MemoryExtractionSubscriber(
+        resolved_runtime_context,
+        schedule=lambda history, active_context: _bg_extract_api(
+            history,
+            runtime_context=active_context,
+        ),
+    )
+    memory_extraction_subscriber.subscribe()
 
     app = FastAPI(
         title="Archer Desktop API",
@@ -209,6 +236,7 @@ def create_app(
     app.state.chat_stream_semaphore = threading.BoundedSemaphore(DEFAULT_MAX_CHAT_STREAMS)
     app.state.active_context_mgr = active_context_mgr
     app.state.runtime_context = resolved_runtime_context
+    app.state.memory_extraction_subscriber = memory_extraction_subscriber
 
     @app.on_event("startup")
     def _on_startup() -> None:

@@ -13,6 +13,7 @@ from typing import Any, Callable
 
 SESSION_END = "session_end"
 INITIATIVE_DUE = "initiative_due"
+TURN_RECEIPT_READY = "turn_receipt_ready"
 
 
 @dataclass(frozen=True)

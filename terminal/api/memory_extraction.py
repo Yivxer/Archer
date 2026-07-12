@@ -4,8 +4,14 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+import logging
+import threading
 
+from core.event_bus import ArcherEvent, TURN_RECEIPT_READY
 from core.runtime_context import RuntimeContext
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -24,6 +30,55 @@ class MemoryExtractionResult:
     skipped_duplicate: int = 0
     skipped_low_quality: int = 0
     skip_reason: str = ""
+
+
+class MemoryExtractionSubscriber:
+    def __init__(self, runtime_context: RuntimeContext, *, schedule: Callable) -> None:
+        self._runtime_context = runtime_context
+        self._schedule = schedule
+        self._seen_receipts: set[str] = set()
+        self._lock = threading.Lock()
+        self._subscribed = False
+
+    def subscribe(self) -> None:
+        if self._subscribed:
+            return
+        self._runtime_context.event_bus.subscribe(TURN_RECEIPT_READY, self)
+        self._subscribed = True
+
+    def __call__(self, event: ArcherEvent) -> None:
+        receipt_id = str(event.payload.get("receiptId", "") or "")
+        if not receipt_id:
+            return
+        with self._lock:
+            if receipt_id in self._seen_receipts:
+                return
+            self._seen_receipts.add(receipt_id)
+        try:
+            history = list(event.payload.get("history") or [])
+            self._schedule(history, self._runtime_context)
+        except Exception as exc:
+            logger.warning("[memory] receipt subscriber failed: %s", exc)
+
+
+def publish_memory_extraction_receipt(
+    runtime_context: RuntimeContext,
+    history: list[dict],
+    *,
+    receipt_id: str,
+    trace_id: str = "",
+    receipt: dict | None = None,
+) -> ArcherEvent:
+    return runtime_context.event_bus.publish(ArcherEvent(
+        type=TURN_RECEIPT_READY,
+        source="terminal.api.chat_stream",
+        payload={
+            "receiptId": receipt_id,
+            "traceId": trace_id,
+            "history": list(history),
+            "receipt": dict(receipt or {}),
+        },
+    ))
 
 
 def build_runtime_memory_extraction_ports(

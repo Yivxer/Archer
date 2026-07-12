@@ -4,9 +4,11 @@ import sqlite3
 from core.runtime_context import create_runtime_context
 from memory.store import init_db
 from terminal.api.memory_extraction import (
+    MemoryExtractionSubscriber,
     MemoryExtractionPorts,
     build_runtime_memory_extraction_ports,
     extract_memories,
+    publish_memory_extraction_receipt,
 )
 
 
@@ -140,3 +142,34 @@ def test_runtime_memory_extraction_ports_isolate_database_and_llm(tmp_path):
         assert connection.execute("SELECT content FROM pending_memories").fetchone()[0] == "isolated stable preference"
     with sqlite3.connect(second.db_path) as connection:
         assert connection.execute("SELECT COUNT(*) FROM pending_memories").fetchone()[0] == 0
+
+
+def test_memory_extraction_receipt_schedules_once_per_receipt(tmp_path):
+    context = create_runtime_context(db_path=tmp_path / "memory.db")
+    scheduled = []
+    subscriber = MemoryExtractionSubscriber(
+        context,
+        schedule=lambda history, runtime_context: scheduled.append((history, runtime_context)),
+    )
+    subscriber.subscribe()
+    history = [{"role": "user", "content": "remember this"}]
+
+    publish_memory_extraction_receipt(context, history, receipt_id="receipt-1", trace_id="trace-1")
+    publish_memory_extraction_receipt(context, history, receipt_id="receipt-1", trace_id="trace-1")
+
+    assert scheduled == [(history, context)]
+
+
+def test_memory_extraction_subscriber_failure_does_not_escape(tmp_path):
+    context = create_runtime_context(db_path=tmp_path / "memory.db")
+    subscriber = MemoryExtractionSubscriber(
+        context,
+        schedule=lambda history, runtime_context: (_ for _ in ()).throw(RuntimeError("boom")),
+    )
+    subscriber.subscribe()
+
+    publish_memory_extraction_receipt(
+        context,
+        [{"role": "user", "content": "remember this"}],
+        receipt_id="receipt-1",
+    )
