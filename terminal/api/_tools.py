@@ -4,11 +4,8 @@ from __future__ import annotations
 
 import json
 import logging
-import queue
 import re
 import subprocess
-import threading
-import time
 from pathlib import Path
 from uuid import uuid4
 
@@ -34,6 +31,7 @@ from terminal.api.context_assembly import (
     file_reference_context,
 )
 from terminal.api.chat_turn_context import FullTurnDependencies, prepare_full_turn
+from terminal.api.hugo_turn import HugoTurnDependencies, iter_hugo_turn_events
 from terminal.api.turn_pipeline import (
     assemble_model_messages,
     classify_turn,
@@ -1821,6 +1819,24 @@ def _full_turn_dependencies() -> FullTurnDependencies:
     )
 
 
+def _hugo_turn_dependencies() -> HugoTurnDependencies:
+    return HugoTurnDependencies(
+        delete=_try_direct_hugo_delete,
+        redeploy=lambda query, refs, messages: _try_direct_hugo_redeploy_with_attachment(
+            query, refs, messages=messages,
+        ),
+        deploy_existing=_try_direct_hugo_deploy_existing,
+        publish=lambda query, refs, messages: _try_direct_hugo_publish(
+            query, refs, messages=messages,
+        ),
+        agent=lambda messages, query, refs: _run_hugo_agent_turn(
+            messages, query, file_refs=refs,
+        ),
+        trace_event=_with_trace_id,
+        failure_hint=_failure_hint_event,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Streaming chat with tool events
 # ---------------------------------------------------------------------------
@@ -2059,79 +2075,18 @@ def _iter_chat_chunks(
         stance_prompt = ""
     # ── 枫弋札记：附件/路径直发 或 LLM 工具链，自动执行，不弹确认卡
     if _wants_hugo_publish(query, file_refs) and "hugo_blog" in _selected_tools:
-        output: queue.Queue[tuple[str, object]] = queue.Queue()
-
-        def run_hugo_workflow() -> None:
-            try:
-                direct = _try_direct_hugo_delete(query)
-                if not direct:
-                    # 优先尝试带附件重新部署（确定性路径，不弹确认卡，不进 LLM agent）
-                    direct = _try_direct_hugo_redeploy_with_attachment(query, file_refs, messages=enriched_messages)
-                if not direct:
-                    direct = _try_direct_hugo_deploy_existing(enriched_messages, query)
-                if not direct:
-                    direct = _try_direct_hugo_publish(query, file_refs, messages=enriched_messages)
-                if direct:
-                    output.put(("result", direct))
-                    return
-                _, agent_events, agent_summary = _run_hugo_agent_turn(
-                    enriched_messages, query, file_refs=file_refs,
-                )
-                output.put(("result", (agent_events, agent_summary)))
-            except Exception as exc:
-                output.put(("error", exc))
-
-        thread = threading.Thread(target=run_hugo_workflow, daemon=True)
-        thread.start()
-        started = time.monotonic()
-        while True:
-            if time.monotonic() - started > HUGO_WORKFLOW_TOTAL_TIMEOUT_SECONDS:
-                raise TimeoutError("hugo workflow total timeout")
-            try:
-                kind, value = output.get(timeout=HUGO_WORKFLOW_HEARTBEAT_SECONDS)
-            except queue.Empty:
-                yield {
-                    "type": "statusEvent",
-                    "statusEvent": {
-                        "id": f"hugo-wait-{uuid4().hex[:8]}",
-                        "intentType": intent,
-                        "intentLabel": "枫弋札记部署中",
-                        "matchedSkills": list(_selected_tools.keys()),
-                        "isBackground": False,
-                        "memoryScope": memory_scope,
-                        "traceId": trace_id,
-                    },
-                }
-                continue
-            if kind == "error":
-                raise value
-            hugo_events, hugo_summary = value  # type: ignore[misc]
-            break
-
-        for event in hugo_events:
-            yield _with_trace_id(event, trace_id)
-        if any(
-            isinstance(event, dict)
-            and event.get("toolEvent", {}).get("status") == "blocked"
-            for event in hugo_events
-        ):
-            yield {
-                "type": "failureHintEvent",
-                "failureHintEvent": _failure_hint_event(
-                    RuntimeError(hugo_summary or "hugo workflow failed"),
-                    stage="hugo_workflow",
-                    trace_id=trace_id,
-                ),
-            }
-        yield {"type": "ready", "ready": True}
-        if hugo_summary:
-            yield {"type": "token", "text": hugo_summary}
-        else:
-            yield {
-                "type": "token",
-                "text": "未能完成枫弋札记操作。请用附件添加 .md 文件，或说明要部署哪篇文章。",
-            }
-        yield {"type": "done", "done": True}
+        yield from iter_hugo_turn_events(
+            query=query,
+            file_refs=file_refs,
+            messages=enriched_messages,
+            intent=intent,
+            selected_tools=_selected_tools,
+            memory_scope=memory_scope,
+            trace_id=trace_id,
+            dependencies=_hugo_turn_dependencies(),
+            heartbeat_seconds=HUGO_WORKFLOW_HEARTBEAT_SECONDS,
+            total_timeout_seconds=HUGO_WORKFLOW_TOTAL_TIMEOUT_SECONDS,
+        )
         return
 
     api_tool_events = list(_iter_api_tool_events(query, turn_plan=_turn_plan))
