@@ -185,18 +185,18 @@ def create_app(
 
     resolved_runtime_context = runtime_context
     if resolved_runtime_context is None:
-        import core.llm as default_llm_client
+        from core.llm_client import DefaultLLMClient
 
-        resolved_runtime_context = create_runtime_context(llm_client=default_llm_client)
+        resolved_runtime_context = create_runtime_context(llm_client=DefaultLLMClient())
     elif resolved_runtime_context.llm_client is None:
-        import core.llm as default_llm_client
+        from core.llm_client import DefaultLLMClient
 
         resolved_runtime_context = create_runtime_context(
             db_path=resolved_runtime_context.db_path,
             config=resolved_runtime_context.config,
             clock=resolved_runtime_context.clock,
             event_bus=resolved_runtime_context.event_bus,
-            llm_client=default_llm_client,
+            llm_client=DefaultLLMClient(),
         )
     configure_llm_client(resolved_runtime_context.llm_client)
 

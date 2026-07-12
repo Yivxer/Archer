@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from core.event_bus import ArcherEventBus
+from core.llm_client import LLMClient
 from core.paths import memory_db_path
 
 
@@ -25,7 +26,7 @@ class RuntimeContext:
     config: Mapping[str, Any]
     clock: Clock
     event_bus: ArcherEventBus
-    llm_client: Any | None
+    llm_client: LLMClient | None
 
     def now(self) -> datetime:
         return self.clock()
@@ -37,7 +38,7 @@ def create_runtime_context(
     config: Mapping[str, Any] | None = None,
     clock: Clock | None = None,
     event_bus: ArcherEventBus | None = None,
-    llm_client: Any | None = None,
+    llm_client: LLMClient | None = None,
 ) -> RuntimeContext:
     """Build dependencies at call time so tests and app roots can isolate state."""
     resolved_db_path = (

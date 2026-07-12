@@ -8,6 +8,8 @@ import threading
 import time
 from collections.abc import Callable, Iterator
 
+from core.llm_client import LLMClient
+
 DSML_MARKER = "｜｜DSML｜｜"
 FAKE_XML_RE = re.compile(
     r"<(读取文件|写入文件|搜索文件|文件查找|参数|tool_call|invoke|function_call|execute)[^>]{0,60}>",
@@ -66,7 +68,7 @@ def build_rescue_messages(model_messages: list[dict], invalid_reply: str) -> lis
 def iter_rescue_stream(
     model_messages: list[dict], invalid_reply: str, *, model: str,
     heartbeat_seconds: float = 8.0, total_timeout_seconds: float = 180.0,
-    stream: Callable | None = None,
+    stream: Callable | None = None, llm_client: LLMClient | None = None,
 ) -> Iterator[dict]:
     """Stream a natural-language retry and finish with its collected text."""
     parts: list[str] = []
@@ -76,6 +78,7 @@ def iter_rescue_stream(
             heartbeat_seconds=heartbeat_seconds,
             total_timeout_seconds=total_timeout_seconds,
             stream=stream,
+            llm_client=llm_client,
             model=model,
         ):
             if event.get("type") == "heartbeat":
@@ -107,13 +110,16 @@ def select_model_for_turn(
 
 def iter_model_stream(
     messages: list[dict], *, heartbeat_seconds: float = 8.0,
-    total_timeout_seconds: float = 180.0, stream: Callable | None = None, **kwargs,
+    total_timeout_seconds: float = 180.0, stream: Callable | None = None,
+    llm_client: LLMClient | None = None, **kwargs,
 ) -> Iterator[dict]:
     output: queue.Queue[tuple[str, object]] = queue.Queue()
 
     def worker() -> None:
         try:
-            if stream is None:
+            if stream is None and llm_client is not None:
+                active_stream = llm_client.stream_chat
+            elif stream is None:
                 from core.llm import stream_chat
                 active_stream = stream_chat
             else:

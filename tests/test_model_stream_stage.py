@@ -17,6 +17,17 @@ def test_model_stream_stage_emits_chunks():
     ]
 
 
+def test_model_stream_uses_injected_llm_client():
+    class FakeClient:
+        def stream_chat(self, messages, **kwargs):
+            return iter(["injected"])
+
+    assert list(iter_model_stream(
+        [{"role": "user", "content": "hi"}],
+        llm_client=FakeClient(),
+    )) == [{"type": "chunk", "text": "injected"}]
+
+
 def test_model_selection_detects_image_attachment():
     calls = []
     model = select_model_for_turn({}, query="look", intent="chat", needs_tools=False, file_refs=[{"type": "image"}], resolver=lambda config, **kwargs: (calls.append(kwargs) or "vision", {}))
