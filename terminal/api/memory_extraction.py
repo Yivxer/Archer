@@ -9,9 +9,11 @@ import threading
 
 from core.event_bus import ArcherEvent, TURN_RECEIPT_READY
 from core.runtime_context import RuntimeContext
+from terminal.api.turn_receipt import MemoryExtractionScheduler
 
 
 logger = logging.getLogger(__name__)
+_memory_extraction_scheduler = MemoryExtractionScheduler()
 
 
 @dataclass
@@ -207,3 +209,53 @@ def extract_memories(
         skipped_duplicate=skipped_duplicate,
         skipped_low_quality=skipped_low_quality,
     )
+
+
+def _do_extract_api(history: list[dict], *, runtime_context=None) -> None:
+    try:
+        from core.orchestrator import (
+            build_memory_candidate_policy,
+            format_memory_candidate_reason,
+            orchestrate_user_input,
+        )
+        if runtime_context is not None:
+            ports = build_runtime_memory_extraction_ports(runtime_context)
+        else:
+            from memory.extract import extract
+            from memory.store import add_pending, is_duplicate_pending, is_low_quality_memory, save
+            ports = MemoryExtractionPorts(
+                extract=extract,
+                save=save,
+                add_pending=add_pending,
+                is_duplicate=is_duplicate_pending,
+                is_low_quality=is_low_quality_memory,
+            )
+        result = extract_memories(
+            history,
+            ports=ports,
+            orchestrate=orchestrate_user_input,
+            build_policy=build_memory_candidate_policy,
+            format_reason=format_memory_candidate_reason,
+        )
+        if result.skip_reason == "candidate_policy":
+            logger.info("[memory] desktop extract skipped: no candidate policy")
+            return
+        logger.info(
+            "[memory] desktop extract: saved %d, staged %d, skipped %d dup, %d low-quality",
+            result.saved,
+            result.staged,
+            result.skipped_duplicate,
+            result.skipped_low_quality,
+        )
+    except Exception as exc:
+        logger.warning("[memory] desktop extract failed: %s", exc)
+
+
+def _bg_extract_api(history: list[dict], *, runtime_context=None) -> None:
+    target = _do_extract_api
+    if runtime_context is not None:
+        target = lambda active_history: _do_extract_api(
+            active_history,
+            runtime_context=runtime_context,
+        )
+    _memory_extraction_scheduler.schedule(history, target)

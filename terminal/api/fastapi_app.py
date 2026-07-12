@@ -30,10 +30,7 @@ from terminal.api._security import (
     error_response,
     normalize_error_payload,
 )
-from terminal.api._tools import (
-    _bg_extract_api,
-    _iter_chat_chunks,
-)
+from terminal.api._tools import _iter_chat_chunks
 from terminal.api.contract import (
     CONTRACT_VERSION,
     CONTRACT_VERSION_HEADER,
@@ -41,6 +38,7 @@ from terminal.api.contract import (
 )
 from core.runtime_context import RuntimeContext, create_runtime_context
 from terminal.api.memory_extraction import (
+    _bg_extract_api,
     MemoryExtractionSubscriber,
     publish_memory_extraction_receipt,
 )

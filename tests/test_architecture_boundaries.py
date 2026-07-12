@@ -138,3 +138,12 @@ def test_memory_extraction_stage_never_reads_global_store_db_path():
 
     assert "memory.store.DB_PATH" not in source
     assert "from memory.store import DB_PATH" not in source
+
+
+@pytest.mark.contract
+def test_tools_facade_does_not_own_extracted_stage_executors():
+    source = (ROOT / "terminal/api/_tools.py").read_text(encoding="utf-8")
+
+    assert "def _do_extract_api(" not in source
+    assert "def _bg_extract_api(" not in source
+    assert "def _iter_model_stream_with_heartbeat(" not in source

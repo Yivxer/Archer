@@ -43,8 +43,8 @@ from terminal.api.turn_pipeline import (
 )
 from terminal.api.tool_stage import summarize_api_tool_events
 from terminal.api.model_stream import has_fake_tool_markup as _has_fake_xml, iter_model_stream, iter_rescue_stream, select_model_for_turn, split_safe_model_chunk as _split_safe_model_chunk, stream_failure_events
-from terminal.api.memory_extraction import MemoryExtractionPorts, build_runtime_memory_extraction_ports, extract_memories
-from terminal.api.turn_receipt import MemoryExtractionScheduler, empty_reply_events, memory_compaction_events
+from terminal.api.memory_extraction import _bg_extract_api, _do_extract_api
+from terminal.api.turn_receipt import empty_reply_events, memory_compaction_events
 
 logger = logging.getLogger("archer_api")
 MODEL_STREAM_HEARTBEAT_SECONDS = 8.0
@@ -145,12 +145,6 @@ def _with_trace_id(event: dict, trace_id: str) -> dict:
             payload["draft"].setdefault("traceId", trace_id)
     return event
 
-
-def _iter_model_stream_with_heartbeat(messages: list[dict], **kwargs):
-    yield from iter_model_stream(
-        messages, heartbeat_seconds=MODEL_STREAM_HEARTBEAT_SECONDS,
-        total_timeout_seconds=MODEL_STREAM_TOTAL_TIMEOUT_SECONDS, **kwargs,
-    )
 
 # ---------------------------------------------------------------------------
 # Intent detection helpers（委托 core/desktop_tool_router，保留旧函数名兼容测试）
@@ -1777,9 +1771,6 @@ def _chat(payload: dict) -> dict:
 # Background memory extraction
 # ---------------------------------------------------------------------------
 
-_memory_extraction_scheduler = MemoryExtractionScheduler()
-
-
 def _yield_memory_compaction_events():
     from core.orchestrator import maybe_run_memory_compaction_after_turn
     yield from memory_compaction_events(
@@ -1787,56 +1778,6 @@ def _yield_memory_compaction_events():
         event_factory=_tool_event,
         warn=lambda detail: logger.warning("[memory] compaction failed: %s", detail),
     )
-
-
-def _do_extract_api(history: list[dict], *, runtime_context=None) -> None:
-    try:
-        from core.orchestrator import (
-            build_memory_candidate_policy,
-            format_memory_candidate_reason,
-            orchestrate_user_input,
-        )
-        if runtime_context is not None:
-            ports = build_runtime_memory_extraction_ports(runtime_context)
-        else:
-            from memory.extract import extract
-            from memory.store import add_pending, is_duplicate_pending, is_low_quality_memory, save
-            ports = MemoryExtractionPorts(
-                extract=extract,
-                save=save,
-                add_pending=add_pending,
-                is_duplicate=is_duplicate_pending,
-                is_low_quality=is_low_quality_memory,
-            )
-        result = extract_memories(
-            history,
-            ports=ports,
-            orchestrate=orchestrate_user_input,
-            build_policy=build_memory_candidate_policy,
-            format_reason=format_memory_candidate_reason,
-        )
-        if result.skip_reason == "candidate_policy":
-            logger.info("[memory] desktop extract skipped: no candidate policy")
-            return
-        logger.info(
-            "[memory] desktop extract: saved %d, staged %d, skipped %d dup, %d low-quality",
-            result.saved,
-            result.staged,
-            result.skipped_duplicate,
-            result.skipped_low_quality,
-        )
-    except Exception as exc:
-        logger.warning("[memory] desktop extract failed: %s", exc)
-
-
-def _bg_extract_api(history: list[dict], *, runtime_context=None) -> None:
-    target = _do_extract_api
-    if runtime_context is not None:
-        target = lambda active_history: _do_extract_api(
-            active_history,
-            runtime_context=runtime_context,
-        )
-    _memory_extraction_scheduler.schedule(history, target)
 
 
 def _soul_insight_for_orchestration() -> dict:
@@ -1952,7 +1893,12 @@ def _iter_simple_chat_path(
     streamed_safe_text = ""
     fake_markup_detected = False
     try:
-        for item in _iter_model_stream_with_heartbeat(model_messages, model=active_model):
+        for item in iter_model_stream(
+            model_messages,
+            heartbeat_seconds=MODEL_STREAM_HEARTBEAT_SECONDS,
+            total_timeout_seconds=MODEL_STREAM_TOTAL_TIMEOUT_SECONDS,
+            model=active_model,
+        ):
             if item.get("type") == "heartbeat":
                 yield {
                     "type": "statusEvent",
@@ -2383,7 +2329,12 @@ def _iter_chat_chunks(
     streamed_safe_text = ""
     fake_markup_detected = False
     try:
-        for item in _iter_model_stream_with_heartbeat(model_messages, model=active_model):
+        for item in iter_model_stream(
+            model_messages,
+            heartbeat_seconds=MODEL_STREAM_HEARTBEAT_SECONDS,
+            total_timeout_seconds=MODEL_STREAM_TOTAL_TIMEOUT_SECONDS,
+            model=active_model,
+        ):
             if item.get("type") == "heartbeat":
                 yield {
                     "type": "statusEvent",
