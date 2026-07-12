@@ -43,6 +43,7 @@ from terminal.api.turn_pipeline import (
 )
 from terminal.api.tool_stage import summarize_api_tool_events
 from terminal.api.model_stream import build_rescue_messages, has_fake_tool_markup as _has_fake_xml, iter_model_stream, select_model_for_turn, split_safe_model_chunk as _split_safe_model_chunk, stream_failure_events
+from terminal.api.turn_receipt import empty_reply_events
 
 logger = logging.getLogger("archer_api")
 MODEL_STREAM_HEARTBEAT_SECONDS = 8.0
@@ -2550,29 +2551,10 @@ def _iter_chat_chunks(
                 ai_reply = "".join(rescue_parts)
 
     if not ai_reply.strip():
-        had_tool_activity = bool(tool_loop_events or api_tool_events)
-        # B1.1: 兜底 token —— 让终端/web/三方客户端都能拿到文案，不只依赖前端 failureHintFallback
-        fallback_text = (
-            "已执行操作，详见上方卡片。"
-            if had_tool_activity else
-            "模型没有返回内容，请打开诊断查看原因。"
+        yield from empty_reply_events(
+            had_tool_activity=bool(tool_loop_events or api_tool_events),
+            trace_id=trace_id,
         )
-        yield {"type": "token", "text": fallback_text}
-        yield {
-            "type": "failureHintEvent",
-            "failureHintEvent": {
-                "id": f"failure-hint-{uuid4().hex[:8]}",
-                "traceId": trace_id,
-                "keyword": "tool_executed_no_summary" if had_tool_activity else "model_empty_response",
-                "stage": "model_stream",
-                "recoverable": True,
-                "detail": (
-                    "工具事件已产生，但模型没有返回总结文本。"
-                    if had_tool_activity else
-                    "模型请求结束但没有返回可显示文本。"
-                ),
-            },
-        }
 
     # ── AI 回复完成后：生成 Obsidian 写入草稿 ──
     if obsidian_write_intent:
