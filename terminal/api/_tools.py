@@ -42,43 +42,13 @@ from terminal.api.turn_pipeline import (
     trim_model_messages as _trim_model_messages_for_context,
 )
 from terminal.api.tool_stage import summarize_api_tool_events
-from terminal.api.model_stream import iter_model_stream, select_model_for_turn
+from terminal.api.model_stream import has_fake_tool_markup as _has_fake_xml, iter_model_stream, select_model_for_turn, split_safe_model_chunk as _split_safe_model_chunk
 
 logger = logging.getLogger("archer_api")
 MODEL_STREAM_HEARTBEAT_SECONDS = 8.0
 MODEL_STREAM_TOTAL_TIMEOUT_SECONDS = 180.0
 HUGO_WORKFLOW_HEARTBEAT_SECONDS = 8.0
 HUGO_WORKFLOW_TOTAL_TIMEOUT_SECONDS = 300.0
-
-# DeepSeek 伪 XML / DSML 残留检测（移植自 terminal/archer.py:228-235）
-_DSML_MARKER = "｜｜DSML｜｜"
-_FAKE_XML_RE = re.compile(
-    r"<(读取文件|写入文件|搜索文件|文件查找|参数|tool_call|invoke|function_call|execute)[^>]{0,60}>",
-    re.IGNORECASE,
-)
-
-
-def _has_fake_xml(text: str) -> bool:
-    """检测 DeepSeek 输出的伪 XML 假标签或 DSML 残留。"""
-    return bool(_FAKE_XML_RE.search(text)) or _DSML_MARKER in text
-
-
-def _split_safe_model_chunk(buffer: str, chunk: str) -> tuple[str, str, bool]:
-    """Return stream-safe text before fake tool markup and whether markup appeared."""
-    combined = buffer + chunk
-    if _has_fake_xml(combined):
-        earliest = len(combined)
-        marker_index = combined.find(_DSML_MARKER)
-        if marker_index >= 0:
-            earliest = min(earliest, marker_index)
-        match = _FAKE_XML_RE.search(combined)
-        if match:
-            earliest = min(earliest, match.start())
-        safe_combined = combined[:earliest]
-        safe_text = safe_combined[len(buffer):] if len(safe_combined) > len(buffer) else ""
-        return safe_combined, safe_text, True
-    return combined, chunk, False
-
 
 from terminal.api.part8_runtime import (
     _initiative_event_from_log,
