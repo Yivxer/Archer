@@ -8,6 +8,21 @@ import time
 from collections.abc import Callable, Iterator
 
 
+def select_model_for_turn(
+    config: dict, *, query: str, intent: str, needs_tools: bool,
+    file_refs: list[dict] | None, resolver: Callable | None = None,
+) -> str:
+    if resolver is None:
+        from core.model_select import resolve_active_model
+        resolver = resolve_active_model
+    has_images = bool(file_refs and any(ref.get("type") == "image" for ref in file_refs))
+    model, _ = resolver(
+        config, user_text=query, intent=intent,
+        needs_tools=needs_tools, has_images=has_images,
+    )
+    return model
+
+
 def iter_model_stream(
     messages: list[dict], *, heartbeat_seconds: float = 8.0,
     total_timeout_seconds: float = 180.0, stream: Callable | None = None, **kwargs,

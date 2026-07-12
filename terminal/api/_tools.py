@@ -42,7 +42,7 @@ from terminal.api.turn_pipeline import (
     trim_model_messages as _trim_model_messages_for_context,
 )
 from terminal.api.tool_stage import summarize_api_tool_events
-from terminal.api.model_stream import iter_model_stream
+from terminal.api.model_stream import iter_model_stream, select_model_for_turn
 
 logger = logging.getLogger("archer_api")
 MODEL_STREAM_HEARTBEAT_SECONDS = 8.0
@@ -2075,13 +2075,9 @@ def _iter_simple_chat_path(
     )
 
     # 主模型 stream
-    has_images = bool(file_refs and any(r.get("type") == "image" for r in file_refs))
-    active_model, _ = resolve_active_model(
-        _load_config(),
-        user_text=query,
-        intent="chat",
-        needs_tools=False,
-        has_images=has_images,
+    active_model = select_model_for_turn(
+        _load_config(), query=query, intent="chat", needs_tools=False,
+        file_refs=file_refs, resolver=resolve_active_model,
     )
     ai_reply_parts: list[str] = []
     streamed_safe_text = ""
@@ -2532,13 +2528,10 @@ def _iter_chat_chunks(
 
     # ── AI 主回复（收集完整回复用于后续草稿生成） ──
     from core.model_select import resolve_active_model
-    has_images = bool(file_refs and any(r.get("type") == "image" for r in file_refs))
-    active_model, _ = resolve_active_model(
-        _load_config(),
-        user_text=query,
-        intent=intent,
+    active_model = select_model_for_turn(
+        _load_config(), query=query, intent=intent,
         needs_tools=bool(intent_info.get("needs_tools")),
-        has_images=has_images,
+        file_refs=file_refs, resolver=resolve_active_model,
     )
     ai_reply_parts: list[str] = []
     streamed_safe_text = ""
