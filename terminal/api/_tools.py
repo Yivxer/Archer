@@ -42,7 +42,7 @@ from terminal.api.turn_pipeline import (
     trim_model_messages as _trim_model_messages_for_context,
 )
 from terminal.api.tool_stage import summarize_api_tool_events
-from terminal.api.model_stream import has_fake_tool_markup as _has_fake_xml, iter_model_stream, select_model_for_turn, split_safe_model_chunk as _split_safe_model_chunk, stream_failure_events
+from terminal.api.model_stream import build_rescue_messages, has_fake_tool_markup as _has_fake_xml, iter_model_stream, select_model_for_turn, split_safe_model_chunk as _split_safe_model_chunk, stream_failure_events
 
 logger = logging.getLogger("archer_api")
 MODEL_STREAM_HEARTBEAT_SECONDS = 8.0
@@ -2085,13 +2085,7 @@ def _iter_simple_chat_path(
 
     # DSML / 伪 XML 救援
     if _has_fake_xml(ai_reply):
-        rescue_messages = list(model_messages) + [
-            {"role": "assistant", "content": ai_reply},
-            {"role": "user", "content": (
-                "你刚才输出了假标签（如 <读取文件>）或 DSML 标记，这些不会被执行。"
-                "请直接用自然语言重新回答刚才的问题，不要输出任何 XML、伪标签或 function call 语法。"
-            )},
-        ]
+        rescue_messages = build_rescue_messages(model_messages, ai_reply)
         rescue_parts: list[str] = []
         try:
             for item in _iter_model_stream_with_heartbeat(rescue_messages, model=active_model):
@@ -2526,13 +2520,7 @@ def _iter_chat_chunks(
     # ── DSML / 伪 XML 救援：DeepSeek 在多轮上下文中容易输出伪标签 ──
     # 移植自 terminal/archer.py:582-592，Desktop API 之前缺失此逻辑
     if _has_fake_xml(ai_reply):
-        rescue_messages = list(model_messages) + [
-            {"role": "assistant", "content": ai_reply},
-            {"role": "user", "content": (
-                "你刚才输出了假标签（如 <读取文件>）或 DSML 标记，这些不会被执行。"
-                "请直接用自然语言重新回答刚才的问题，不要输出任何 XML、伪标签或 function call 语法。"
-            )},
-        ]
+        rescue_messages = build_rescue_messages(model_messages, ai_reply)
         rescue_parts: list[str] = []
         try:
             for item in _iter_model_stream_with_heartbeat(rescue_messages, model=active_model):

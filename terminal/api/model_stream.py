@@ -52,6 +52,17 @@ def stream_failure_events(exc: Exception, *, trace_id: str, hint_factory: Callab
     ]
 
 
+def build_rescue_messages(model_messages: list[dict], invalid_reply: str) -> list[dict]:
+    return [
+        *model_messages,
+        {"role": "assistant", "content": invalid_reply},
+        {"role": "user", "content": (
+            "你刚才输出了假标签（如 <读取文件>）或 DSML 标记，这些不会被执行。"
+            "请直接用自然语言重新回答刚才的问题，不要输出任何 XML、伪标签或 function call 语法。"
+        )},
+    ]
+
+
 def select_model_for_turn(
     config: dict, *, query: str, intent: str, needs_tools: bool,
     file_refs: list[dict] | None, resolver: Callable | None = None,
