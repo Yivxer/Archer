@@ -42,7 +42,7 @@ from terminal.api.turn_pipeline import (
     trim_model_messages as _trim_model_messages_for_context,
 )
 from terminal.api.tool_stage import summarize_api_tool_events
-from terminal.api.model_stream import has_fake_tool_markup as _has_fake_xml, iter_model_stream, select_model_for_turn, split_safe_model_chunk as _split_safe_model_chunk
+from terminal.api.model_stream import has_fake_tool_markup as _has_fake_xml, iter_model_stream, select_model_for_turn, split_safe_model_chunk as _split_safe_model_chunk, stream_failure_events
 
 logger = logging.getLogger("archer_api")
 MODEL_STREAM_HEARTBEAT_SECONDS = 8.0
@@ -2079,21 +2079,7 @@ def _iter_simple_chat_path(
                 if detected:
                     fake_markup_detected = True
     except Exception as stream_exc:
-        err_msg = str(stream_exc)[:300] or type(stream_exc).__name__
-        if "rate" in err_msg.lower() or "limit" in err_msg.lower():
-            yield {"type": "token", "text": "\n\n（请求太频繁，稍等几秒再试。）"}
-        elif "timeout" in err_msg.lower() or "connect" in err_msg.lower():
-            yield {"type": "token", "text": "\n\n（连接超时，请检查本地 API 是否正常运行。）"}
-        else:
-            yield {"type": "token", "text": f"\n\n（回复生成中断：{err_msg}）"}
-        yield {
-            "type": "failureHintEvent",
-            "failureHintEvent": _failure_hint_event(
-                stream_exc, stage="model_stream", trace_id=trace_id
-            ),
-        }
-        yield {"type": "error", "detail": err_msg}
-        yield {"type": "done", "done": True}
+        yield from stream_failure_events(stream_exc, trace_id=trace_id, hint_factory=_failure_hint_event)
         return
     ai_reply = "".join(ai_reply_parts)
 
@@ -2533,16 +2519,7 @@ def _iter_chat_chunks(
                 if detected:
                     fake_markup_detected = True
     except Exception as stream_exc:
-        err_msg = str(stream_exc)[:300] or type(stream_exc).__name__
-        if "rate" in err_msg.lower() or "limit" in err_msg.lower():
-            yield {"type": "token", "text": f"\n\n（请求太频繁，稍等几秒再试。）"}
-        elif "timeout" in err_msg.lower() or "connect" in err_msg.lower():
-            yield {"type": "token", "text": f"\n\n（连接超时，请检查本地 API 是否正常运行。）"}
-        else:
-            yield {"type": "token", "text": f"\n\n（回复生成中断：{err_msg}）"}
-        yield {"type": "failureHintEvent", "failureHintEvent": _failure_hint_event(stream_exc, stage="model_stream", trace_id=trace_id)}
-        yield {"type": "error", "detail": err_msg}
-        yield {"type": "done", "done": True}
+        yield from stream_failure_events(stream_exc, trace_id=trace_id, hint_factory=_failure_hint_event)
         return
     ai_reply = "".join(ai_reply_parts)
 

@@ -35,6 +35,23 @@ def split_safe_model_chunk(buffer: str, chunk: str) -> tuple[str, str, bool]:
     return safe_combined, safe_text, True
 
 
+def stream_failure_events(exc: Exception, *, trace_id: str, hint_factory: Callable) -> list[dict]:
+    detail = str(exc)[:300] or type(exc).__name__
+    lowered = detail.lower()
+    if "rate" in lowered or "limit" in lowered:
+        text = "\n\n（请求太频繁，稍等几秒再试。）"
+    elif "timeout" in lowered or "connect" in lowered:
+        text = "\n\n（连接超时，请检查本地 API 是否正常运行。）"
+    else:
+        text = f"\n\n（回复生成中断：{detail}）"
+    return [
+        {"type": "token", "text": text},
+        {"type": "failureHintEvent", "failureHintEvent": hint_factory(exc, stage="model_stream", trace_id=trace_id)},
+        {"type": "error", "detail": detail},
+        {"type": "done", "done": True},
+    ]
+
+
 def select_model_for_turn(
     config: dict, *, query: str, intent: str, needs_tools: bool,
     file_refs: list[dict] | None, resolver: Callable | None = None,
