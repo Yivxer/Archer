@@ -23,3 +23,18 @@ def empty_reply_events(*, had_tool_activity: bool, trace_id: str) -> list[dict]:
             ),
         }},
     ]
+
+
+def memory_compaction_events(*, compact, event_factory, warn=lambda message: None) -> list[dict]:
+    try:
+        result = compact()
+        if not result or result.get("archivedCount", 0) <= 0:
+            return []
+        return [event_factory(
+            f"memory-compact-{uuid4().hex[:8]}", "memory.compact", "complete", "low",
+            "已整理记忆",
+            f"archived: {result['archivedCount']}, summary_id: {result.get('summaryId')}, reason: {result.get('reason', '')}",
+        )]
+    except Exception as exc:
+        warn(str(exc))
+        return []

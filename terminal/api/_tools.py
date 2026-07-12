@@ -43,7 +43,7 @@ from terminal.api.turn_pipeline import (
 )
 from terminal.api.tool_stage import summarize_api_tool_events
 from terminal.api.model_stream import build_rescue_messages, has_fake_tool_markup as _has_fake_xml, iter_model_stream, select_model_for_turn, split_safe_model_chunk as _split_safe_model_chunk, stream_failure_events
-from terminal.api.turn_receipt import empty_reply_events
+from terminal.api.turn_receipt import empty_reply_events, memory_compaction_events
 
 logger = logging.getLogger("archer_api")
 MODEL_STREAM_HEARTBEAT_SECONDS = 8.0
@@ -1792,26 +1792,12 @@ _api_extract_lock = threading.Lock()
 
 
 def _yield_memory_compaction_events():
-    """Run compaction if thresholds met; yield a lightweight tool event for Desktop."""
-    try:
-        from core.orchestrator import maybe_run_memory_compaction_after_turn
-
-        result = maybe_run_memory_compaction_after_turn()
-        if result and result.get("archivedCount", 0) > 0:
-            yield _tool_event(
-                f"memory-compact-{uuid4().hex[:8]}",
-                "memory.compact",
-                "complete",
-                "low",
-                "已整理记忆",
-                (
-                    f"archived: {result['archivedCount']}, "
-                    f"summary_id: {result.get('summaryId')}, "
-                    f"reason: {result.get('reason', '')}"
-                ),
-            )
-    except Exception as exc:
-        logger.warning("[memory] compaction failed: %s", exc)
+    from core.orchestrator import maybe_run_memory_compaction_after_turn
+    yield from memory_compaction_events(
+        compact=maybe_run_memory_compaction_after_turn,
+        event_factory=_tool_event,
+        warn=lambda detail: logger.warning("[memory] compaction failed: %s", detail),
+    )
 
 
 def _should_auto_save_memory(memory: dict, sensitive: bool) -> bool:
