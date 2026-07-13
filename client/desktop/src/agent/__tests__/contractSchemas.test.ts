@@ -124,9 +124,18 @@ describe('contract schemas', () => {
       labels: ['项目规划', '构建'],
       needsMemory: true,
       needsJob: false,
+      taskRoute: {
+        mode: 'foreground',
+        reason: 'interactive turn stays in foreground',
+        title: '项目规划',
+        timeoutSeconds: 300,
+      },
     })
 
     expect(parsed.type).toBe('orchestration.event')
+    if (parsed.type === 'orchestration.event') {
+      expect(parsed.taskRoute.mode).toBe('foreground')
+    }
   })
 
   it('accepts status, runtime context, and failure hint events', () => {

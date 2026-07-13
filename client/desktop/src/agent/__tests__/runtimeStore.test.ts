@@ -138,10 +138,17 @@ describe('runtime store reducer', () => {
       labels: ['项目规划', '构建'],
       needsMemory: true,
       needsJob: false,
+      taskRoute: {
+        mode: 'background',
+        reason: 'python orchestrator requires background job',
+        title: '项目规划',
+        timeoutSeconds: 300,
+      },
     })
 
     expect(next.status).toBe('idle')
     expect(next.orchestrations['orch-1']?.labels).toContain('项目规划')
+    expect(next.orchestrations['orch-1']?.taskRoute.mode).toBe('background')
   })
 
   it('tracks runtime context and failure hints without changing active status', () => {

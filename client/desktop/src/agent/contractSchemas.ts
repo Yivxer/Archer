@@ -107,6 +107,12 @@ export const orchestrationEventSchema = base.extend({
   labels: z.array(z.string()),
   needsMemory: z.boolean(),
   needsJob: z.boolean(),
+  taskRoute: z.object({
+    mode: z.enum(['foreground', 'background']),
+    reason: z.string().min(1),
+    title: z.string().min(1),
+    timeoutSeconds: z.number().int().positive(),
+  }),
 })
 
 export const statusEventSchema = base.extend({

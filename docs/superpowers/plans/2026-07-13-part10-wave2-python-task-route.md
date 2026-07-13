@@ -34,12 +34,12 @@
 - Modify: `client/desktop/src/agent/__tests__/pythonBridge.test.ts`
 - Modify: `client/desktop/src/agent/__tests__/runtimeStore.test.ts`
 
-- [ ] Add failing Vitest assertions that a Python `taskRoute` survives schema validation, bridge conversion, and runtime-store reduction.
-- [ ] Run `npm test -- --run src/agent/__tests__/contractSchemas.test.ts src/agent/__tests__/pythonBridge.test.ts src/agent/__tests__/runtimeStore.test.ts`; expect type/schema failure.
-- [ ] Add `TaskRouteSnapshot` to the shared contract and require it on orchestration events.
-- [ ] Extend the Python bridge input type and `pythonOrchestrationToAgentEvent()` mapping.
-- [ ] Run the focused Vitest files; expect PASS.
-- [ ] Commit `feat: project python task route in desktop`.
+- [x] Add failing Vitest assertions that a Python `taskRoute` survives schema validation, bridge conversion, and runtime-store reduction.
+- [x] Run `npm test -- --run src/agent/__tests__/contractSchemas.test.ts src/agent/__tests__/pythonBridge.test.ts src/agent/__tests__/runtimeStore.test.ts`; expect type/schema failure.
+- [x] Add `TaskRouteSnapshot` to the shared contract and require it on orchestration events.
+- [x] Extend the Python bridge input type and `pythonOrchestrationToAgentEvent()` mapping.
+- [x] Run the focused Vitest files; expect PASS.
+- [x] Commit `feat: project python task route in desktop`.
 
 ### Task 3: Remove Desktop pre-send routing decisions
 

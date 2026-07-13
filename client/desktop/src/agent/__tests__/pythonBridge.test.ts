@@ -114,11 +114,18 @@ describe('python bridge', () => {
       labels: ['项目规划', '构建', '检索记忆'],
       needsMemory: true,
       needsJob: false,
+      taskRoute: {
+        mode: 'foreground',
+        reason: 'interactive turn stays in foreground',
+        title: '项目规划',
+        timeoutSeconds: 300,
+      },
     })
 
     expect(event.type).toBe('orchestration.event')
     if (event.type === 'orchestration.event') {
       expect(event.labels).toContain('项目规划')
+      expect(event.taskRoute.title).toBe('项目规划')
     }
   })
 
@@ -153,6 +160,12 @@ describe('python bridge', () => {
         labels: ['项目规划'],
         needsMemory: true,
         needsJob: false,
+        taskRoute: {
+          mode: 'foreground',
+          reason: 'interactive turn stays in foreground',
+          title: '项目规划',
+          timeoutSeconds: 300,
+        },
       },
       statusEvent: {
         traceId: 'trace-1',

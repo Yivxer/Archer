@@ -81,6 +81,12 @@ type PythonOrchestrationEvent = {
   labels: string[]
   needsMemory: boolean
   needsJob: boolean
+  taskRoute: {
+    mode: 'foreground' | 'background'
+    reason: string
+    title: string
+    timeoutSeconds: number
+  }
 }
 
 function nowIso(): string {
@@ -167,6 +173,7 @@ export function pythonOrchestrationToAgentEvent(
     labels: snapshot.labels,
     needsMemory: snapshot.needsMemory,
     needsJob: snapshot.needsJob,
+    taskRoute: snapshot.taskRoute,
   }
 }
 

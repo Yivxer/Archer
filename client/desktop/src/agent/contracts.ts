@@ -102,6 +102,13 @@ export type PlanEvent = AgentEventBase & {
   prompt?: string
 }
 
+export type TaskRouteSnapshot = {
+  mode: 'foreground' | 'background'
+  reason: string
+  title: string
+  timeoutSeconds: number
+}
+
 export type OrchestrationEvent = AgentEventBase & {
   type: 'orchestration.event'
   intent: string
@@ -111,6 +118,7 @@ export type OrchestrationEvent = AgentEventBase & {
   labels: string[]
   needsMemory: boolean
   needsJob: boolean
+  taskRoute: TaskRouteSnapshot
 }
 
 export type StatusEvent = AgentEventBase & {
