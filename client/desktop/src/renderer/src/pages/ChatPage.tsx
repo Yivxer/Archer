@@ -24,7 +24,7 @@ import { PermissionPrompt } from '../components/PermissionPrompt'
 import { TracePanel } from '../components/TracePanel'
 import { WorkReceipt as WorkReceiptComponent } from '../components/WorkReceipt'
 import { buildThinkingMutter } from '../lib/thinkingMutter'
-import { buildTraceDiagnostics, createInitialRuntimeState, createPersistentEventLog, reduceRuntimeEvent, restoreRuntimeStateFromEvents, routeTaskForRuntime, isForegroundOnlyWritingFeedbackPlan, isHugoBlogPublishPlan, jobSnapshotToAgentEvent, buildPlanChildJobSpecs, buildPlanCoordinatorPrompt, buildPlanExecutionPrompt, planWithStatus } from '../../../agent'
+import { buildTraceDiagnostics, createInitialRuntimeState, createPersistentEventLog, reduceRuntimeEvent, restoreRuntimeStateFromEvents, isForegroundOnlyWritingFeedbackPlan, isHugoBlogPublishPlan, jobSnapshotToAgentEvent, buildPlanChildJobSpecs, buildPlanCoordinatorPrompt, buildPlanExecutionPrompt, planWithStatus } from '../../../agent'
 import type { AgentEvent, ApprovalResultEvent, EventLog, JobEvent, OrchestrationEvent, PlanEvent, TraceDiagnostics } from '../../../agent'
 import type { FailureHintEvent, InitiativeEvent } from '../../../agent/contracts'
 
@@ -404,18 +404,6 @@ export function ChatPage({
       setToolNotice(`文稿读取失败：${explicitFailures.map((file) => file.name).join('、')}`)
       setFileRefs(sentFileRefs)
       return
-    }
-    if (data.status.adapter === 'local') {
-      const route = routeTaskForRuntime({ text, fileCount: sentFileRefs.length })
-      if (route.mode === 'background') {
-        await sendBackgroundJob(text, {
-          reason: route.reason,
-          timeoutSeconds: route.timeoutSeconds,
-          title: route.title,
-          autoRouted: true,
-        })
-        return
-      }
     }
     const previousMessages = messages
     const nextId = messages.length + 1

@@ -50,12 +50,12 @@
 - Modify: `client/desktop/src/agent/__tests__/taskRouter.test.ts`
 - Test: `client/desktop/src/renderer/src/pages/ChatPage.test.tsx`
 
-- [ ] Add a failing ChatPage test proving local messages always enter the Python chat stream instead of being diverted by TS keyword/path heuristics.
-- [ ] Remove the `routeTaskForRuntime()` pre-send branch from `sendMessage()`.
-- [ ] Delete `RuntimeTaskRoute`, `RuntimeTaskRouteInput`, keyword/path/approval routing helpers, and `routeTaskForRuntime()`; retain only Hugo intent and plan-card presentation helpers.
-- [ ] Update exports and focused tests.
-- [ ] Run task-router and ChatPage tests; expect PASS.
-- [ ] Commit `refactor: remove desktop task routing decisions`.
+- [x] Add a failing ChatPage test proving local messages always enter the Python chat stream instead of being diverted by TS keyword/path heuristics.
+- [x] Remove the `routeTaskForRuntime()` pre-send branch from `sendMessage()`.
+- [x] Delete `RuntimeTaskRoute`, `RuntimeTaskRouteInput`, keyword/path/approval routing helpers, and `routeTaskForRuntime()`; retain only Hugo intent and plan-card presentation helpers.
+- [x] Update exports and focused tests.
+- [x] Run task-router and ChatPage tests; expect PASS.
+- [x] Commit `refactor: remove desktop task routing decisions`.
 
 ### Task 4: Wave 2 route-source closure
 
