@@ -163,6 +163,38 @@ def test_profiles_settings_and_skills_live_behind_routes_facade():
     assert not domain_symbols & route_definitions
 
 
+@pytest.mark.contract
+def test_part8_shadow_routes_live_behind_routes_facade():
+    from terminal.api import _routes, initiative_routes
+
+    domain_symbols = {
+        "_proactive_touch",
+        "_initiative_shadow",
+        "_initiative_shadow_failure",
+        "_safe_initiative_shadow",
+        "_initiative_shadow_report",
+        "_initiative_shadow_long_term_report",
+        "_initiative_shadow_delivery_gate",
+        "_initiative_shadow_review_packet",
+        "_initiative_shadow_feedback",
+        "_initiative_presence",
+        "_initiative_delivery_opt_in",
+    }
+
+    for name in domain_symbols:
+        assert getattr(_routes, name) is getattr(initiative_routes, name)
+
+    routes_tree = ast.parse(
+        (ROOT / "terminal/api/_routes.py").read_text(encoding="utf-8")
+    )
+    route_definitions = {
+        node.name
+        for node in routes_tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+    }
+    assert not domain_symbols & route_definitions
+
+
 def _skill(name: str, *, risk: str = "medium"):
     module = types.ModuleType(name)
     module.SKILL = {
