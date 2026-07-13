@@ -94,6 +94,74 @@ class TestOrchestratorSnapshot(unittest.TestCase):
         self.assertEqual(event["soulInsight"]["dueHypotheses"][0]["id"], 7)
         self.assertIn("验证假设", event["labels"])
 
+    def test_task_route_snapshot_is_authoritative_for_background_work(self):
+        from core.orchestrator import OrchestrationResult, task_route_snapshot
+
+        result = OrchestrationResult(
+            intent="project",
+            sub_intent="code_task",
+            mode="builder",
+            depth="deep",
+            needs_job=True,
+            side_effect_level="none",
+        )
+
+        self.assertEqual(task_route_snapshot(result), {
+            "mode": "background",
+            "reason": "python orchestrator requires background job",
+            "title": "代码任务",
+            "timeoutSeconds": 300,
+        })
+
+    def test_task_route_snapshot_keeps_approval_work_foreground(self):
+        from core.orchestrator import OrchestrationResult, task_route_snapshot
+
+        result = OrchestrationResult(
+            intent="task",
+            sub_intent="tool_task",
+            mode="operator",
+            depth="normal",
+            needs_job=True,
+            side_effect_level="approval_required",
+        )
+
+        self.assertEqual(task_route_snapshot(result)["mode"], "foreground")
+        self.assertEqual(
+            task_route_snapshot(result)["reason"],
+            "approval-required task stays in foreground",
+        )
+
+    def test_task_route_snapshot_keeps_hugo_workflow_foreground(self):
+        from core.orchestrator import OrchestrationResult, task_route_snapshot
+
+        result = OrchestrationResult(
+            intent="task",
+            sub_intent="tool_task",
+            mode="operator",
+            depth="normal",
+            needs_job=True,
+            matched_skills=["hugo_blog"],
+            side_effect_level="none",
+        )
+
+        self.assertEqual(task_route_snapshot(result)["mode"], "foreground")
+        self.assertEqual(
+            task_route_snapshot(result)["reason"],
+            "hugo workflow stays in foreground",
+        )
+
+    def test_orchestration_event_includes_task_route_snapshot(self):
+        from core.orchestrator import orchestration_to_event_dict
+
+        result = orchestrate_user_input(
+            "按照成长计划开始执行 Archer 路由重构",
+        )
+
+        event = orchestration_to_event_dict(result)
+
+        self.assertEqual(event["taskRoute"]["timeoutSeconds"], 300)
+        self.assertIn(event["taskRoute"]["mode"], {"foreground", "background"})
+
     def test_short_chat_stays_light_without_memory(self):
         result = orchestrate_user_input("在吗")
 

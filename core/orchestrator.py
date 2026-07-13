@@ -700,6 +700,29 @@ def orchestration_status_labels(orchestration: OrchestrationResult) -> list[str]
     return labels
 
 
+def task_route_snapshot(orchestration: OrchestrationResult) -> dict:
+    """Return the Python-authoritative execution route for Desktop projection."""
+    title = _SUB_INTENT_LABELS.get(orchestration.sub_intent, "对话")
+    if "hugo_blog" in orchestration.matched_skills:
+        mode = "foreground"
+        reason = "hugo workflow stays in foreground"
+    elif orchestration.side_effect_level == "approval_required":
+        mode = "foreground"
+        reason = "approval-required task stays in foreground"
+    elif orchestration.needs_job:
+        mode = "background"
+        reason = "python orchestrator requires background job"
+    else:
+        mode = "foreground"
+        reason = "interactive turn stays in foreground"
+    return {
+        "mode": mode,
+        "reason": reason,
+        "title": title,
+        "timeoutSeconds": 300,
+    }
+
+
 def orchestration_to_event_dict(orchestration: OrchestrationResult) -> dict:
     """Serialize orchestration snapshot for Desktop runtime events."""
     from uuid import uuid4
@@ -714,6 +737,7 @@ def orchestration_to_event_dict(orchestration: OrchestrationResult) -> dict:
         "labels": orchestration_status_labels(orchestration),
         "needsMemory": orchestration.needs_memory,
         "needsJob": orchestration.needs_job,
+        "taskRoute": task_route_snapshot(orchestration),
         "matchedSkills": list(orchestration.matched_skills),
         "soulInsight": {
             "dueHypotheses": list(due_hypotheses),
