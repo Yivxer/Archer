@@ -89,6 +89,40 @@ def test_background_jobs_live_in_domain_module_behind_routes_facade():
     assert not job_symbols & route_definitions
 
 
+@pytest.mark.contract
+def test_memory_vault_and_sensors_live_behind_routes_facade():
+    from terminal.api import _routes, memory_routes
+
+    domain_symbols = {
+        "_memory",
+        "_resolve_pending_memory",
+        "_batch_resolve_pending",
+        "_hypotheses",
+        "_create_hypothesis",
+        "_import_obsidian_hypotheses",
+        "_vault_reflection",
+        "_list_recent_reflections",
+        "_vault_refresh_index",
+        "_vault_current_focus",
+        "_vault_search_index",
+        "_sensor_obsidian_focus",
+        "_sensors_status",
+    }
+
+    for name in domain_symbols:
+        assert getattr(_routes, name) is getattr(memory_routes, name)
+
+    routes_tree = ast.parse(
+        (ROOT / "terminal/api/_routes.py").read_text(encoding="utf-8")
+    )
+    route_definitions = {
+        node.name
+        for node in routes_tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+    }
+    assert not domain_symbols & route_definitions
+
+
 def _skill(name: str, *, risk: str = "medium"):
     module = types.ModuleType(name)
     module.SKILL = {

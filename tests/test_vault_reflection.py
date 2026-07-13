@@ -18,6 +18,7 @@ from pathlib import Path
 from datetime import datetime, timedelta
 from unittest.mock import patch
 from terminal.api import job_routes as jobs
+from terminal.api import memory_routes
 
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
@@ -458,7 +459,7 @@ def test_api_post_vault_reflection_background_creates_job(tmp_path, monkeypatch)
         captured["payload"] = payload
         return {"ok": True, "job": {"id": "job-bg-1", "kind": "vault_reflection", "status": "queued"}}
 
-    monkeypatch.setattr(routes, "_create_job", fake_create_job)
+    monkeypatch.setattr(memory_routes, "_create_job", fake_create_job)
 
     status, payload = routes.payload_post("/vault/reflection", {
         "path": "测试笔记.md",
@@ -488,7 +489,7 @@ def test_api_post_vault_reflection_background_days(tmp_path, monkeypatch):
         captured["payload"] = payload
         return {"ok": True, "job": {"id": "job-bg-2", "kind": "vault_reflection"}}
 
-    monkeypatch.setattr(routes, "_create_job", fake_create_job)
+    monkeypatch.setattr(memory_routes, "_create_job", fake_create_job)
 
     status, payload = routes.payload_post("/vault/reflection", {
         "days": 14,
@@ -509,7 +510,7 @@ def test_api_post_vault_reflection_background_missing_params(tmp_path, monkeypat
     def fake_create_job(payload):  # 不应被调用
         raise AssertionError("_create_job should not be called")
 
-    monkeypatch.setattr(routes, "_create_job", fake_create_job)
+    monkeypatch.setattr(memory_routes, "_create_job", fake_create_job)
 
     status, payload = routes.payload_post("/vault/reflection", {
         "background": True,
