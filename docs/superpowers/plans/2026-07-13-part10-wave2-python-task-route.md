@@ -65,7 +65,7 @@
 - Modify: `Archer 架构设计.md` outside the repository
 - Modify: `客户端构建日志.md` outside the repository
 
-- [ ] Add an architecture test forbidding `routeTaskForRuntime` and the removed background keyword tables from Desktop production code.
-- [ ] Run Python route/contract tests, Desktop Vitest, and `npm run build`.
-- [ ] Run Journey 0 only if local `/health` and `/ready` are available; do not spend model quota for this structural slice.
-- [ ] Update the three canonical documents with exact commits and verification level.
+- [x] Protect the production boundary with the TDD source gate in `taskRouter.test.ts`, forbidding `routeTaskForRuntime` in `ChatPage`; production search also confirms removed route types and keyword tables are absent.
+- [x] Run Python route/contract/architecture tests, Desktop Vitest, and `npm run build`.
+- [x] Run Journey 0 only if local `/health` and `/ready` are available; Journey 0 passed without a model call.
+- [x] Update the three canonical documents with exact commits and verification level.
