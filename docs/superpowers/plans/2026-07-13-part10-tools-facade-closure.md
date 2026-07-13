@@ -18,12 +18,12 @@
 - Modify: `tests/test_architecture_boundaries.py`
 - Test: `tests/test_desktop_api.py`, `tests/test_tool_stage.py`
 
-- [ ] Add a failing architecture test asserting shell execution, tool-event construction, Obsidian draft preview, API request/result conversion, and skill selection helpers are defined in `api_tool_helpers.py` and only re-exported by `_tools.py`.
-- [ ] Run `.venv/bin/python -m pytest -q tests/test_architecture_boundaries.py -k api_tool_helpers`; expect import failure before the module exists.
-- [ ] Move `_is_dangerous_shell` through `_execute_api_tool_preview` into `api_tool_helpers.py`; import router aliases and `_config` dependencies directly, with no import from `_tools.py`.
-- [ ] Re-export the historic private names from `_tools.py` and preserve exact function identity.
-- [ ] Run `.venv/bin/python -m pytest -q tests/test_architecture_boundaries.py tests/test_desktop_api.py tests/test_tool_stage.py -k 'api_tool_helpers or shell or obsidian or tool_event or approval'`; expect PASS.
-- [ ] Commit `refactor: extract api tool helpers`.
+- [x] Add a failing architecture test asserting shell execution, tool-event construction, Obsidian draft preview, API request/result conversion, and skill selection helpers are defined in `api_tool_helpers.py` and only re-exported by `_tools.py`.
+- [x] Run `.venv/bin/python -m pytest -q tests/test_architecture_boundaries.py -k api_tool_helpers`; expect import failure before the module exists.
+- [x] Move `_is_dangerous_shell` through `_execute_api_tool_preview` into `api_tool_helpers.py`; import router aliases and `_config` dependencies directly, with no import from `_tools.py`.
+- [x] Re-export the historic private names from `_tools.py` and preserve exact function identity.
+- [x] Run `.venv/bin/python -m pytest -q tests/test_architecture_boundaries.py tests/test_desktop_api.py tests/test_tool_stage.py -k 'api_tool_helpers or shell or obsidian or tool_event or approval'`; expect PASS.
+- [x] Commit `refactor: extract api tool helpers`.
 
 ### Task 2: Extract deterministic Hugo workflow implementation
 
@@ -33,12 +33,12 @@
 - Modify: `tests/test_architecture_boundaries.py`
 - Test: `tests/test_hugo_turn.py`, `tests/test_desktop_api.py`, `tests/test_hugo_*`
 
-- [ ] Add a failing architecture test asserting Markdown source parsing, publish/delete/redeploy, confirmation result, agent fallback, and Hugo summary helpers live in `hugo_workflow.py`.
-- [ ] Run the new architecture test and confirm it fails because `hugo_workflow.py` does not exist.
-- [ ] Move `_extract_md_path_from_query` through `_run_hugo_agent_turn` into `hugo_workflow.py`; import request/event primitives from `api_tool_helpers.py` and router helpers directly.
-- [ ] Keep `_tools.py` compatibility aliases and build `HugoTurnDependencies` from those aliases without changing direct-action priority.
-- [ ] Run Hugo, approval, architecture, and Desktop API focused regressions; expect PASS.
-- [ ] Commit `refactor: extract hugo workflow helpers`.
+- [x] Add a failing architecture test asserting Markdown source parsing, publish/delete/redeploy, confirmation result, agent fallback, and Hugo summary helpers live in `hugo_workflow.py`.
+- [x] Run the new architecture test and confirm it fails because `hugo_workflow.py` does not exist.
+- [x] Move `_extract_md_path_from_query` through `_run_hugo_agent_turn` into `hugo_workflow.py`; import request/event primitives from `api_tool_helpers.py` and router helpers directly.
+- [x] Keep `_tools.py` compatibility aliases and build `HugoTurnDependencies` from those aliases without changing direct-action priority.
+- [x] Run Hugo, approval, architecture, and Desktop API focused regressions; expect PASS.
+- [x] Commit `refactor: extract hugo workflow helpers`.
 
 ### Task 3: Extract Desktop tool execution and draft helpers
 

@@ -228,6 +228,43 @@ def test_api_tool_helpers_live_behind_tools_facade():
     assert not helper_symbols & tool_definitions
 
 
+@pytest.mark.contract
+def test_hugo_workflow_helpers_live_behind_tools_facade():
+    from terminal.api import _tools, hugo_workflow
+
+    helper_symbols = {
+        "_extract_md_path_from_query",
+        "_extract_md_paths_from_text",
+        "_read_md_source",
+        "_collect_hugo_markdown_sources",
+        "_extract_frontmatter_hints",
+        "_format_hugo_chat_summary",
+        "_hugo_workflow_event",
+        "_run_hugo_publish_workflow",
+        "_try_direct_hugo_deploy_existing",
+        "_wants_hugo_delete",
+        "_try_direct_hugo_delete",
+        "_parse_markdown_for_hugo",
+        "_hugo_confirmation_result",
+        "_try_direct_hugo_publish",
+        "_try_direct_hugo_redeploy_with_attachment",
+        "_run_hugo_agent_turn",
+    }
+
+    for name in helper_symbols:
+        assert getattr(_tools, name) is getattr(hugo_workflow, name)
+
+    tools_tree = ast.parse(
+        (ROOT / "terminal/api/_tools.py").read_text(encoding="utf-8")
+    )
+    tool_definitions = {
+        node.name
+        for node in tools_tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+    }
+    assert not helper_symbols & tool_definitions
+
+
 def _skill(name: str, *, risk: str = "medium"):
     module = types.ModuleType(name)
     module.SKILL = {
