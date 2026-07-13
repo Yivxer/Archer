@@ -195,6 +195,39 @@ def test_part8_shadow_routes_live_behind_routes_facade():
     assert not domain_symbols & route_definitions
 
 
+@pytest.mark.contract
+def test_api_tool_helpers_live_behind_tools_facade():
+    from terminal.api import _tools, api_tool_helpers
+
+    helper_symbols = {
+        "_is_dangerous_shell",
+        "_execute_shell_command",
+        "_tool_event",
+        "_obsidian_write_draft",
+        "_make_api_tool_request",
+        "_obsidian_work_intent",
+        "_expert_scoped_skills",
+        "_select_api_skills",
+        "_filter_api_skills_for_intent",
+        "_tool_event_from_request",
+        "_tool_event_from_result",
+        "_execute_api_tool_preview",
+    }
+
+    for name in helper_symbols:
+        assert getattr(_tools, name) is getattr(api_tool_helpers, name)
+
+    tools_tree = ast.parse(
+        (ROOT / "terminal/api/_tools.py").read_text(encoding="utf-8")
+    )
+    tool_definitions = {
+        node.name
+        for node in tools_tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+    }
+    assert not helper_symbols & tool_definitions
+
+
 def _skill(name: str, *, risk: str = "medium"):
     module = types.ModuleType(name)
     module.SKILL = {
