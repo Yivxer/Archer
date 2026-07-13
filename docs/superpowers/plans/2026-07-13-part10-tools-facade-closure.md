@@ -62,7 +62,8 @@
 - Modify: `Archer 架构设计.md` outside the repository
 - Modify: `客户端构建日志.md` outside the repository
 
-- [ ] Verify `_tools.py <800`, `_routes.py` remains a compatibility dispatcher, and architecture boundaries pass.
-- [ ] Run Python full suite, Desktop Vitest, and `cd client/desktop && npm run build`.
-- [ ] Run the shortest Journey only if the local API health check is ready; record an unavailable prerequisite separately from regression status.
-- [ ] Update the three canonical Archer documents with exact lines, tests, and verification level.
+- [x] Verify `_tools.py <800`, `_routes.py` remains a compatibility dispatcher, and architecture boundaries pass.
+- [ ] Obtain a clean Python full-suite exit. All 1560 tests ran to 100% without an assertion failure, but Python 3.14 hung while joining a `concurrent.futures` worker during interpreter shutdown and required interruption.
+- [x] Run Desktop Vitest and `cd client/desktop && npm run build`.
+- [x] Run the shortest Journey only if the local API health check is ready; Journey 0 passed without a real model call.
+- [x] Update the three canonical Archer documents with exact lines, tests, and verification level.
