@@ -265,6 +265,39 @@ def test_hugo_workflow_helpers_live_behind_tools_facade():
     assert not helper_symbols & tool_definitions
 
 
+@pytest.mark.contract
+def test_desktop_tool_execution_helpers_live_behind_tools_facade():
+    from terminal.api import _tools, desktop_tool_execution
+
+    helper_symbols = {
+        "_run_desktop_tool_loop",
+        "_iter_obsidian_search_events",
+        "_iter_obsidian_read_events",
+        "_iter_obsidian_write_events",
+        "_iter_shell_events",
+        "_iter_github_events",
+        "_iter_hugo_blog_events",
+        "_generate_hugo_draft_from_reply",
+        "_generate_obsidian_draft_with_ai",
+        "_iter_api_tool_events",
+        "_append_obsidian_draft",
+        "_execute_github_operation",
+    }
+
+    for name in helper_symbols:
+        assert getattr(_tools, name) is getattr(desktop_tool_execution, name)
+
+    tools_tree = ast.parse(
+        (ROOT / "terminal/api/_tools.py").read_text(encoding="utf-8")
+    )
+    tool_definitions = {
+        node.name
+        for node in tools_tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+    }
+    assert not helper_symbols & tool_definitions
+
+
 def _skill(name: str, *, risk: str = "medium"):
     module = types.ModuleType(name)
     module.SKILL = {

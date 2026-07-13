@@ -48,12 +48,12 @@
 - Modify: `tests/test_architecture_boundaries.py`
 - Test: `tests/test_desktop_api.py`, `tests/test_tool_stage.py`, `tests/test_obsidian_write_preview.py`
 
-- [ ] Add a failing architecture test asserting `_run_desktop_tool_loop`, per-skill event iterators, draft generators, `_iter_api_tool_events`, `_append_obsidian_draft`, and `_execute_github_operation` live in `desktop_tool_execution.py`.
-- [ ] Run the new architecture test and confirm it fails because the module does not exist.
-- [ ] Move the tool loop and execution helpers into the new module; import shared request/event primitives from `api_tool_helpers.py` and router helpers directly.
-- [ ] Re-export historic private names from `_tools.py`; keep chat orchestration and dependency factories in `_tools.py`.
-- [ ] Run focused Desktop tool, approval, Obsidian, architecture, and chat-turn regressions; expect PASS and `_tools.py <800`.
-- [ ] Commit `refactor: close tools compatibility facade`.
+- [x] Add a failing architecture test asserting `_run_desktop_tool_loop`, per-skill event iterators, draft generators, `_iter_api_tool_events`, `_append_obsidian_draft`, and `_execute_github_operation` live in `desktop_tool_execution.py`.
+- [x] Run the new architecture test and confirm it fails because the module does not exist.
+- [x] Move the tool loop and execution helpers into the new module; import shared request/event primitives from `api_tool_helpers.py` and router helpers directly.
+- [x] Re-export historic private names from `_tools.py`; keep chat orchestration and dependency factories in `_tools.py`.
+- [x] Run focused Desktop tool, approval, Obsidian, architecture, and chat-turn regressions; expect PASS and `_tools.py <800`.
+- [x] Commit `refactor: close tools compatibility facade`.
 
 ### Task 4: Wave 1 closure verification
 

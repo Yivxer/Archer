@@ -40,6 +40,7 @@ from terminal.api._security import (
     normalize_error_payload,
 )
 from terminal.api import _tools as _api_tools
+from terminal.api import desktop_tool_execution as _desktop_tool_execution
 from terminal.api.contract import CONTRACT_VERSION, CONTRACT_VERSION_HEADER, versioned_dict
 from terminal.api._tools import (
     _bg_extract_api,
@@ -90,14 +91,22 @@ def _iter_api_tool_events(query: str):
         "_should_trigger_shell": _should_trigger_shell,
         "_should_trigger_github": _should_trigger_github,
     }
-    original = {name: getattr(_api_tools, name) for name in patched}
+    targets = (_api_tools, _desktop_tool_execution)
+    original = {
+        (target, name): getattr(target, name)
+        for target in targets
+        for name in patched
+        if hasattr(target, name)
+    }
     try:
-        for name, value in patched.items():
-            setattr(_api_tools, name, value)
+        for target in targets:
+            for name, value in patched.items():
+                if hasattr(target, name):
+                    setattr(target, name, value)
         yield from _api_tools._iter_api_tool_events(query)
     finally:
-        for name, value in original.items():
-            setattr(_api_tools, name, value)
+        for (target, name), value in original.items():
+            setattr(target, name, value)
 
 
 def _execute_api_tool_preview(*args, **kwargs):
