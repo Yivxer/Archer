@@ -123,6 +123,46 @@ def test_memory_vault_and_sensors_live_behind_routes_facade():
     assert not domain_symbols & route_definitions
 
 
+@pytest.mark.contract
+def test_profiles_settings_and_skills_live_behind_routes_facade():
+    from terminal.api import _routes, profile_routes
+
+    domain_symbols = {
+        "_disabled_skills_path",
+        "_load_disabled_skills",
+        "_save_disabled_skills",
+        "_toggle_skill",
+        "_skills",
+        "_available_modes",
+        "_available_experts",
+        "_switch_current_mode",
+        "_switch_current_expert",
+        "_soul_files",
+        "_soul_profile_summary",
+        "_period_review",
+        "_journal_review",
+        "_settings",
+        "_validate_settings_draft",
+        "_save_settings_draft",
+        "_save_profile_settings",
+        "_switch_active_profile",
+        "_test_model_profile",
+    }
+
+    for name in domain_symbols:
+        assert getattr(_routes, name) is getattr(profile_routes, name)
+
+    routes_tree = ast.parse(
+        (ROOT / "terminal/api/_routes.py").read_text(encoding="utf-8")
+    )
+    route_definitions = {
+        node.name
+        for node in routes_tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+    }
+    assert not domain_symbols & route_definitions
+
+
 def _skill(name: str, *, risk: str = "medium"):
     module = types.ModuleType(name)
     module.SKILL = {
