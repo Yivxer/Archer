@@ -109,11 +109,11 @@ def test_post_jobs_requires_object_body(client):
 
 
 def test_post_jobs_creates_job(tmp_path, monkeypatch, client):
-    from terminal.api import _routes as routes
+    from terminal.api import job_routes as jobs
 
-    routes.BACKGROUND_JOBS.clear()
-    routes.BACKGROUND_JOBS_LOADED = False
-    routes.BACKGROUND_JOBS_PATH = tmp_path / "jobs.json"
+    jobs.BACKGROUND_JOBS.clear()
+    jobs.BACKGROUND_JOBS_LOADED = False
+    jobs.BACKGROUND_JOBS_PATH = tmp_path / "jobs.json"
 
     response = client.post(
         "/jobs",

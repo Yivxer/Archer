@@ -87,6 +87,7 @@ def test_child_job_concurrency_limit_constant():
 def test_isolated_child_job_skips_memory(monkeypatch, tmp_path):
     import time
     from terminal.api import _routes as routes
+    from terminal.api import job_routes as jobs
 
     memory_called = {"value": False}
 
@@ -98,14 +99,14 @@ def test_isolated_child_job_skips_memory(monkeypatch, tmp_path):
 
     jobs_path = tmp_path / "background_jobs.json"
     jobs_path.parent.mkdir(parents=True, exist_ok=True)
-    routes.BACKGROUND_JOBS.clear()
-    routes.BACKGROUND_JOBS_LOADED = False
-    routes.BACKGROUND_JOBS_PATH = jobs_path
+    jobs.BACKGROUND_JOBS.clear()
+    jobs.BACKGROUND_JOBS_LOADED = False
+    jobs.BACKGROUND_JOBS_PATH = jobs_path
 
     def fake_isolated(prompt, job):
         return {"role": "assistant", "text": "isolated ok"}
 
-    monkeypatch.setattr(routes, "_run_isolated_child_job_chat", fake_isolated)
+    monkeypatch.setattr(jobs, "_run_isolated_child_job_chat", fake_isolated)
 
     _, created = routes.payload_post("/jobs", {
         "title": "父",

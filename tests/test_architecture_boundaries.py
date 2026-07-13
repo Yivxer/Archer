@@ -54,6 +54,41 @@ def test_workflows_never_import_terminal_api():
     assert _imports_under("workflows", "terminal") == set()
 
 
+@pytest.mark.contract
+def test_background_jobs_live_in_domain_module_behind_routes_facade():
+    from terminal.api import _routes, job_routes
+
+    job_symbols = {
+        "BACKGROUND_JOBS",
+        "BACKGROUND_JOB_LOCK",
+        "_create_job",
+        "_list_jobs",
+        "_job_detail",
+        "_run_job",
+        "_start_job",
+        "_cancel_job",
+        "_retry_job",
+        "_approve_job_tool",
+        "_pause_job_for_approval",
+        "_spawn_child_jobs",
+        "_kick_queued_children",
+        "_try_rollup_parent_result",
+    }
+
+    for name in job_symbols:
+        assert getattr(_routes, name) is getattr(job_routes, name)
+
+    routes_tree = ast.parse(
+        (ROOT / "terminal/api/_routes.py").read_text(encoding="utf-8")
+    )
+    route_definitions = {
+        node.name
+        for node in routes_tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+    }
+    assert not job_symbols & route_definitions
+
+
 def _skill(name: str, *, risk: str = "medium"):
     module = types.ModuleType(name)
     module.SKILL = {

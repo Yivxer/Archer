@@ -36,12 +36,13 @@ from archer_api import (
     _validate_settings_draft,
 )
 import archer_api
+from terminal.api import job_routes as jobs
 
 
 def _reset_background_jobs(routes, path):
-    routes.BACKGROUND_JOBS.clear()
-    routes.BACKGROUND_JOBS_LOADED = False
-    routes.BACKGROUND_JOBS_PATH = path
+    jobs.BACKGROUND_JOBS.clear()
+    jobs.BACKGROUND_JOBS_LOADED = False
+    jobs.BACKGROUND_JOBS_PATH = path
 
 
 def test_thread_context_is_injected_as_system_message():
@@ -150,7 +151,7 @@ def test_background_job_runs_after_create(tmp_path, monkeypatch):
         assert prompt == "执行后台分析"
         return {"role": "assistant", "text": "后台结果"}
 
-    monkeypatch.setattr(routes, "_run_job_chat_with_tools", fake_chat_with_tools)
+    monkeypatch.setattr(jobs, "_run_job_chat_with_tools", fake_chat_with_tools)
 
     status, created = routes.payload_post("/jobs", {
         "title": "后台分析",
@@ -184,8 +185,8 @@ def test_background_jobs_persist_to_disk(tmp_path):
     })
     job_id = created["job"]["id"]
 
-    routes.BACKGROUND_JOBS.clear()
-    routes.BACKGROUND_JOBS_LOADED = False
+    jobs.BACKGROUND_JOBS.clear()
+    jobs.BACKGROUND_JOBS_LOADED = False
     status, payload = routes.payload_get(f"/jobs/{job_id}")
 
     assert status == 200
@@ -222,8 +223,8 @@ def test_stale_running_background_job_is_cancelled_on_read(tmp_path, monkeypatch
     from terminal.api import _routes as routes
 
     _reset_background_jobs(routes, tmp_path / "background_jobs.json")
-    routes.BACKGROUND_JOBS_LOADED = True
-    routes.BACKGROUND_JOBS["job-stale"] = {
+    jobs.BACKGROUND_JOBS_LOADED = True
+    jobs.BACKGROUND_JOBS["job-stale"] = {
         "id": "job-stale",
         "title": "僵尸任务",
         "kind": "analysis",
@@ -234,7 +235,7 @@ def test_stale_running_background_job_is_cancelled_on_read(tmp_path, monkeypatch
         "updatedAt": "2026-06-02T10:00:00",
         "timeoutSeconds": 300,
     }
-    monkeypatch.setattr(routes, "BACKGROUND_JOB_STALE_SECONDS", 1)
+    monkeypatch.setattr(jobs, "BACKGROUND_JOB_STALE_SECONDS", 1)
 
     status, payload = routes.payload_get("/jobs/job-stale")
 
@@ -248,9 +249,9 @@ def test_stale_queued_and_waiting_background_jobs_are_cancelled_on_read(tmp_path
     from terminal.api import _routes as routes
 
     _reset_background_jobs(routes, tmp_path / "background_jobs.json")
-    routes.BACKGROUND_JOBS_LOADED = True
+    jobs.BACKGROUND_JOBS_LOADED = True
     for status in ("queued", "waiting_approval"):
-        routes.BACKGROUND_JOBS[f"job-{status}"] = {
+        jobs.BACKGROUND_JOBS[f"job-{status}"] = {
             "id": f"job-{status}",
             "title": f"僵尸任务 {status}",
             "kind": "analysis",
@@ -262,16 +263,16 @@ def test_stale_queued_and_waiting_background_jobs_are_cancelled_on_read(tmp_path
             "timeoutSeconds": 300,
             "staleSeconds": 1,
         }
-    monkeypatch.setattr(routes, "BACKGROUND_JOB_STALE_SECONDS", 1)
+    monkeypatch.setattr(jobs, "BACKGROUND_JOB_STALE_SECONDS", 1)
 
     status, payload = routes.payload_get("/jobs")
 
     assert status == 200
-    jobs = {job["id"]: job for job in payload["jobs"]}
-    assert jobs["job-queued"]["status"] == "cancelled"
-    assert jobs["job-queued"]["stale"] is True
-    assert jobs["job-waiting_approval"]["status"] == "cancelled"
-    assert jobs["job-waiting_approval"]["stale"] is True
+    jobs_by_id = {job["id"]: job for job in payload["jobs"]}
+    assert jobs_by_id["job-queued"]["status"] == "cancelled"
+    assert jobs_by_id["job-queued"]["stale"] is True
+    assert jobs_by_id["job-waiting_approval"]["status"] == "cancelled"
+    assert jobs_by_id["job-waiting_approval"]["stale"] is True
 
 
 def test_background_job_create_accepts_bounded_stale_seconds_for_smoke(tmp_path):
@@ -303,8 +304,8 @@ def test_real_running_background_job_stale_cancel_is_not_overwritten(tmp_path, m
         release.wait(timeout=2)
         return {"role": "assistant", "text": "迟到的长任务结果"}
 
-    monkeypatch.setattr(routes, "_run_job_chat_with_tools", slow_chat_with_tools)
-    monkeypatch.setattr(routes, "BACKGROUND_JOB_STALE_SECONDS", 1)
+    monkeypatch.setattr(jobs, "_run_job_chat_with_tools", slow_chat_with_tools)
+    monkeypatch.setattr(jobs, "BACKGROUND_JOB_STALE_SECONDS", 1)
 
     _, created = routes.payload_post("/jobs", {
         "title": "真实长跑任务",
@@ -315,9 +316,9 @@ def test_real_running_background_job_stale_cancel_is_not_overwritten(tmp_path, m
     job_id = created["job"]["id"]
     assert started.wait(timeout=1)
 
-    with routes.BACKGROUND_JOB_LOCK:
-        routes.BACKGROUND_JOBS[job_id]["updatedAt"] = "2026-06-02T10:00:00"
-        routes._persist_jobs_locked()
+    with jobs.BACKGROUND_JOB_LOCK:
+        jobs.BACKGROUND_JOBS[job_id]["updatedAt"] = "2026-06-02T10:00:00"
+        jobs._persist_jobs_locked()
 
     stale_status, stale_payload = routes.payload_get(f"/jobs/{job_id}")
     release.set()
@@ -366,7 +367,7 @@ def test_background_job_cancel_running_job_is_not_overwritten(tmp_path, monkeypa
         release.wait(timeout=1)
         return {"role": "assistant", "text": "不应覆盖取消状态"}
 
-    monkeypatch.setattr(routes, "_run_job_chat_with_tools", fake_chat_with_tools)
+    monkeypatch.setattr(jobs, "_run_job_chat_with_tools", fake_chat_with_tools)
     _, created = routes.payload_post("/jobs", {
         "title": "运行中任务",
         "kind": "analysis",
@@ -391,7 +392,7 @@ def test_background_job_retry_failed_job(tmp_path, monkeypatch):
     from terminal.api import _routes as routes
 
     _reset_background_jobs(routes, tmp_path / "background_jobs.json")
-    routes.BACKGROUND_JOBS["job-failed"] = {
+    jobs.BACKGROUND_JOBS["job-failed"] = {
         "id": "job-failed",
         "title": "失败任务",
         "kind": "analysis",
@@ -402,14 +403,14 @@ def test_background_job_retry_failed_job(tmp_path, monkeypatch):
         "createdAt": "2026-06-02T10:00:00",
         "updatedAt": "2026-06-02T10:00:00",
     }
-    routes.BACKGROUND_JOBS_LOADED = True
-    with routes.BACKGROUND_JOB_LOCK:
-        routes._persist_jobs_locked()
+    jobs.BACKGROUND_JOBS_LOADED = True
+    with jobs.BACKGROUND_JOB_LOCK:
+        jobs._persist_jobs_locked()
 
     def fake_chat_with_tools(prompt, job_id):
         return {"role": "assistant", "text": "重试成功"}
 
-    monkeypatch.setattr(routes, "_run_job_chat_with_tools", fake_chat_with_tools)
+    monkeypatch.setattr(jobs, "_run_job_chat_with_tools", fake_chat_with_tools)
     status, payload = routes.payload_post("/jobs/job-failed/retry", {})
 
     detail_payload = {}
@@ -545,7 +546,7 @@ def test_background_job_timeout_marks_failed(tmp_path, monkeypatch):
         release.wait(timeout=2)
         return {"role": "assistant", "text": "太晚了"}
 
-    monkeypatch.setattr(routes, "_run_job_chat_with_tools", slow_chat_with_tools)
+    monkeypatch.setattr(jobs, "_run_job_chat_with_tools", slow_chat_with_tools)
 
     _, created = routes.payload_post("/jobs", {
         "title": "超时任务",
@@ -580,7 +581,7 @@ def test_background_job_exception_marks_failed_with_failure_keyword(tmp_path, mo
     def failing_chat_with_tools(prompt, job_id):
         raise RuntimeError("model bridge exploded")
 
-    monkeypatch.setattr(routes, "_run_job_chat_with_tools", failing_chat_with_tools)
+    monkeypatch.setattr(jobs, "_run_job_chat_with_tools", failing_chat_with_tools)
 
     _, created = routes.payload_post("/jobs", {
         "title": "异常隔离任务",

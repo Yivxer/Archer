@@ -44,7 +44,7 @@ def test_build_child_jobs_summary_format():
 
 def test_auto_rollup_parent_result():
     """When all child jobs complete, parent result is auto-aggregated."""
-    from terminal.api._routes import (
+    from terminal.api.job_routes import (
         _try_rollup_parent_result,
         BACKGROUND_JOBS,
         BACKGROUND_JOB_LOCK,
@@ -104,7 +104,7 @@ def test_auto_rollup_parent_result():
 
 def test_rollup_skips_when_children_running():
     """Do NOT rollup if any child is still running."""
-    from terminal.api._routes import (
+    from terminal.api.job_routes import (
         _try_rollup_parent_result,
         BACKGROUND_JOBS,
         BACKGROUND_JOB_LOCK,
@@ -143,7 +143,7 @@ def test_rollup_skips_when_children_running():
 
 def test_rollup_handles_failed_child():
     """Failed child results are included in rollup with error info."""
-    from terminal.api._routes import (
+    from terminal.api.job_routes import (
         _try_rollup_parent_result,
         BACKGROUND_JOBS,
         BACKGROUND_JOB_LOCK,
@@ -192,7 +192,7 @@ def test_rollup_handles_failed_child():
 
 def test_rollup_no_children_returns_false():
     """Parent without children returns False."""
-    from terminal.api._routes import (
+    from terminal.api.job_routes import (
         _try_rollup_parent_result,
         BACKGROUND_JOBS,
         BACKGROUND_JOB_LOCK,

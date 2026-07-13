@@ -17,6 +17,7 @@ import tempfile
 from pathlib import Path
 from datetime import datetime, timedelta
 from unittest.mock import patch
+from terminal.api import job_routes as jobs
 
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
@@ -440,9 +441,10 @@ def test_api_get_recent_reflections_with_limit(tmp_path):
 def _reset_jobs(monkeypatch, tmp_path):
     """重置 BACKGROUND_JOBS 状态，避免跨测试污染。"""
     from terminal.api import _routes as routes
-    monkeypatch.setattr(routes, "BACKGROUND_JOBS_PATH", tmp_path / "jobs.json")
-    monkeypatch.setattr(routes, "BACKGROUND_JOBS_LOADED", True)
-    routes.BACKGROUND_JOBS.clear()
+    from terminal.api import job_routes as jobs
+    monkeypatch.setattr(jobs, "BACKGROUND_JOBS_PATH", tmp_path / "jobs.json")
+    monkeypatch.setattr(jobs, "BACKGROUND_JOBS_LOADED", True)
+    jobs.BACKGROUND_JOBS.clear()
     return routes
 
 
@@ -523,7 +525,7 @@ def test_run_job_vault_reflection_dispatches_note(tmp_path, monkeypatch):
     routes = _reset_jobs(monkeypatch, tmp_path)
 
     job_id = "job-run-note"
-    routes.BACKGROUND_JOBS[job_id] = {
+    jobs.BACKGROUND_JOBS[job_id] = {
         "id": job_id,
         "title": "Vault 结晶：测试.md",
         "kind": "vault_reflection",
@@ -545,9 +547,9 @@ def test_run_job_vault_reflection_dispatches_note(tmp_path, monkeypatch):
 
     monkeypatch.setattr("workflows.vault_reflection.reflect_on_note", fake_reflect_on_note)
 
-    routes._run_job(job_id)
+    jobs._run_job(job_id)
 
-    job = routes.BACKGROUND_JOBS[job_id]
+    job = jobs.BACKGROUND_JOBS[job_id]
     assert job["status"] == "complete"
     assert called["path"] == "测试.md"
     assert called["force"] is True
@@ -561,7 +563,7 @@ def test_run_job_vault_reflection_dispatches_recent(tmp_path, monkeypatch):
     routes = _reset_jobs(monkeypatch, tmp_path)
 
     job_id = "job-run-recent"
-    routes.BACKGROUND_JOBS[job_id] = {
+    jobs.BACKGROUND_JOBS[job_id] = {
         "id": job_id,
         "title": "Vault 结晶：最近 7 天",
         "kind": "vault_reflection",
@@ -585,9 +587,9 @@ def test_run_job_vault_reflection_dispatches_recent(tmp_path, monkeypatch):
 
     monkeypatch.setattr("workflows.vault_reflection.reflect_on_recent", fake_reflect_on_recent)
 
-    routes._run_job(job_id)
+    jobs._run_job(job_id)
 
-    job = routes.BACKGROUND_JOBS[job_id]
+    job = jobs.BACKGROUND_JOBS[job_id]
     assert job["status"] == "complete"
     assert called["days"] == 7
     assert called["max_notes"] == 3
@@ -600,7 +602,7 @@ def test_run_job_vault_reflection_progress_updates_job(tmp_path, monkeypatch):
     routes = _reset_jobs(monkeypatch, tmp_path)
 
     job_id = "job-run-prog"
-    routes.BACKGROUND_JOBS[job_id] = {
+    jobs.BACKGROUND_JOBS[job_id] = {
         "id": job_id,
         "title": "Vault 结晶：最近 7 天",
         "kind": "vault_reflection",
@@ -620,9 +622,9 @@ def test_run_job_vault_reflection_progress_updates_job(tmp_path, monkeypatch):
 
     monkeypatch.setattr("workflows.vault_reflection.reflect_on_recent", fake_reflect_on_recent)
 
-    routes._run_job(job_id)
+    jobs._run_job(job_id)
 
-    job = routes.BACKGROUND_JOBS[job_id]
+    job = jobs.BACKGROUND_JOBS[job_id]
     assert job["status"] == "complete"
     assert "progress" in job
     assert len(job["progress"]) == 3
@@ -635,7 +637,7 @@ def test_run_job_vault_reflection_failure_marks_failed(tmp_path, monkeypatch):
     routes = _reset_jobs(monkeypatch, tmp_path)
 
     job_id = "job-run-fail"
-    routes.BACKGROUND_JOBS[job_id] = {
+    jobs.BACKGROUND_JOBS[job_id] = {
         "id": job_id,
         "title": "Vault 结晶：bad.md",
         "kind": "vault_reflection",
@@ -653,8 +655,8 @@ def test_run_job_vault_reflection_failure_marks_failed(tmp_path, monkeypatch):
 
     monkeypatch.setattr("workflows.vault_reflection.reflect_on_note", boom)
 
-    routes._run_job(job_id)
+    jobs._run_job(job_id)
 
-    job = routes.BACKGROUND_JOBS[job_id]
+    job = jobs.BACKGROUND_JOBS[job_id]
     assert job["status"] == "failed"
     assert "boom" in str(job.get("error", ""))
