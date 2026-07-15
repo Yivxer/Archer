@@ -7,7 +7,6 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFil
 import { randomBytes } from 'node:crypto'
 import { execFile } from 'node:child_process'
 import { apiRetryDelayMs, brainStatusReason, probeExistingApi, probeReadyApi, reclaimApiPort, resolveApiLaunchPaths, verifyApiToken, waitForReadyApi } from './apiProcess'
-import { listLocalSkills, tryExecuteLocalSkill } from '../agent/skills/localSkillBridge'
 
 const isDev = !app.isPackaged
 
@@ -708,16 +707,6 @@ ipcMain.handle('archer:get-brain-status', async () => {
 ipcMain.handle('archer:get-crash-info', async () => {
   return lastStartupCrashInfo
 })
-
-ipcMain.handle('archer:execute-local-skill', async (_event, name: string, args: Record<string, unknown> = {}) => {
-  if (!name || typeof name !== 'string') {
-    return { handled: false, result: null }
-  }
-  const result = await tryExecuteLocalSkill(name, args)
-  return { handled: result !== null, result }
-})
-
-ipcMain.handle('archer:list-local-skills', async () => listLocalSkills())
 
 // Single instance lock — prevents two Desktop instances from fighting over the Python API port.
 // When a new instance launches (e.g. after DMG update), it focuses the existing window and quits itself.

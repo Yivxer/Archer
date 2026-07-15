@@ -32,14 +32,14 @@
 - Modify: `client/desktop/src/agent/skills/index.ts`
 - Delete: `client/desktop/src/main/runLocalSkill.ts`
 - Delete: `client/desktop/src/agent/skills/localSkillBridge.ts`
-- Modify: `client/desktop/src/agent/skills/__tests__/localSkillBridge.test.ts`
+- Create: `client/desktop/src/agent/skills/__tests__/pythonSkillAuthority.test.ts`
 
-- [ ] Add a failing source-boundary test asserting Desktop main has no `archer:execute-local-skill` or `archer:list-local-skills` IPC handlers and the build has no `runLocalSkill` entry.
-- [ ] Remove both IPC handlers and their bridge import from Desktop main.
-- [ ] Remove the secondary Electron build entry and delete the CLI/registry bridge.
-- [ ] Replace the old bridge behavior test with the source-boundary test and remove bridge exports.
-- [ ] Run Desktop skill/main focused Vitest and `npm run build`; expect PASS and no `out/main/runLocalSkill.js`.
-- [ ] Commit `refactor: retire desktop skill runner`.
+- [x] Add a failing source-boundary test asserting Desktop main has no `archer:execute-local-skill` or `archer:list-local-skills` IPC handlers and the build has no `runLocalSkill` entry.
+- [x] Remove both IPC handlers and their bridge import from Desktop main.
+- [x] Remove the secondary Electron build entry and delete the CLI/registry bridge.
+- [x] Replace the old bridge behavior test with the source-boundary test and remove bridge exports.
+- [x] Run Desktop skill/main focused Vitest and `npm run build`; expect PASS and no `out/main/runLocalSkill.js`.
+- [x] Commit `refactor: retire desktop skill runner`.
 
 ### Task 3: Delete duplicated TS skill implementations
 

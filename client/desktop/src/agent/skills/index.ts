@@ -8,5 +8,3 @@ export { fileSearchSkill } from './fileSearch'
 export { webFetchSkill } from './webFetch'
 export { webSearchSkill, parseDdgHtml, ddgSearch } from './webSearch'
 export { validatePublicHttpUrl, fetchPublicHttpUrl } from './urlSafety'
-
-export { getSkillRegistry, hasLocalSkill, listLocalSkills, resetSkillRegistry, tryExecuteLocalSkill } from './localSkillBridge'
