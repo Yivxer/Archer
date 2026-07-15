@@ -13,4 +13,4 @@
 - [x] Add stale-response guards for rapid detail selection and search query changes.
 - [x] Add deterministic concurrency tests for detail and search races.
 - [x] Run session Python tests, full Desktop Vitest, and production build.
-- [ ] Update canonical Archer documents and commit the batch.
+- [x] Update canonical Archer documents and commit the batch.
