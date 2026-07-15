@@ -1,5 +1,3 @@
-export { createApprovalQueue } from './approvalQueue'
-export type { ApprovalQueue } from './approvalQueue'
 export { agentEventSchema, parseAgentEvent } from './contractSchemas'
 export { createEventLog, createPersistentEventLog } from './eventLog'
 export type { EventLog, EventLogStorage } from './eventLog'
