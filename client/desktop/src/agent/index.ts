@@ -20,7 +20,6 @@ export type { TraceDiagnostics } from './traceDiagnostics'
 export { createInitialRuntimeState, reduceRuntimeEvent, restoreRuntimeStateFromEvents } from './runtimeStore'
 export type { RuntimeState } from './runtimeStore'
 export { isForegroundOnlyWritingFeedbackPlan, isHugoBlogPublishPlan } from './taskRouter'
-export type { Skill, SkillArgs, SkillDef, SkillRegistry, SkillResult } from './skills/types'
 export type {
   AgentEvent,
   AgentEventBase,

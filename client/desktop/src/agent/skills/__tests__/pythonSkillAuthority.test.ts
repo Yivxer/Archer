@@ -15,4 +15,20 @@ describe('python skill authority', () => {
     expect(existsSync(resolve('src/main/runLocalSkill.ts'))).toBe(false)
     expect(existsSync(resolve('src/agent/skills/localSkillBridge.ts'))).toBe(false)
   })
+
+  it('has no duplicate TypeScript skill runtime', () => {
+    const duplicateFiles = [
+      'obsidianRead.ts',
+      'obsidianWrite.ts',
+      'fileOpsRead.ts',
+      'fileSearch.ts',
+      'webFetch.ts',
+      'webSearch.ts',
+    ]
+
+    for (const file of duplicateFiles) {
+      expect(existsSync(resolve('src/agent/skills', file))).toBe(false)
+    }
+    expect(existsSync(resolve('../../core/ts_skill_bridge.py'))).toBe(false)
+  })
 })

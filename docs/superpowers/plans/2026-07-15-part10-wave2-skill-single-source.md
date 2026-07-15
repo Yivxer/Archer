@@ -51,13 +51,20 @@
 - Delete: `client/desktop/src/agent/skills/webFetch.ts`
 - Delete: `client/desktop/src/agent/skills/webSearch.ts`
 - Delete: their six implementation-specific test files under `client/desktop/src/agent/skills/__tests__/`
-- Modify: `client/desktop/src/agent/skills/index.ts`
+- Delete: `client/desktop/src/agent/skills/index.ts`
+- Delete: `client/desktop/src/agent/skills/types.ts`
+- Delete: `client/desktop/src/agent/skills/vault.ts`
+- Delete: `client/desktop/src/agent/skills/urlSafety.ts`
+- Delete: their now-orphaned registry and URL-safety tests
+- Delete: `core/ts_skill_bridge.py`
+- Delete: `tests/test_ts_skill_bridge.py`
+- Modify: `client/desktop/src/agent/index.ts`
 
-- [ ] Add a failing architecture assertion that the six TS implementation files and exports are absent.
-- [ ] Verify `vault.ts`, `urlSafety.ts`, and shared skill types independently before deletion; retain any helper with a production caller.
-- [ ] Delete only the six duplicate implementations and tests, then remove their public exports.
-- [ ] Run Python six-skill tests, Desktop Vitest, and `npm run build`; expect PASS.
-- [ ] Commit `refactor: remove duplicate ts skill implementations`.
+- [x] Add a failing architecture assertion that the six TS implementation files and exports are absent.
+- [x] Verify `vault.ts`, `urlSafety.ts`, and shared skill types independently before deletion; retain any helper with a production caller.
+- [x] Delete the six duplicate implementations and tests, then remove the now-orphaned helpers, registry types, exports, and Python TS subprocess bridge.
+- [x] Run Python six-skill tests, Desktop Vitest, and `npm run build`; expect PASS.
+- [x] Commit `refactor: remove duplicate ts skill implementations`.
 
 ### Task 4: Wave 2 skill-source closure
 
