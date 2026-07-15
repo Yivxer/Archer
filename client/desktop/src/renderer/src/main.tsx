@@ -13,14 +13,14 @@ import {
   Wrench,
   X,
 } from 'lucide-react'
-import { fetchLocalExpertWorkbench, loadLocalSession, switchLocalExpert } from './adapters/localArcher'
+import { fetchLocalExpertWorkbench, switchLocalExpert } from './adapters/localArcher'
 import { connectionStatusLabel, expertShortLabel, modelProfileShortLabel } from './lib/conversationPersona'
 import { mergeInitiativeShadowEvent } from './lib/initiativeShadow'
 import { mergeSseInitiativeEvent } from './lib/initiativeStore'
 import { onStoreEvent } from './lib/storeEventBus'
 import { syncStoresFromAdapter } from './lib/storeSync'
 import { upsertThreadFromSave } from './lib/threadStore'
-import { deleteSession } from './lib/sessionStore'
+import { deleteSession, getSessionStoreState, loadSessionDetail } from './lib/sessionStore'
 import { createOfflineLocalShell, syncBrainData, wasBrainEverLinked } from './lib/brainConnection'
 import { useConnectionState, type ConnectionStateSnapshot } from './lib/useConnectionState'
 import { ConnectionBadge } from './components/ConnectionBadge'
@@ -135,7 +135,11 @@ function App() {
     setActiveSession(null)
     setSessionLoadState('loading')
     try {
-      const detail = await loadLocalSession(session.id)
+      const detail = await loadSessionDetail(session.id)
+      const sessionState = getSessionStoreState()
+      if (!detail || sessionState.detailState === 'error') {
+        throw new Error(sessionState.error || '无法读取这个历史会话')
+      }
       setActiveSession(detail)
       setSessionLoadState('idle')
       if (

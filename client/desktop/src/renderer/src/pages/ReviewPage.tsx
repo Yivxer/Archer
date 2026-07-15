@@ -1,6 +1,6 @@
 import React from 'react'
 import { Brain, ChevronRight, History, Layers, Search } from 'lucide-react'
-import { loadLocalSession, resolvePendingMemory, searchLocalSessions } from '../adapters/localArcher'
+import { resolvePendingMemory } from '../adapters/localArcher'
 import { EmptyDetail, SearchBox } from '../components/common'
 import { EmptyState } from '../components/EmptyState'
 import { LoadingState } from '../components/LoadingState'
@@ -13,7 +13,8 @@ import {
   ReviewSoulProfilePanel,
   type ReviewMemoryGroup,
 } from '../components/ReviewPanels'
-import type { ArcherAdapter, MemoryItem, Route, SessionDetail, SessionSearchResult } from '../types'
+import type { ArcherAdapter, MemoryItem, Route } from '../types'
+import { clearSessionDetail, loadSessionDetail, searchSessions, useSessionStore } from '../lib/sessionStore'
 
 export function ReviewPage({
   data,
@@ -29,15 +30,17 @@ export function ReviewPage({
   onMemoryItemsChange?: (items: MemoryItem[]) => void
 }) {
   const [selectedId, setSelectedId] = React.useState(data.sessions[0]?.id ?? '')
-  const [detail, setDetail] = React.useState<SessionDetail | null>(null)
-  const [detailState, setDetailState] = React.useState<'idle' | 'loading' | 'error'>('idle')
+  const sessions = useSessionStore((state) => state.items)
+  const detail = useSessionStore((state) => state.currentDetail)
+  const detailState = useSessionStore((state) => state.detailState)
+  const contentResults = useSessionStore((state) => state.searchResults)
+  const searchState = useSessionStore((state) => state.searchState)
   const [query, setQuery] = React.useState('')
   const [expertFilter, setExpertFilter] = React.useState('all')
   const [memoryItems, setMemoryItems] = React.useState(data.memory)
   const [memoryBusyId, setMemoryBusyId] = React.useState<number | null>(null)
   const [memoryNotice, setMemoryNotice] = React.useState('')
-  const [contentResults, setContentResults] = React.useState<SessionSearchResult[] | null>(null)
-  const [contentSearching, setContentSearching] = React.useState(false)
+  const contentSearching = searchState === 'searching'
   const expertOptions = data.experts?.experts ?? []
   const pendingMemoryCount = memoryItems.filter((item) => item.status === 'pending').length
   const pendingReviewMemories = memoryItems.filter((item) => item.status === 'pending').slice(0, 3)
@@ -45,10 +48,15 @@ export function ReviewPage({
   const canResolveMemory = data.status.adapter === 'local'
 
   React.useEffect(() => {
-    setSelectedId(data.sessions[0]?.id ?? '')
-    setDetail(null)
-    setDetailState('idle')
-  }, [data])
+    if (!sessions.length) {
+      setSelectedId('')
+      clearSessionDetail()
+      return
+    }
+    if (!sessions.some((session) => session.id === selectedId)) {
+      setSelectedId(sessions[0].id)
+    }
+  }, [sessions, selectedId])
 
   React.useEffect(() => {
     setMemoryItems(data.memory)
@@ -57,26 +65,10 @@ export function ReviewPage({
 
   React.useEffect(() => {
     if (!selectedId || data.status.adapter !== 'local') {
-      setDetail(null)
-      setDetailState('idle')
+      clearSessionDetail()
       return
     }
-    let cancelled = false
-    setDetailState('loading')
-    loadLocalSession(selectedId)
-      .then((value) => {
-        if (cancelled) return
-        setDetail(value)
-        setDetailState('idle')
-      })
-      .catch(() => {
-        if (cancelled) return
-        setDetail(null)
-        setDetailState('error')
-      })
-    return () => {
-      cancelled = true
-    }
+    void loadSessionDetail(selectedId)
   }, [selectedId, data.status.adapter])
 
   const now = new Date()
@@ -93,8 +85,8 @@ export function ReviewPage({
   const cleanQuery = query.trim().toLowerCase()
   const visibleSessions = React.useMemo(() => {
     const filtered = expertFilter === 'all'
-      ? data.sessions
-      : data.sessions.filter((session) => session.expertId === expertFilter)
+      ? sessions
+      : sessions.filter((session) => session.expertId === expertFilter)
     return cleanQuery
       ? filtered.filter((session) => {
         const haystack = [
@@ -108,7 +100,7 @@ export function ReviewPage({
         return haystack.includes(cleanQuery)
       })
       : filtered
-  }, [cleanQuery, data.sessions, expertFilter])
+  }, [cleanQuery, sessions, expertFilter])
   const selected = visibleSessions.find((session) => session.id === selectedId)
     ?? contentResults?.find((r) => r.id === selectedId)
     ?? visibleSessions[0]
@@ -122,30 +114,19 @@ export function ReviewPage({
   const contentSearchEnabled = data.status.adapter === 'local'
   React.useEffect(() => {
     if (!contentSearchEnabled) {
-      setContentResults(null)
+      void searchSessions('')
       return
     }
     const trimmed = query.trim()
     if (!trimmed || trimmed.length < 2) {
-      setContentResults(null)
+      void searchSessions('')
       return
     }
-    let cancelled = false
-    setContentSearching(true)
+    void searchSessions('')
     const timer = setTimeout(() => {
-      searchLocalSessions(trimmed)
-        .then((results) => {
-          if (!cancelled) setContentResults(results)
-        })
-        .catch(() => {
-          if (!cancelled) setContentResults(null)
-        })
-        .finally(() => {
-          if (!cancelled) setContentSearching(false)
-        })
+      void searchSessions(trimmed)
     }, 300)
     return () => {
-      cancelled = true
       clearTimeout(timer)
     }
   }, [query, contentSearchEnabled])
@@ -190,7 +171,7 @@ export function ReviewPage({
   ].filter((review) => review.highlights.length || review.growth_markers.length || review.suggested_questions.length)
   const soulSections = data.soulProfile.empty ? [] : data.soulProfile.sections.filter((section) => section.items.length).slice(0, 4)
 
-  const grouped: { label: string; sessions: typeof data.sessions }[] = []
+  const grouped: { label: string; sessions: typeof sessions }[] = []
   for (const session of visibleSessions) {
     const label = groupLabel(session.date)
     const existing = grouped.find((group) => group.label === label)
@@ -227,7 +208,7 @@ export function ReviewPage({
             刷新
           </button>
         </div>
-        {contentResults ? (
+        {query.trim().length >= 2 && searchState !== 'idle' ? (
           contentResults.length ? (
             <React.Fragment>
               <div className="session-group-label">

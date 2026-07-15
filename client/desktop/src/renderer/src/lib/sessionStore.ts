@@ -50,6 +50,8 @@ const initialState: SessionStoreState = {
 // ───────────────────────── Store 单例 ─────────────────────────
 
 const store = createExternalStore<SessionStoreState>(initialState)
+let detailRequestId = 0
+let searchRequestId = 0
 
 export function getSessionStoreState(): SessionStoreState {
   return store.getState()
@@ -82,22 +84,28 @@ export async function loadSessionList(): Promise<void> {
 /**
  * 加载会话详情。
  */
-export async function loadSessionDetail(id: string): Promise<void> {
+export async function loadSessionDetail(id: string): Promise<SessionDetail | null> {
+  const requestId = ++detailRequestId
   store.setState((s) => ({ ...s, detailState: 'loading', error: '' }))
   try {
     const detail = await loadLocalSession(id)
+    if (requestId !== detailRequestId) return null
     store.setState((s) => ({
       ...s,
       currentDetail: detail,
       detailState: 'ready',
       error: '',
     }))
+    return detail
   } catch (err) {
+    if (requestId !== detailRequestId) return null
     store.setState((s) => ({
       ...s,
+      currentDetail: null,
       detailState: 'error',
       error: err instanceof Error ? err.message : String(err),
     }))
+    return null
   }
 }
 
@@ -105,6 +113,7 @@ export async function loadSessionDetail(id: string): Promise<void> {
  * 搜索会话（debounce 由调用方处理）。
  */
 export async function searchSessions(query: string): Promise<void> {
+  const requestId = ++searchRequestId
   const trimmed = query.trim()
   if (!trimmed) {
     store.setState((s) => ({
@@ -118,12 +127,14 @@ export async function searchSessions(query: string): Promise<void> {
   store.setState((s) => ({ ...s, searchState: 'searching', searchQuery: trimmed }))
   try {
     const results = await searchLocalSessions(trimmed)
+    if (requestId !== searchRequestId) return
     store.setState((s) => ({
       ...s,
       searchResults: results,
       searchState: 'ready',
     }))
   } catch (err) {
+    if (requestId !== searchRequestId) return
     store.setState((s) => ({
       ...s,
       searchState: 'error',
@@ -209,6 +220,7 @@ export async function deleteSession(sessionId: string): Promise<{ ok: boolean; t
  * 清空 currentDetail（用于关闭会话详情）。
  */
 export function clearSessionDetail(): void {
+  detailRequestId += 1
   store.setState((s) => ({ ...s, currentDetail: null, detailState: 'idle' }))
 }
 
@@ -216,6 +228,8 @@ export function clearSessionDetail(): void {
  * 重置 store。
  */
 export function resetSessionStore(): void {
+  detailRequestId += 1
+  searchRequestId += 1
   store.setState(() => initialState)
 }
 
