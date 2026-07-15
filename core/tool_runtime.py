@@ -59,12 +59,6 @@ class ToolResult:
 def invoke(skill_name: str, args: dict, skills: dict,
            timeout: int | None = None) -> ToolResult:
     """调用技能并返回 ToolResult，任何情况下都不抛异常。"""
-    from core.ts_skill_bridge import try_execute_ts_skill
-
-    ts_result = try_execute_ts_skill(skill_name, args)
-    if ts_result is not None:
-        return ts_result
-
     mod = skills.get(skill_name)
     if mod is None:
         return ToolResult(

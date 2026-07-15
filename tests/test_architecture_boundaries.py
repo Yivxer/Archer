@@ -298,6 +298,28 @@ def test_desktop_tool_execution_helpers_live_behind_tools_facade():
     assert not helper_symbols & tool_definitions
 
 
+@pytest.mark.contract
+def test_python_tool_runtime_does_not_delegate_to_ts_bridge():
+    runtime_tree = ast.parse(
+        (ROOT / "core/tool_runtime.py").read_text(encoding="utf-8")
+    )
+    imported_names = {
+        alias.name
+        for node in ast.walk(runtime_tree)
+        if isinstance(node, ast.ImportFrom)
+        and node.module == "core.ts_skill_bridge"
+        for alias in node.names
+    }
+    called_names = {
+        node.func.id
+        for node in ast.walk(runtime_tree)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+    }
+
+    assert "try_execute_ts_skill" not in imported_names
+    assert "try_execute_ts_skill" not in called_names
+
+
 def _skill(name: str, *, risk: str = "medium"):
     module = types.ModuleType(name)
     module.SKILL = {

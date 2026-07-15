@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import types
 from unittest.mock import patch
 
 from core.tool_runtime import invoke
@@ -40,17 +41,25 @@ def test_try_execute_ts_skill_honors_fallback_marker():
         assert try_execute_ts_skill("file_ops", {"action": "write", "path": "/tmp/x.md"}) is None
 
 
-def test_runtime_invoke_uses_ts_bridge_before_python():
-    payload = {"ok": True, "output": "from ts"}
-    proc = type("Proc", (), {"stdout": json.dumps(payload), "returncode": 0})()
+def test_python_runtime_wins_even_when_ts_bridge_can_execute():
+    python_skill = types.ModuleType("file_ops")
+    python_skill.SKILL = {"name": "file_ops", "default_timeout": 5}
+    python_skill.run = lambda _args: "from python"
 
-    with patch("core.ts_skill_bridge._run_runner", return_value=proc), \
-         patch("core.ts_skill_bridge.runner_mode", return_value="dev"):
-        result = invoke("file_ops", {"action": "read", "path": "/tmp/demo.txt"}, {})
+    with patch(
+        "core.ts_skill_bridge.try_execute_ts_skill",
+        return_value=type("Result", (), {"ok": True, "content_preview": "from ts"})(),
+    ) as ts_execute:
+        result = invoke(
+            "file_ops",
+            {"action": "read", "path": "/tmp/demo.txt"},
+            {"file_ops": python_skill},
+        )
 
     assert result.ok is True
-    assert "from ts" in result.content_preview
-    assert result.meta.get("runtime") == "ts"
+    assert result.content_preview == "from python"
+    assert result.meta.get("runtime") == "py"
+    ts_execute.assert_not_called()
 
 
 def test_runner_mode_reports_built_or_dev():
