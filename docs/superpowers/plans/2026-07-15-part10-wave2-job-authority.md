@@ -12,4 +12,4 @@
 - [x] Feed Chat `job.event` SSE payloads into `jobStore.mergeJobEvent()`.
 - [x] Reuse the adapter `SpawnChildSpec` request type instead of duplicating it.
 - [x] Run focused Python/Vitest tests, full Desktop Vitest, and production build.
-- [ ] Update canonical Archer documents and commit the batch.
+- [x] Update canonical Archer documents and commit the batch.
