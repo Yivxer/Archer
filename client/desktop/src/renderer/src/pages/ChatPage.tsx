@@ -24,6 +24,7 @@ import { PermissionPrompt } from '../components/PermissionPrompt'
 import { TracePanel } from '../components/TracePanel'
 import { WorkReceipt as WorkReceiptComponent } from '../components/WorkReceipt'
 import { buildThinkingMutter } from '../lib/thinkingMutter'
+import { mergeJobEvent } from '../lib/jobStore'
 import { buildTraceDiagnostics, createInitialRuntimeState, createPersistentEventLog, reduceRuntimeEvent, restoreRuntimeStateFromEvents, isForegroundOnlyWritingFeedbackPlan, isHugoBlogPublishPlan, jobSnapshotToAgentEvent, buildPlanChildJobSpecs, buildPlanCoordinatorPrompt, buildPlanExecutionPrompt, planWithStatus } from '../../../agent'
 import type { AgentEvent, ApprovalResultEvent, EventLog, JobEvent, OrchestrationEvent, PlanEvent, TraceDiagnostics } from '../../../agent'
 import type { FailureHintEvent, InitiativeEvent } from '../../../agent/contracts'
@@ -226,6 +227,13 @@ export function ChatPage({
   function recordAgentEvent(event: AgentEvent) {
     eventLogRef.current?.append(event)
     setRuntimeState((current) => reduceRuntimeEvent(current, event))
+    if (event.type === 'job.event') {
+      mergeJobEvent(event.jobId, {
+        status: event.status,
+        result: event.detail,
+        stale: event.stale,
+      })
+    }
     if (event.type === 'initiative.event') onInitiativeEvent?.(event)
   }
 

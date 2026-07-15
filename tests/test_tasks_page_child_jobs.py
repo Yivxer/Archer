@@ -3,6 +3,19 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 TASKS_PAGE = ROOT / "client/desktop/src/renderer/src/pages/TasksPage.tsx"
+CHAT_PAGE = ROOT / "client/desktop/src/renderer/src/pages/ChatPage.tsx"
+
+
+def test_tasks_page_uses_server_authoritative_job_store():
+    source = TASKS_PAGE.read_text()
+    chat_source = CHAT_PAGE.read_text()
+
+    assert "from '../lib/jobStore'" in source
+    assert "useJobStore" in source
+    assert "loadJobList" in source
+    assert "loadJobDetail" in source
+    assert "setTimeout(() => void refreshJobs" not in source
+    assert "mergeJobEvent" in chat_source
 
 
 def test_tasks_page_shows_child_job_summaries():
@@ -17,13 +30,13 @@ def test_tasks_page_shows_child_job_summaries():
     assert "childStatusIcon" in source
     assert "子任务汇总" in source
     assert "buildChildJobsSummary" in source
-    assert "fetchBackgroundJob" in source
+    assert "loadJobDetail" in source
 
 
 def test_tasks_page_has_manual_child_job_entry():
     source = TASKS_PAGE.read_text()
 
-    assert "spawnChildJobs" in source
+    assert "spawnChildren" in source
     assert "拆分子任务" in source
     assert "childDrafts" in source
     assert "handleSpawnChildren" in source

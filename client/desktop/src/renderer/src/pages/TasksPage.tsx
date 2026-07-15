@@ -1,12 +1,17 @@
 import React from 'react'
 import { Check, ChevronRight, Clock3, Copy, Loader2, Plus, Trash2, X } from 'lucide-react'
-import { cancelBackgroundJob, fetchBackgroundJob, listBackgroundJobs, retryBackgroundJob, spawnChildJobs } from '../adapters/localArcher'
 import { EmptyDetail, SearchBox } from '../components/common'
 import { EmptyState } from '../components/EmptyState'
 import type { ArcherAdapter, BackgroundJob, BackgroundJobChildSummary } from '../types'
 import type { SpawnChildSpec } from '../adapters/localArcher'
-
-type LoadState = 'idle' | 'loading' | 'error'
+import {
+  cancelJob as cancelStoredJob,
+  loadJobDetail,
+  loadJobList,
+  retryJob as retryStoredJob,
+  spawnChildren,
+  useJobStore,
+} from '../lib/jobStore'
 
 type ChildDraft = {
   key: string
@@ -27,47 +32,18 @@ function createChildDraft(): ChildDraft {
 }
 
 export function TasksPage({ data }: { data: ArcherAdapter }) {
-  const [jobs, setJobs] = React.useState<BackgroundJob[]>([])
+  const jobs = useJobStore((state) => state.jobs)
+  const jobDetail = useJobStore((state) => state.currentDetail)
+  const loadState = useJobStore((state) => state.loadState)
+  const storeError = useJobStore((state) => state.error)
   const [selectedId, setSelectedId] = React.useState('')
-  const [jobDetail, setJobDetail] = React.useState<BackgroundJob | null>(null)
   const [query, setQuery] = React.useState('')
-  const [loadState, setLoadState] = React.useState<LoadState>('idle')
   const [notice, setNotice] = React.useState('')
-
-  async function loadJobDetail(jobId: string) {
-    if (!jobId || data.status.adapter !== 'local') {
-      setJobDetail(null)
-      return
-    }
-    try {
-      const detail = await fetchBackgroundJob(jobId)
-      setJobDetail(detail)
-    } catch {
-      setJobDetail(null)
-    }
-  }
 
   async function refreshJobs() {
     if (data.status.adapter !== 'local') return
-    setLoadState('loading')
     setNotice('')
-    try {
-      const result = await listBackgroundJobs()
-      setJobs(result.jobs)
-      const nextId = selectedId && result.jobs.some((job) => job.id === selectedId)
-        ? selectedId
-        : result.jobs[0]?.id || ''
-      setSelectedId(nextId)
-      if (nextId) {
-        await loadJobDetail(nextId)
-      } else {
-        setJobDetail(null)
-      }
-      setLoadState('idle')
-    } catch (error) {
-      setLoadState('error')
-      setNotice(error instanceof Error ? error.message : '后台任务读取失败')
-    }
+    await loadJobList()
   }
 
   React.useEffect(() => {
@@ -75,14 +51,21 @@ export function TasksPage({ data }: { data: ArcherAdapter }) {
   }, [data.status.adapter])
 
   React.useEffect(() => {
-    void loadJobDetail(selectedId)
+    if (selectedId && data.status.adapter === 'local') void loadJobDetail(selectedId)
   }, [selectedId, data.status.adapter])
+
+  React.useEffect(() => {
+    if (jobs.length && !jobs.some((job) => job.id === selectedId)) {
+      setSelectedId(jobs[0].id)
+    }
+    if (!jobs.length && selectedId) setSelectedId('')
+  }, [jobs, selectedId])
 
   async function cancelJob(job: BackgroundJob) {
     try {
-      const result = await cancelBackgroundJob(job.id)
-      upsertJob(result.job)
-      setNotice(result.message)
+      await cancelStoredJob(job.id)
+      setSelectedId(job.id)
+      setNotice('任务已取消')
       await loadJobDetail(job.id)
     } catch (error) {
       setNotice(error instanceof Error ? error.message : '取消失败')
@@ -91,10 +74,9 @@ export function TasksPage({ data }: { data: ArcherAdapter }) {
 
   async function retryJob(job: BackgroundJob) {
     try {
-      const result = await retryBackgroundJob(job.id)
-      upsertJob(result.job)
-      setNotice(result.message)
-      window.setTimeout(() => void refreshJobs(), 600)
+      await retryStoredJob(job.id)
+      setSelectedId(job.id)
+      setNotice('任务已重新排队')
     } catch (error) {
       setNotice(error instanceof Error ? error.message : '重试失败')
     }
@@ -102,17 +84,11 @@ export function TasksPage({ data }: { data: ArcherAdapter }) {
 
   async function spawnChildJobsForParent(job: BackgroundJob, specs: SpawnChildSpec[]) {
     try {
-      const result = await spawnChildJobs(job.id, specs)
-      setNotice(`已创建 ${result.spawned} 个子任务`)
-      await refreshJobs()
+      await spawnChildren(job.id, specs)
+      setNotice(`已创建 ${specs.length} 个子任务`)
     } catch (error) {
       setNotice(error instanceof Error ? error.message : '子任务创建失败')
     }
-  }
-
-  function upsertJob(job: BackgroundJob) {
-    setJobs((current) => current.map((item) => (item.id === job.id ? job : item)))
-    setSelectedId(job.id)
   }
 
   const visibleJobs = React.useMemo(() => {
@@ -175,7 +151,7 @@ export function TasksPage({ data }: { data: ArcherAdapter }) {
       {selectedDetail ? (
         <TaskDetail
           job={selectedDetail}
-          notice={notice}
+          notice={notice || storeError}
           onCancel={() => void cancelJob(selectedDetail)}
           onRetry={() => void retryJob(selectedDetail)}
           onSpawnChildren={(specs) => spawnChildJobsForParent(selectedDetail, specs)}

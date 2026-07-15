@@ -18,6 +18,7 @@ import type {
   SessionItem,
   SoulFiles,
   SoulProfileSummary,
+  BackgroundJob,
 } from '../../types'
 
 import {
@@ -47,6 +48,7 @@ import {
 import {
   clearJobDetail,
   getJobStoreState,
+  mergeJobItems,
   mergeJobEvent,
   resetJobStore,
   subscribeJobStore,
@@ -404,6 +406,17 @@ describe('sessionStore — L3.4', () => {
 // ───────────────────────── jobStore ─────────────────────────
 
 describe('jobStore — L3.5', () => {
+  const serverJob: BackgroundJob = {
+    id: 'job-1',
+    title: '服务端任务',
+    kind: 'chat',
+    prompt: '执行任务',
+    status: 'queued',
+    result: '',
+    createdAt: '2026-07-15T00:00:00Z',
+    updatedAt: '2026-07-15T00:00:00Z',
+  }
+
   beforeEach(() => {
     resetJobStore()
   })
@@ -425,11 +438,14 @@ describe('jobStore — L3.5', () => {
   })
 
   it('mergeJobEvent 对已知 job 局部更新', () => {
-    // 先通过 mergeJobEvent 注入初始 job —— 但 mergeJobEvent 只更新已存在的
-    // 这里用 mergeJobEvent 的方式测：先有 job 才能更新
-    // 改用直接验证：mergeJobEvent 不追加，保持空
-    mergeJobEvent('job-1', { status: 'running' })
-    expect(getJobStoreState().jobs).toHaveLength(0)
+    mergeJobItems([serverJob])
+    mergeJobEvent('job-1', { status: 'running', result: '服务端 SSE 进度' })
+
+    expect(getJobStoreState().jobs).toEqual([{
+      ...serverJob,
+      status: 'running',
+      result: '服务端 SSE 进度',
+    }])
   })
 
   it('clearJobDetail 清空详情', () => {

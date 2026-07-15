@@ -20,6 +20,7 @@ import {
   retryBackgroundJob,
   spawnChildJobs,
 } from '../adapters/localArcher'
+import type { SpawnChildSpec } from '../adapters/localArcher'
 import type { BackgroundJob } from '../types'
 import { createExternalStore, useExternalStore, type LoadState } from './externalStore'
 import { emitStoreEvent } from './storeEventBus'
@@ -63,6 +64,13 @@ function upsertJob(state: JobStoreState, job: BackgroundJob): BackgroundJob[] {
   const idx = state.jobs.findIndex((j) => j.id === job.id)
   if (idx === -1) return [...state.jobs, job]
   return state.jobs.map((j) => (j.id === job.id ? job : j))
+}
+
+function projectServerJob(state: JobStoreState, job: BackgroundJob): Pick<JobStoreState, 'jobs' | 'currentDetail'> {
+  return {
+    jobs: upsertJob(state, job),
+    currentDetail: state.currentDetail?.id === job.id ? job : state.currentDetail,
+  }
 }
 
 // ───────────────────────── Actions ─────────────────────────
@@ -111,6 +119,11 @@ export async function loadJobDetail(jobId: string): Promise<void> {
   }
 }
 
+/** 用服务端 /jobs 快照替换列表；供连接恢复和确定性测试复用。 */
+export function mergeJobItems(jobs: BackgroundJob[]): void {
+  store.setState((s) => ({ ...s, jobs, loadState: 'ready', error: '' }))
+}
+
 /**
  * 创建 job。
  */
@@ -145,7 +158,7 @@ export async function cancelJob(jobId: string): Promise<void> {
     const result = await cancelBackgroundJob(jobId)
     store.setState((s) => ({
       ...s,
-      jobs: upsertJob(s, result.job),
+      ...projectServerJob(s, result.job),
       busyIds: new Set([...s.busyIds].filter((id) => id !== jobId)),
     }))
     // L3.7: 通知跨 store 联动
@@ -161,7 +174,7 @@ export async function cancelJob(jobId: string): Promise<void> {
 }
 
 /**
- * 重试 job（成功后 600ms 延迟 refresh，与原 TasksPage 逻辑一致）。
+ * 重试 job。动作响应与后续 SSE 都来自服务端，不用固定延迟猜状态。
  */
 export async function retryJob(jobId: string): Promise<void> {
   store.setState((s) => ({
@@ -172,15 +185,11 @@ export async function retryJob(jobId: string): Promise<void> {
     const result = await retryBackgroundJob(jobId)
     store.setState((s) => ({
       ...s,
-      jobs: upsertJob(s, result.job),
+      ...projectServerJob(s, result.job),
       busyIds: new Set([...s.busyIds].filter((id) => id !== jobId)),
     }))
     // L3.7: 通知跨 store 联动
     emitStoreEvent({ type: 'job:retried', jobId })
-    // 600ms 后 refresh 列表（等后端状态稳定）
-    setTimeout(() => {
-      loadJobList().catch(() => {})
-    }, 600)
   } catch (err) {
     store.setState((s) => ({
       ...s,
@@ -207,7 +216,7 @@ export async function approveJob(
     const result = await approveJobTool(jobId, eventId, decision)
     store.setState((s) => ({
       ...s,
-      jobs: upsertJob(s, result.job),
+      ...projectServerJob(s, result.job),
       busyIds: new Set([...s.busyIds].filter((id) => id !== jobId)),
     }))
     // L3.7: 通知跨 store 联动
@@ -227,7 +236,7 @@ export async function approveJob(
  */
 export async function spawnChildren(
   jobId: string,
-  children: { title: string; kind: string; prompt: string; timeoutSeconds?: number; isolated?: boolean }[],
+  children: SpawnChildSpec[],
 ): Promise<void> {
   store.setState((s) => ({
     ...s,
@@ -264,7 +273,10 @@ export function mergeJobEvent(jobId: string, patch: Partial<BackgroundJob>): voi
     const idx = s.jobs.findIndex((j) => j.id === jobId)
     if (idx === -1) return s // 列表里没有，忽略（等下次 loadJobList）
     const jobs = s.jobs.map((j) => (j.id === jobId ? { ...j, ...patch } : j))
-    return { ...s, jobs }
+    const currentDetail = s.currentDetail?.id === jobId
+      ? { ...s.currentDetail, ...patch }
+      : s.currentDetail
+    return { ...s, jobs, currentDetail }
   })
 }
 
