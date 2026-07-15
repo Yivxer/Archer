@@ -73,6 +73,6 @@
 - Modify: `Archer 架构设计.md` outside the repository
 - Modify: `客户端构建日志.md` outside the repository
 
-- [ ] Run the relevant Python suite, full Desktop Vitest, production build, and Journey 0 if local API is ready.
-- [ ] Confirm repository search and code graph show no production TS executor for the six skill names.
-- [ ] Update the three canonical documents with exact commits, counts, and verification level.
+- [x] Run the relevant Python suite, full Desktop Vitest, production build, and Journey 0 if local API is ready.
+- [x] Confirm repository search and code graph show no production TS executor for the six skill names.
+- [x] Update the three canonical documents with exact commits, counts, and verification level.
