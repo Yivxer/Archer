@@ -90,6 +90,17 @@ def test_status_requires_bearer_token(client):
     assert "adapter" in response.json()
 
 
+def test_list_response_uses_contract_envelope(client):
+    response = client.get(
+        "/sessions",
+        headers={"Authorization": "Bearer test-token"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["contractVersion"] == 1
+    assert isinstance(response.json()["data"], list)
+
+
 def test_openapi_docs_available(client):
     response = client.get("/openapi.json")
     assert response.status_code == 200

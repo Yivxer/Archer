@@ -15,6 +15,7 @@ from terminal.api._tools import (
 from terminal.api._routes import _tool_approval
 from terminal.api import _config
 from terminal.api.fastapi_app import _chat_stream_events
+from terminal.api.contract import versioned_payload
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -153,3 +154,10 @@ def test_fastapi_sse_frames_all_declare_contract_version(monkeypatch):
 
     payloads = [json.loads(frame.removeprefix("data: ")) for frame in frames]
     assert [payload["contractVersion"] for payload in payloads] == [1, 1]
+
+
+def test_list_rest_payload_uses_versioned_data_envelope():
+    assert versioned_payload([{"id": "session-1"}]) == {
+        "contractVersion": 1,
+        "data": [{"id": "session-1"}],
+    }

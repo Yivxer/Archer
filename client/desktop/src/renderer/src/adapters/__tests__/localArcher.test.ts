@@ -94,7 +94,10 @@ describe('localArcher token management', () => {
       confidence: '0.9',
       source: 'test',
     }]
-    const fetchSpy = vi.fn(async () => new Response(JSON.stringify(memory), { status: 200 }))
+    const fetchSpy = vi.fn(async () => new Response(JSON.stringify({
+      contractVersion: 1,
+      data: memory,
+    }), { status: 200 }))
     vi.stubGlobal('fetch', fetchSpy)
 
     await expect(fetchMemoryItems()).resolves.toEqual(memory)
@@ -102,6 +105,16 @@ describe('localArcher token management', () => {
       expect.stringContaining('/memory?include_rejected=true'),
       expect.any(Object),
     )
+  })
+
+  it('rejects a list envelope from an unsupported contract version', async () => {
+    saveDesktopApiToken('test-token')
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      contractVersion: 2,
+      data: [],
+    }), { status: 200 })))
+
+    await expect(fetchMemoryItems()).rejects.toThrow('Archer API 协议版本不兼容')
   })
 
   it('confirms active profile by reading settings after switching models', async () => {

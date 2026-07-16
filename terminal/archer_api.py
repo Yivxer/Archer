@@ -41,7 +41,7 @@ from terminal.api._security import (
 )
 from terminal.api import _tools as _api_tools
 from terminal.api import desktop_tool_execution as _desktop_tool_execution
-from terminal.api.contract import CONTRACT_VERSION, CONTRACT_VERSION_HEADER, versioned_dict
+from terminal.api.contract import CONTRACT_VERSION, CONTRACT_VERSION_HEADER, versioned_dict, versioned_payload
 from terminal.api._tools import (
     _bg_extract_api,
     _extract_github_args,
@@ -176,7 +176,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def _send(self, status: int, payload: dict | list) -> None:
         payload = normalize_error_payload(status, payload)
-        payload = versioned_dict(payload) if isinstance(payload, dict) else payload
+        payload = versioned_payload(payload)
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")

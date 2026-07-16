@@ -35,6 +35,7 @@ from terminal.api.contract import (
     CONTRACT_VERSION,
     CONTRACT_VERSION_HEADER,
     versioned_dict,
+    versioned_payload,
 )
 from core.runtime_context import RuntimeContext, create_runtime_context
 from terminal.api.memory_extraction import (
@@ -81,7 +82,7 @@ def _path_with_query(request: Request) -> str:
 
 def _json_response(status: int, payload: dict | list) -> JSONResponse:
     payload = normalize_error_payload(status, payload)
-    content = versioned_dict(payload) if isinstance(payload, dict) else payload
+    content = versioned_payload(payload)
     return JSONResponse(
         status_code=status,
         content=content,

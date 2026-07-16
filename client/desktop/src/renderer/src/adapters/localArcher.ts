@@ -165,6 +165,14 @@ export async function checkLocalApiReady(): Promise<boolean> {
   return response.ok
 }
 
+function unwrapRestPayload<T>(payload: unknown): T {
+  if (payload && typeof payload === 'object' && 'data' in payload) {
+    assertSupportedContractVersion(payload as { contractVersion?: unknown })
+    return (payload as { data: T }).data
+  }
+  return payload as T
+}
+
 async function getJson<T>(path: string): Promise<T> {
   const response = await apiFetch(path)
   if (!response.ok) {
@@ -172,7 +180,7 @@ async function getJson<T>(path: string): Promise<T> {
     const error = parseError(response, body)
     throw new Error(`[${error.type}] ${error.message}`)
   }
-  return response.json() as Promise<T>
+  return unwrapRestPayload<T>(await response.json())
 }
 
 async function postJson<T>(path: string, payload: unknown): Promise<T> {
