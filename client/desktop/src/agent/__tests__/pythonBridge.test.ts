@@ -238,4 +238,33 @@ describe('python bridge', () => {
       recoverable: true,
     })
   })
+
+  it('preserves bounded performance metrics on runtime context events', () => {
+    const [event] = pythonStreamPayloadToAgentEvents('session-1', {
+      contractVersion: 1,
+      performanceEvent: {
+        id: 'perf-1',
+        traceId: 'trace-1',
+        task: 'chat_turn',
+        phase: 'performance',
+        userIntent: 'chat',
+        lastResult: 'complete',
+        expectedNext: 'trace_closed',
+        outcome: 'complete',
+        ttftMs: 80,
+        totalDurationMs: 200,
+        contextBuildMs: 30,
+        toolDurationMs: 40,
+        cpuTimeMs: 10,
+        peakRssBytes: 123456,
+      },
+    })
+    expect(event).toMatchObject({
+      type: 'runtime.context',
+      phase: 'performance',
+      ttftMs: 80,
+      totalDurationMs: 200,
+      peakRssBytes: 123456,
+    })
+  })
 })

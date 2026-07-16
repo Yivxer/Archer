@@ -209,6 +209,13 @@ type PythonRuntimeContextEvent = {
   provider?: string
   model?: string
   baseUrlSummary?: string
+  outcome?: 'complete' | 'failed'
+  ttftMs?: number
+  totalDurationMs?: number
+  contextBuildMs?: number
+  toolDurationMs?: number
+  cpuTimeMs?: number
+  peakRssBytes?: number
 }
 
 type PythonFailureHintEvent = {
@@ -228,6 +235,7 @@ export type PythonStreamPayload = {
   statusEvent?: PythonStatusEvent
   initiativeEvent?: PythonInitiativeEvent
   runtimeContextEvent?: PythonRuntimeContextEvent
+  performanceEvent?: PythonRuntimeContextEvent
   failureHintEvent?: PythonFailureHintEvent
 }
 
@@ -287,6 +295,13 @@ export function pythonRuntimeContextToAgentEvent(
     provider: snapshot.provider,
     model: snapshot.model,
     baseUrlSummary: snapshot.baseUrlSummary,
+    outcome: snapshot.outcome,
+    ttftMs: snapshot.ttftMs,
+    totalDurationMs: snapshot.totalDurationMs,
+    contextBuildMs: snapshot.contextBuildMs,
+    toolDurationMs: snapshot.toolDurationMs,
+    cpuTimeMs: snapshot.cpuTimeMs,
+    peakRssBytes: snapshot.peakRssBytes,
   }
 }
 
@@ -315,6 +330,9 @@ export function pythonStreamPayloadToAgentEvents(
   const events: AgentEvent[] = []
   if (payload.runtimeContextEvent) {
     events.push(pythonRuntimeContextToAgentEvent(sessionId, payload.runtimeContextEvent))
+  }
+  if (payload.performanceEvent) {
+    events.push(pythonRuntimeContextToAgentEvent(sessionId, payload.performanceEvent))
   }
   if (payload.toolEvent) {
     events.push(pythonToolEventToAgentEvent(sessionId, payload.toolEvent))

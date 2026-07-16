@@ -151,6 +151,13 @@ export type RuntimeContextEvent = AgentEventBase & {
   provider?: string
   model?: string
   baseUrlSummary?: string
+  outcome?: 'complete' | 'failed'
+  ttftMs?: number
+  totalDurationMs?: number
+  contextBuildMs?: number
+  toolDurationMs?: number
+  cpuTimeMs?: number
+  peakRssBytes?: number
 }
 
 export type FailureHintEvent = AgentEventBase & {

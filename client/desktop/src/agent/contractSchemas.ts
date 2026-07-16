@@ -145,6 +145,13 @@ export const runtimeContextEventSchema = base.extend({
   provider: z.string().optional(),
   model: z.string().optional(),
   baseUrlSummary: z.string().optional(),
+  outcome: z.enum(['complete', 'failed']).optional(),
+  ttftMs: z.number().nonnegative().optional(),
+  totalDurationMs: z.number().nonnegative().optional(),
+  contextBuildMs: z.number().nonnegative().optional(),
+  toolDurationMs: z.number().nonnegative().optional(),
+  cpuTimeMs: z.number().nonnegative().optional(),
+  peakRssBytes: z.number().nonnegative().optional(),
 })
 
 export const failureHintEventSchema = base.extend({

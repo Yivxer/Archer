@@ -468,6 +468,7 @@ def _iter_simple_chat_path(
         core_persona=core_persona,
         simple=True,
     )
+    yield {"type": "_metric", "stage": "context_ready", "traceId": trace_id}
 
     # 主模型 stream
     active_model = select_model_for_turn(
@@ -559,11 +560,30 @@ def _iter_chat_chunks(
     file_refs: list[dict] | None = None,
     runtime_context=None,
 ):
+    from terminal.api.turn_metrics import instrument_turn_events
+
+    yield from instrument_turn_events(_iter_chat_chunks_impl(
+        messages,
+        memory_mode=memory_mode,
+        obsidian_mode=obsidian_mode,
+        file_refs=file_refs,
+        runtime_context=runtime_context,
+    ))
+
+
+def _iter_chat_chunks_impl(
+    messages: list[dict],
+    memory_mode: str = "conservative",
+    obsidian_mode: str = "summary",
+    file_refs: list[dict] | None = None,
+    runtime_context=None,
+):
     from core.llm import stream_chat
 
     classified_turn = classify_turn(messages)
     query = classified_turn.query
     trace_id = f"trace-{uuid4().hex[:12]}"
+    yield {"type": "_metric", "stage": "trace_started", "traceId": trace_id}
     _record_part8_shadow_material(messages, runtime_context)
     # 历史（不含当前这条用户消息），用于历史感知意图与检索改写
     prior_history = classified_turn.prior_history
@@ -591,6 +611,7 @@ def _iter_chat_chunks(
         dependencies=_full_turn_dependencies(),
         classified_turn=classified_turn,
     )
+    yield {"type": "_metric", "stage": "context_ready", "traceId": trace_id}
     query = prepared_turn.query
     prior_history = prepared_turn.prior_history
     intent_info = prepared_turn.intent_info

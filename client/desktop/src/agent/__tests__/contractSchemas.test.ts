@@ -165,6 +165,13 @@ describe('contract schemas', () => {
       provider: 'Kimi',
       model: 'kimi-k2-fast',
       baseUrlSummary: 'https://api.moonshot.cn',
+      outcome: 'complete',
+      ttftMs: 80,
+      totalDurationMs: 200,
+      contextBuildMs: 30,
+      toolDurationMs: 40,
+      cpuTimeMs: 10,
+      peakRssBytes: 123456,
     }).type).toBe('runtime.context')
 
     expect(parseAgentEvent({

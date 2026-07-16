@@ -18,6 +18,8 @@ Metrics produced:
     3. tool.request → tool.result 闭环率
     4. dead→ready latency (from connection transitions)
     5. state distribution (time spent in each state, approximate)
+    6. chat turn TTFT / total / context / tool / CPU p50+p95
+    7. process peak RSS and explicit performance-terminal Trace closure
 
 Exit codes:
     0 = 指标采集成功（即使有警告）
@@ -104,15 +106,22 @@ def collect_trace_metrics(events: list[dict[str, Any]]) -> dict[str, Any]:
         "has_failure": False,
         "tool_requests": 0,
         "tool_results": 0,
+        "has_performance_terminal": False,
     })
+    performance_events: list[dict[str, Any]] = []
 
     for e in events:
-        tid = e.get("traceId")
+        runtime = e.get("performanceEvent") or e.get("runtimeContextEvent") or e
+        runtime = runtime if isinstance(runtime, dict) else e
+        tid = e.get("traceId") or runtime.get("traceId")
         if not tid:
             continue
         t = traces[tid]
         t["events"].append(e)
         etype = e.get("type", "")
+        if runtime.get("phase") == "performance":
+            t["has_performance_terminal"] = True
+            performance_events.append(runtime)
         if etype in ("text.final",):
             t["has_final"] = True
         if etype == "failure.hint":
@@ -126,12 +135,31 @@ def collect_trace_metrics(events: list[dict[str, Any]]) -> dict[str, Any]:
     if total == 0:
         return {"total": 0}
 
-    closed = sum(1 for t in traces.values() if t["has_final"] or t["has_failure"])
+    closed = sum(
+        1 for t in traces.values()
+        if t["has_final"] or t["has_failure"] or t["has_performance_terminal"]
+    )
     failed = sum(1 for t in traces.values() if t["has_failure"])
     tool_unclosed = sum(
         1 for t in traces.values()
         if t["tool_requests"] > 0 and t["tool_requests"] > t["tool_results"]
     )
+
+    def distribution(field: str) -> dict[str, int]:
+        values = sorted(
+            int(event[field]) for event in performance_events
+            if isinstance(event.get(field), (int, float))
+        )
+        if not values:
+            return {"count": 0}
+        count = len(values)
+        return {
+            "count": count,
+            "min": values[0],
+            "p50": values[min(int(count * 0.50), count - 1)],
+            "p95": values[min(int(count * 0.95), count - 1)],
+            "max": values[-1],
+        }
 
     return {
         "total": total,
@@ -140,6 +168,14 @@ def collect_trace_metrics(events: list[dict[str, Any]]) -> dict[str, Any]:
         "with_failure": failed,
         "failure_rate": f"{failed / total * 100:.1f}%" if total else "n/a",
         "tool_unclosed": tool_unclosed,
+        "performance": {
+            "total_duration_ms": distribution("totalDurationMs"),
+            "ttft_ms": distribution("ttftMs"),
+            "context_build_ms": distribution("contextBuildMs"),
+            "tool_duration_ms": distribution("toolDurationMs"),
+            "cpu_time_ms": distribution("cpuTimeMs"),
+            "peak_rss_bytes": distribution("peakRssBytes"),
+        },
     }
 
 
@@ -264,6 +300,24 @@ def print_report(failure: dict, traces: dict, conn: dict, since: str | None) -> 
         print(f"  闭环率: {traces['closed_rate']}（{traces['closed']}/{traces['total']}）")
         print(f"  含 failure 的 trace: {traces['with_failure']}（{traces['failure_rate']}）")
         print(f"  tool.request 未闭合: {traces['tool_unclosed']}")
+        performance = traces.get("performance", {})
+        if performance.get("total_duration_ms", {}).get("count", 0):
+            print("  性能分位（ms，min/p50/p95/max）:")
+            for label, key in (
+                ("总耗时", "total_duration_ms"),
+                ("TTFT", "ttft_ms"),
+                ("上下文", "context_build_ms"),
+                ("工具", "tool_duration_ms"),
+                ("CPU", "cpu_time_ms"),
+            ):
+                item = performance[key]
+                print(
+                    f"    {label}: {item.get('min', 'n/a')}/"
+                    f"{item.get('p50', 'n/a')}/{item.get('p95', 'n/a')}/"
+                    f"{item.get('max', 'n/a')}"
+                )
+            rss = performance["peak_rss_bytes"]
+            print(f"  进程 RSS 峰值: {rss.get('max', 0) / 1024 / 1024:.1f} MiB")
     print()
 
     # 连接状态
