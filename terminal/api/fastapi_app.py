@@ -247,6 +247,20 @@ def create_app(
         )
         app.state.schema_version = migration_result.version
 
+        try:
+            from memory.portable_export import create_rotating_backup
+
+            context = app.state.runtime_context
+            create_rotating_backup(
+                context.db_path,
+                context.config or _load_config(),
+                context.db_path.parent / "backups" / "portable",
+                now=context.now(),
+            )
+            logger.info("[startup] portable Soul/Memory backup refreshed")
+        except Exception as exc:
+            logger.warning("[startup] portable backup failed: %s", exc)
+
         # L0 active_context: 启动时判定崩溃 + 写新 active_context + 启动心跳
         if active_context_mgr is not None:
             try:

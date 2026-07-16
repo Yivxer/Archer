@@ -4,6 +4,11 @@ import json
 import sqlite3
 from datetime import datetime, timedelta
 
+from fastapi.testclient import TestClient
+
+from core.runtime_context import create_runtime_context
+from terminal.api.fastapi_app import create_app
+
 from memory.portable_export import (
     build_portable_export,
     create_rotating_backup,
@@ -86,3 +91,29 @@ def test_rotating_backup_keeps_seven_daily_and_four_weekly_pairs(tmp_path):
     assert len(list((backup_root / "daily").glob("*.md"))) == 7
     assert len(list((backup_root / "weekly").glob("*.json"))) == 4
     assert len(list((backup_root / "weekly").glob("*.md"))) == 4
+
+
+def test_fastapi_startup_backs_up_and_manual_export_returns_paths(tmp_path):
+    soul_path = tmp_path / "SOUL.md"
+    soul_path.write_text("# Soul", encoding="utf-8")
+    context = create_runtime_context(
+        db_path=tmp_path / "archer.db",
+        config={"persona": {"soul_path": str(soul_path)}},
+        clock=lambda: datetime(2026, 7, 16, 9, 30),
+    )
+    app = create_app("test-token", runtime_context=context)
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/exports/portable",
+            headers={"Authorization": "Bearer test-token"},
+            json={},
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ok"] is True
+    assert body["contractVersion"] == 1
+    assert (tmp_path / "backups" / "portable" / "daily" / "archer-portable-2026-07-16.json").is_file()
+    assert (tmp_path / "exports" / "portable" / body["jsonPath"].split("/")[-1]).is_file()
+    assert (tmp_path / "exports" / "portable" / body["markdownPath"].split("/")[-1]).is_file()

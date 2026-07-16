@@ -600,6 +600,19 @@ def payload_get(path: str, runtime_context=None) -> tuple[int, dict | list]:
     return 404, {"error": "not_found", "path": path}
 def payload_post(path: str, payload: dict, runtime_context=None) -> tuple[int, dict | list]:
     """Handle POST request routing."""
+    if path == "/exports/portable":
+        from memory.portable_export import write_portable_export
+        from memory.store import DB_PATH
+
+        db_path = getattr(runtime_context, "db_path", DB_PATH)
+        config = getattr(runtime_context, "config", None) or _load_config()
+        output_dir = db_path.parent / "exports" / "portable"
+        result = write_portable_export(db_path, config, output_dir)
+        return 200, {
+            "ok": True,
+            "jsonPath": str(result.json_path),
+            "markdownPath": str(result.markdown_path),
+        }
     initiative_feedback = re.fullmatch(r"/initiative-shadow/([0-9]+)/feedback", path)
     if initiative_feedback:
         return _initiative_shadow_feedback(initiative_feedback.group(1), payload)
