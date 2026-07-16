@@ -433,14 +433,14 @@ export const mockArcher: ArcherAdapter = {
       { id: 'parent-educator', label: '亲子教育家', note: '育儿沟通与教育理念', modelProfile: 'lite', skillCount: 3, configured: true },
     ],
     modelProfiles: [
-      { id: 'lite', label: 'DSK', provider: 'DeepSeek', baseUrl: 'https://api.deepseek.com/v1', model: 'deepseek-chat', apiKeyPreview: 'sk-••••••••••••••••', configured: true },
+      { id: 'lite', label: 'DSK', provider: 'DeepSeek', baseUrl: 'https://api.deepseek.com/v1', model: 'deepseek-chat', apiKeyPreview: '••••', configured: true },
       { id: 'pro', label: 'KIM', provider: 'Kimi', baseUrl: '', model: '', apiKeyPreview: '', configured: false },
       { id: 'max', label: 'GLM', provider: 'GLM', baseUrl: '', model: '', apiKeyPreview: '', configured: false },
     ],
     provider: 'OpenAI-compatible',
     baseUrl: 'https://api.deepseek.com/v1',
     model: 'deepseek-chat',
-    apiKeyPreview: 'sk-••••••••••••••••',
+    apiKeyPreview: '••••',
     configPath: '~/.archer/archer.toml',
     memoryDbPath: '~/.archer/archer.db',
     sessionsPath: '~/.archer/sessions'

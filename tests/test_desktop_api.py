@@ -1735,6 +1735,10 @@ class TestSettingsValidation:
         monkeypatch.setattr(routes, "CONFIG_PATH", config_path)
         monkeypatch.setattr("terminal.api._config.CONFIG_PATH", config_path)
         monkeypatch.setattr(routes, "_load_config", lambda: cfg)
+        monkeypatch.setattr(
+            "terminal.api.profile_routes.write_system_credential",
+            lambda profile_id, _value: f"keychain:{profile_id}",
+        )
 
         status, payload = routes.payload_post("/settings/save", {
             "settings": {
@@ -1751,7 +1755,8 @@ class TestSettingsValidation:
         written = config_path.read_text(encoding="utf-8")
         assert 'active_profile = "pro"' in written
         assert 'model = "kimi-k2.6"' in written
-        assert 'api_key = "sk-new-pro"' in written
+        assert 'api_key_ref = "keychain:pro"' in written
+        assert "sk-new-pro" not in written
 
 
 class TestToolApproval:

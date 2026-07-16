@@ -21,9 +21,9 @@ import os
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-import tomllib
 
 from core.boundary_responses import boundary_response
+from core.config_contract import load_config_file
 from core.intent import (
     augment_retrieval_query,
     classify_boundary_request,
@@ -544,5 +544,4 @@ def build_messages(
 
 def load_config() -> dict:
     p = Path(__file__).parent.parent / "archer.toml"
-    with open(p, "rb") as f:
-        return tomllib.load(f)
+    return load_config_file(p)

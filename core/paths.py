@@ -1,5 +1,6 @@
-import tomllib
 from pathlib import Path
+
+from core.config_contract import load_config_file, validate_config
 
 ROOT = Path(__file__).parent.parent
 CONFIG_PATH = ROOT / "archer.toml"
@@ -7,10 +8,9 @@ CONFIG_PATH = ROOT / "archer.toml"
 
 def _load_config() -> dict:
     try:
-        with open(CONFIG_PATH, "rb") as f:
-            return tomllib.load(f)
+        return load_config_file(CONFIG_PATH)
     except FileNotFoundError:
-        return {}
+        return validate_config({})
 
 
 def _expand(path: str | Path) -> Path:

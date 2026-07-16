@@ -8,7 +8,6 @@ import re
 import sys
 import time
 from pathlib import Path
-import tomllib
 
 # ---------------------------------------------------------------------------
 # Project root & sys.path
@@ -16,6 +15,8 @@ import tomllib
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
+
+from core.config_contract import load_config_file, validate_config
 
 ROOT = _PROJECT_ROOT
 CONFIG_PATH = ROOT / "archer.toml"
@@ -287,20 +288,13 @@ def write_config_text(text: str) -> None:
 def _load_config() -> dict:
     with _CONFIG_LOCK:
         try:
-            with open(CONFIG_PATH, "rb") as f:
-                return tomllib.load(f)
+            return load_config_file(CONFIG_PATH)
         except FileNotFoundError:
-            return {}
-        except Exception:
-            return {}
+            return validate_config({})
 
 
 def _mask_key(value: str) -> str:
-    if not value:
-        return ""
-    if len(value) <= 8:
-        return "••••"
-    return f"{value[:3]}-••••••••{value[-4:]}"
+    return "••••" if value else ""
 
 
 def _read_text(path_value: str | None) -> str:

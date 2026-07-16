@@ -455,7 +455,7 @@ export function SettingsPage({
             <SettingRow title="模型" description="">
               <FormField label="模型" value={draft.model} onChange={(value) => updateDraft('model', value)} />
             </SettingRow>
-            <SettingRow title="API key" description="仅本地存储。">
+            <SettingRow title="API key" description="优先读取环境变量；新 key 保存到 macOS 系统凭据库，不写入 archer.toml。">
               <FormField label="API key 状态" value={draft.apiKeyPreview} readOnly />
               <FormField
                 label="新 API key"

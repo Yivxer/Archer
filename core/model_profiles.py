@@ -4,6 +4,8 @@ from __future__ import annotations
 import os
 from copy import deepcopy
 
+from core.secret_store import resolve_profile_api_key
+
 MODEL_PROFILE_IDS = ("lite", "pro", "max")
 
 DEFAULT_MODEL_PROFILES: dict[str, dict[str, object]] = {
@@ -65,7 +67,7 @@ def model_profiles(cfg: dict) -> dict[str, dict[str, object]]:
     has_lite_profile = isinstance(configured.get("lite"), dict)
     active_profile = str(api.get("active_profile", "lite") or "lite").strip().lower()
     if not has_lite_profile and active_profile == "lite":
-        for key in ("provider", "base_url", "api_key", "model", "model_auto", "vision_model", "models"):
+        for key in ("provider", "base_url", "api_key", "api_key_ref", "model", "model_auto", "vision_model", "models"):
             if key in api:
                 profiles["lite"][key] = api[key]
 
@@ -82,15 +84,24 @@ def model_profiles(cfg: dict) -> dict[str, dict[str, object]]:
         if env_key:
             lite["api_key"] = env_key
 
+    for profile_id, profile in profiles.items():
+        resolved_key = resolve_profile_api_key(profile_id, profile)
+        if resolved_key:
+            profile["api_key"] = resolved_key
+
     return profiles
 
 
 def active_api_config(cfg: dict) -> dict:
     api = dict(cfg.get("api", {}) if isinstance(cfg.get("api"), dict) else {})
     profile_id = active_model_profile_id(cfg)
+    configured = cfg.get("model_profiles", {})
+    if isinstance(configured, dict) and isinstance(configured.get(profile_id), dict):
+        api.pop("api_key", None)
+        api.pop("api_key_ref", None)
     profile = dict(model_profiles(cfg)[profile_id])
 
-    for key in ("provider", "base_url", "api_key", "model", "model_auto", "vision_model", "models"):
+    for key in ("provider", "base_url", "api_key", "api_key_ref", "model", "model_auto", "vision_model", "models"):
         value = profile.get(key)
         if value not in ("", [], None):
             api[key] = value

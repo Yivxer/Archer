@@ -1,7 +1,9 @@
+config_version = 1
+
 [api]
 active_profile = "lite"          # lite | pro | max
 base_url     = "https://api.deepseek.com/v1"
-api_key      = "sk-xxxxxxxxxxxxxxxx"
+api_key_ref  = "env:DEEPSEEK_API_KEY" # or keychain:lite
 model        = "deepseek-chat"
 model_auto   = true              # 每轮自动选 models[]；/model <名> 锁定
 vision_model = "deepseek-chat"   # 支持图片的模型
@@ -13,7 +15,7 @@ max_retries  = 1
 label        = "DSK"
 provider     = "DeepSeek"
 base_url     = "https://api.deepseek.com/v1"
-api_key      = "sk-xxxxxxxxxxxxxxxx"
+api_key_ref  = "env:DEEPSEEK_API_KEY"
 model        = "deepseek-chat"
 model_auto   = true
 vision_model = "deepseek-chat"
@@ -23,7 +25,7 @@ models       = ["deepseek-chat", "deepseek-reasoner"]
 label        = "KIM"
 provider     = "Kimi"
 base_url     = ""                # 填入 Kimi 的 OpenAI-compatible endpoint
-api_key      = ""                # 申请后再填
+api_key_ref  = "keychain:pro"    # Settings 保存后写入系统凭据库
 model        = ""                # 申请后再填
 model_auto   = false
 vision_model = ""
@@ -33,7 +35,7 @@ models       = []
 label        = "GLM"
 provider     = "GLM"
 base_url     = ""                # 填入 GLM 的 OpenAI-compatible endpoint
-api_key      = ""                # 申请后再填
+api_key_ref  = "keychain:max"    # Settings 保存后写入系统凭据库
 model        = ""                # 申请后再填
 model_auto   = false
 vision_model = ""

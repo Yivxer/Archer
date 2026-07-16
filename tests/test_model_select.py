@@ -117,6 +117,13 @@ class TestResolveActiveModel(unittest.TestCase):
         self.assertEqual(api["base_url"], "https://api.deepseek.com/v1")
         self.assertEqual(api["model"], "deepseek-chat")
 
+    def test_top_level_credential_does_not_leak_into_explicit_profile(self):
+        api = active_api_config({
+            "api": {"active_profile": "pro", "api_key": "stale-lite-key"},
+            "model_profiles": {"pro": {"base_url": "https://kimi.example/v1", "model": "kimi"}},
+        })
+        self.assertFalse(api.get("api_key"))
+
 
 if __name__ == "__main__":
     unittest.main()

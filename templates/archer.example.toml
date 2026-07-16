@@ -1,11 +1,12 @@
 # Archer Configuration
+config_version = 1
 # Copy this file to archer.toml and fill in your values.
 # archer.toml is gitignored — it will never be committed.
 
 [api]
 active_profile = "lite"                           # lite | pro | max
 base_url     = "https://api.deepseek.com/v1"   # or any OpenAI-compatible endpoint
-api_key      = "sk-your-api-key-here"
+api_key_ref  = "env:DEEPSEEK_API_KEY"           # or keychain:lite
 model        = "deepseek-chat"
 model_auto   = true                             # true=每轮按意图选 models[]；/model <名> 锁定后置 false
 vision_model = "deepseek-chat"                  # model to use when images are attached
@@ -17,7 +18,7 @@ max_retries  = 1
 label        = "DSK"
 provider     = "DeepSeek"
 base_url     = "https://api.deepseek.com/v1"
-api_key      = "sk-your-api-key-here"
+api_key_ref  = "env:DEEPSEEK_API_KEY"
 model        = "deepseek-chat"
 model_auto   = true
 vision_model = "deepseek-chat"
@@ -27,7 +28,7 @@ models       = ["deepseek-chat", "deepseek-reasoner"]
 label        = "KIM"
 provider     = "Kimi"
 base_url     = ""                                # fill after Kimi API approval
-api_key      = ""                                # fill after approval
+api_key_ref  = "keychain:pro"                    # Settings stores the secret in system credentials
 model        = ""                                # fill after approval
 model_auto   = false
 vision_model = ""
@@ -37,7 +38,7 @@ models       = []
 label        = "GLM"
 provider     = "GLM"
 base_url     = ""                                # fill after GLM API approval
-api_key      = ""                                # fill after approval
+api_key_ref  = "keychain:max"                    # Settings stores the secret in system credentials
 model        = ""                                # fill after approval
 model_auto   = false
 vision_model = ""

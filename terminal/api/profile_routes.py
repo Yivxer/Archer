@@ -10,6 +10,9 @@ from pathlib import Path
 
 import tomli_w
 
+from core.config_contract import validate_config
+from core.secret_store import migrate_plaintext_api_keys, write_system_credential
+
 from terminal.api._config import (
     CONFIG_PATH,
     SETTINGS_ALLOWED_FIELDS,
@@ -483,13 +486,16 @@ def _save_settings_draft(payload: dict) -> dict:
         profile_cfg["model"] = draft.get("model", profile_cfg.get("model", ""))
         api_key = str(draft.get("apiKey", "") or "").strip()
         if api_key:
-            profile_cfg["api_key"] = api_key
+            profile_cfg["api_key_ref"] = write_system_credential(active_profile, api_key)
+            profile_cfg.pop("api_key", None)
         cfg["api"]["base_url"] = draft.get("baseUrl", cfg["api"].get("base_url", ""))
         cfg["api"]["model"] = draft.get("model", cfg["api"].get("model", ""))
         if api_key:
-            cfg["api"]["api_key"] = api_key
+            cfg["api"]["api_key_ref"] = profile_cfg["api_key_ref"]
+            cfg["api"].pop("api_key", None)
         cfg["memory"]["db_path"] = draft.get("memoryDbPath", cfg["memory"].get("db_path", ""))
         cfg["paths"]["sessions_dir"] = draft.get("sessionsPath", cfg["paths"].get("sessions_dir", ""))
+        cfg = validate_config(migrate_plaintext_api_keys(cfg))
         write_config_text(tomli_w.dumps(cfg))
         try:
             _load_config()
@@ -568,7 +574,8 @@ def _save_profile_settings(payload: dict) -> dict:
         if model:
             profile_cfg["model"] = model
         if api_key:
-            profile_cfg["api_key"] = api_key
+            profile_cfg["api_key_ref"] = write_system_credential(profile_id, api_key)
+            profile_cfg.pop("api_key", None)
 
         # 如果保存的是当前 active profile，同步更新 [api] 段
         active_profile = str(cfg.get("api", {}).get("active_profile", "lite"))
@@ -578,8 +585,10 @@ def _save_profile_settings(payload: dict) -> dict:
             if model:
                 cfg["api"]["model"] = model
             if api_key:
-                cfg["api"]["api_key"] = api_key
+                cfg["api"]["api_key_ref"] = profile_cfg["api_key_ref"]
+                cfg["api"].pop("api_key", None)
 
+        cfg = validate_config(migrate_plaintext_api_keys(cfg))
         write_config_text(tomli_w.dumps(cfg))
         try:
             _load_config()
@@ -629,15 +638,18 @@ def _switch_active_profile(payload: dict) -> dict:
         if "api" not in cfg or not isinstance(cfg.get("api"), dict):
             cfg["api"] = {}
         cfg["api"]["active_profile"] = profile_id
+        cfg["api"].pop("api_key", None)
+        cfg["api"].pop("api_key_ref", None)
 
         # 从已解析的 profile 同步字段到 [api] 段（仅当 profile 有该字段且非空时）
         profiles = model_profiles(cfg)
         target = profiles.get(profile_id, {})
-        for key in ("provider", "base_url", "model", "api_key", "vision_model"):
+        for key in ("provider", "base_url", "model", "api_key_ref", "vision_model"):
             val = target.get(key)
             if val not in ("", None):
                 cfg["api"][key] = val
 
+        cfg = validate_config(cfg)
         write_config_text(tomli_w.dumps(cfg))
         try:
             _load_config()
@@ -811,4 +823,3 @@ def _test_model_profile(payload: dict, cfg: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
-

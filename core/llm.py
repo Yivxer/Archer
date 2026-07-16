@@ -1,10 +1,10 @@
 import os
-import tomllib
 from pathlib import Path
 from openai import APIConnectionError, APIStatusError, APITimeoutError, OpenAI
 from openai.types.chat import ChatCompletionMessage
 from typing import Generator
 
+from core.config_contract import load_config_file
 from core.model_profiles import cfg_with_active_api
 from core.observability import trace_span
 from core.provider_breaker import is_provider_connection_error, record_failure, record_success
@@ -70,8 +70,7 @@ def _load_config() -> dict:
         _config_reloaded = False
         return _cfg
     if _cfg is None or mtime > _config_mtime:
-        with open(_CONFIG_PATH, "rb") as f:
-            _cfg = cfg_with_active_api(_apply_env_overrides(tomllib.load(f)))
+        _cfg = cfg_with_active_api(_apply_env_overrides(load_config_file(_CONFIG_PATH)))
         _config_reloaded = (_config_mtime > 0)  # 初次加载不算"重载"
         _config_mtime = mtime
         if _config_reloaded:
