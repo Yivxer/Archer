@@ -11,7 +11,7 @@ import tomli_w
 from core.secret_store import migrate_plaintext_api_keys
 
 
-CURRENT_CONFIG_VERSION = 1
+CURRENT_CONFIG_VERSION = 2
 KNOWN_TOP_LEVEL_FIELDS = frozenset({
     "config_version", "api", "model_profiles", "persona", "memory", "paths",
     "context", "ui", "obsidian", "critique", "security", "mcp",
@@ -20,6 +20,57 @@ KNOWN_TOP_LEVEL_FIELDS = frozenset({
 
 class ConfigValidationError(ValueError):
     """Raised when a configuration cannot be safely interpreted."""
+
+
+def _validate_mcp_config(mcp: dict) -> None:
+    servers = mcp.get("servers", [])
+    if not isinstance(servers, list):
+        raise ConfigValidationError("mcp.servers must be an array of tables")
+    names: set[str] = set()
+    for index, server in enumerate(servers):
+        label = f"mcp.servers[{index}]"
+        if not isinstance(server, dict):
+            raise ConfigValidationError(f"{label} must be a TOML table")
+        name = str(server.get("name", "")).strip()
+        if not name:
+            raise ConfigValidationError(f"{label}.name is required")
+        if name in names:
+            raise ConfigValidationError(f"duplicate MCP server name: {name}")
+        names.add(name)
+        enabled = server.get("enabled", False)
+        if not isinstance(enabled, bool):
+            raise ConfigValidationError(f"{label}.enabled must be a boolean")
+        if not enabled:
+            continue
+        permissions = server.get("permissions")
+        if not isinstance(permissions, dict):
+            raise ConfigValidationError(f"{label}.permissions is required when enabled")
+        tools = permissions.get("tools")
+        if not isinstance(tools, dict) or not tools:
+            raise ConfigValidationError(f"{label}.permissions.tools must not be empty")
+        invalid = sorted(
+            str(tool) for tool, level in tools.items()
+            if str(level).strip().lower() not in {"read", "write"}
+        )
+        if invalid:
+            raise ConfigValidationError(
+                f"{label}.permissions.tools has invalid level: {', '.join(invalid)}"
+            )
+        domains = permissions.get("allowed_domains", [])
+        if not isinstance(domains, list) or any(
+            not isinstance(domain, str) or not domain.strip() for domain in domains
+        ):
+            raise ConfigValidationError(
+                f"{label}.permissions.allowed_domains must be an array of domains"
+            )
+        transport = str(server.get("transport", "stdio")).strip().lower()
+        if transport in {"streamable_http", "http", "remote"}:
+            from core.mcp import _url_domain_allowed
+
+            if not _url_domain_allowed(str(server.get("url", "")), domains):
+                raise ConfigValidationError(
+                    f"{label}.url must use http(s) and match permissions.allowed_domains"
+                )
 
 
 def validate_config(raw: object) -> dict:
@@ -57,6 +108,10 @@ def validate_config(raw: object) -> dict:
                 raise ConfigValidationError(f"unknown model profile: {profile_id}")
             if not isinstance(profile, dict):
                 raise ConfigValidationError(f"[model_profiles.{profile_id}] must be a TOML table")
+
+    mcp = cfg.get("mcp", {})
+    if isinstance(mcp, dict):
+        _validate_mcp_config(mcp)
 
     cfg["config_version"] = CURRENT_CONFIG_VERSION
     return cfg

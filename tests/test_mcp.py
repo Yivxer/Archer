@@ -13,7 +13,8 @@ ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 
 from core.mcp import (
-    MCPManager, _extract_text, _fn_name, _make_module, load_from_config,
+    MCPManager, _extract_text, _fn_name, _make_module, _normalize_server_config,
+    load_from_config,
 )
 
 
@@ -93,6 +94,13 @@ def test_make_module_has_skill():
     assert mod.SKILL["name"] == "fetch__get_url"
     assert "fetch" in mod.SKILL["description"]
 
+
+def test_make_module_marks_write_tool_for_confirmation():
+    info = _sample_info()
+    info["permission"] = "write"
+    mod = _make_module(info, MagicMock())
+    assert mod.SKILL["requires_confirmation"] is True
+
 def test_make_module_schema_format():
     mgr = MagicMock()
     mod = _make_module(_sample_info(), mgr)
@@ -116,6 +124,28 @@ def test_make_module_has_schema_and_run():
     mod = _make_module(_sample_info(), mgr)
     assert callable(mod.schema)
     assert callable(mod.run)
+
+
+def test_normalize_server_permissions_are_deny_by_default():
+    cfg = _normalize_server_config({"name": "fetch", "command": "uvx"})
+    assert cfg is not None
+    assert cfg["enabled"] is False
+    assert cfg["tool_permissions"] == {}
+
+
+def test_normalize_server_permissions_accept_read_and_write_only():
+    cfg = _normalize_server_config({
+        "name": "fetch",
+        "command": "uvx",
+        "enabled": True,
+        "permissions": {
+            "tools": {"fetch_url": "read", "publish": "write", "oops": "admin"},
+            "allowed_domains": ["example.com", "*.example.org"],
+        },
+    })
+    assert cfg is not None
+    assert cfg["tool_permissions"] == {"fetch_url": "read", "publish": "write"}
+    assert cfg["allowed_domains"] == ["example.com", "*.example.org"]
 
 
 # ── MCPManager.make_skill_modules ─────────────────────────────────────────────
@@ -216,3 +246,20 @@ def test_call_tool_unknown_tool():
         assert False, "should raise"
     except ValueError as e:
         assert "nonexistent__tool" in str(e)
+
+
+def test_call_tool_rechecks_url_domain_before_transport():
+    mgr = MCPManager()
+    mgr.ready = True
+    mgr._tools = {
+        "fetch__fetch_url": {
+            "server": "fetch",
+            "tool_name": "fetch_url",
+            "allowed_domains": ["example.com"],
+        }
+    }
+    try:
+        mgr.call_tool("fetch__fetch_url", {"url": "https://evil.example/a"})
+        assert False, "should deny unapproved domain"
+    except PermissionError as exc:
+        assert "evil.example" in str(exc)

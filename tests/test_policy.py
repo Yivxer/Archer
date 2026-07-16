@@ -601,6 +601,68 @@ def test_mcp_unknown_tool_allow():
     assert r.decision == Decision.ALLOW
 
 
+def _mcp_cfg(*, tools=None, domains=None, enabled=True):
+    return {
+        "mcp": {
+            "enabled": True,
+            "servers": [{
+                "name": "fetch",
+                "enabled": enabled,
+                "permissions": {
+                    "tools": tools or {},
+                    "allowed_domains": domains or [],
+                },
+            }],
+        }
+    }
+
+
+def test_mcp_config_denies_server_without_explicit_enable():
+    r = check_mcp_tool("fetch", "fetch_url", {}, cfg=_mcp_cfg(
+        tools={"fetch_url": "read"}, enabled=False,
+    ))
+    assert r.decision == Decision.DENY
+    assert "未启用" in r.reason
+
+
+def test_mcp_config_denies_unlisted_tool():
+    r = check_mcp_tool("fetch", "publish", {}, cfg=_mcp_cfg(
+        tools={"fetch_url": "read"},
+    ))
+    assert r.decision == Decision.DENY
+    assert "未授权" in r.reason
+
+
+def test_mcp_config_write_tool_always_requires_confirmation():
+    r = check_mcp_tool("fetch", "publish", {"title": "x"}, cfg=_mcp_cfg(
+        tools={"publish": "write"},
+    ))
+    assert r.decision == Decision.CONFIRM
+    assert "写入" in r.reason
+
+
+def test_mcp_config_read_tool_allows_allowlisted_domain():
+    r = check_mcp_tool("fetch", "fetch_url", {"url": "https://docs.example.com/a"}, cfg=_mcp_cfg(
+        tools={"fetch_url": "read"}, domains=["*.example.com"],
+    ))
+    assert r.decision == Decision.ALLOW
+
+
+def test_mcp_config_denies_domain_not_in_allowlist():
+    r = check_mcp_tool("fetch", "fetch_url", {"url": "https://evil.example/a"}, cfg=_mcp_cfg(
+        tools={"fetch_url": "read"}, domains=["example.com"],
+    ))
+    assert r.decision == Decision.DENY
+    assert "域名" in r.reason
+
+
+def test_mcp_config_denies_url_when_domain_allowlist_is_empty():
+    r = check_mcp_tool("fetch", "fetch_url", {"payload": {"target": "https://example.com/a"}}, cfg=_mcp_cfg(
+        tools={"fetch_url": "read"},
+    ))
+    assert r.decision == Decision.DENY
+
+
 def test_mcp_alert_keyword_medium():
     """工具名含危险关键词但无具体风险 → CONFIRM medium。"""
     r = check_mcp_tool('fetch', 'file_list', {})

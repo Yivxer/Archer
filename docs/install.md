@@ -96,9 +96,13 @@ enabled = true
 
 [[mcp.servers]]
 name    = "fetch"
+enabled = true
 command = "uvx"
 args    = ["mcp-server-fetch"]
+permissions = { tools = { fetch_url = "read" }, allowed_domains = ["example.com"] }
 ```
+
+MCP 权限默认拒绝：server、工具及 HTTP(S) 域名都需显式授权；`write` 工具仍需用户确认。
 
 ## 更新
 

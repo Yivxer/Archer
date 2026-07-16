@@ -122,13 +122,46 @@ def test_connect_streamable_http_uses_client():
                     await mgr._connect_one(
                         {
                             "name": "remote",
+                            "enabled": True,
                             "transport": "streamable_http",
                             "url": "https://example.com/mcp",
+                            "tool_permissions": {"ping": "read"},
+                            "allowed_domains": ["example.com"],
                         }
                     )
 
         assert "remote" in mgr._sessions
         assert "remote__ping" in mgr._tools
+
+    asyncio.run(_run())
+
+
+def test_connect_registers_only_explicitly_allowed_tools():
+    async def _run():
+        mgr = MCPManager()
+        fake_session = MagicMock()
+        allowed = MagicMock(name="allowed")
+        allowed.name = "fetch_url"
+        allowed.description = "Fetch"
+        allowed.inputSchema = {}
+        denied = MagicMock(name="denied")
+        denied.name = "publish"
+        denied.description = "Publish"
+        denied.inputSchema = {}
+        fake_session.list_tools = AsyncMock(return_value=MagicMock(tools=[allowed, denied]))
+        mgr._connect_stdio = AsyncMock(return_value=fake_session)
+
+        await mgr._connect_one({
+            "name": "fetch",
+            "enabled": True,
+            "transport": "stdio",
+            "command": "uvx",
+            "tool_permissions": {"fetch_url": "read"},
+            "allowed_domains": ["example.com"],
+        })
+
+        assert set(mgr._tools) == {"fetch__fetch_url"}
+        assert mgr._tools["fetch__fetch_url"]["permission"] == "read"
 
     asyncio.run(_run())
 

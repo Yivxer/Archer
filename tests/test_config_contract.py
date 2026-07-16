@@ -31,6 +31,68 @@ def test_invalid_section_and_profile_are_rejected():
         validate_config({"surprise": {}})
 
 
+def test_enabled_mcp_server_requires_explicit_tool_permissions():
+    with pytest.raises(ConfigValidationError, match="permissions is required"):
+        validate_config({
+            "mcp": {
+                "enabled": True,
+                "servers": [{"name": "fetch", "enabled": True, "command": "uvx"}],
+            }
+        })
+
+
+def test_mcp_tool_permission_levels_are_validated():
+    with pytest.raises(ConfigValidationError, match="invalid level"):
+        validate_config({
+            "mcp": {
+                "enabled": True,
+                "servers": [{
+                    "name": "fetch",
+                    "enabled": True,
+                    "command": "uvx",
+                    "permissions": {"tools": {"fetch_url": "admin"}},
+                }],
+            }
+        })
+
+
+def test_mcp_explicit_read_write_permissions_are_accepted():
+    cfg = validate_config({
+        "mcp": {
+            "enabled": True,
+            "servers": [{
+                "name": "fetch",
+                "enabled": True,
+                "command": "uvx",
+                "permissions": {
+                    "tools": {"fetch_url": "read", "publish": "write"},
+                    "allowed_domains": ["example.com"],
+                },
+            }],
+        }
+    })
+    assert cfg["mcp"]["servers"][0]["enabled"] is True
+
+
+def test_remote_mcp_endpoint_must_match_domain_allowlist():
+    with pytest.raises(ConfigValidationError, match="match permissions.allowed_domains"):
+        validate_config({
+            "mcp": {
+                "enabled": True,
+                "servers": [{
+                    "name": "remote",
+                    "enabled": True,
+                    "transport": "streamable_http",
+                    "url": "https://evil.example/mcp",
+                    "permissions": {
+                        "tools": {"search": "read"},
+                        "allowed_domains": ["mcp.example.com"],
+                    },
+                }],
+            }
+        })
+
+
 def test_environment_secret_has_priority(monkeypatch):
     monkeypatch.setenv("ARCHER_PRO_API_KEY", "env-secret")
     monkeypatch.setattr("core.secret_store.read_system_credential", lambda _profile: "keychain-secret")
@@ -86,7 +148,7 @@ def test_config_file_migration_is_atomic_without_plaintext_backup(tmp_path, monk
 
     assert migrate_config_file(path) is True
     written = path.read_text(encoding="utf-8")
-    assert "config_version = 1" in written
+    assert f"config_version = {CURRENT_CONFIG_VERSION}" in written
     assert 'api_key_ref = "keychain:lite"' in written
     assert "legacy-secret" not in written
     assert not path.with_suffix(".toml.pre-v1.bak").exists()

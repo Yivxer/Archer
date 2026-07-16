@@ -33,6 +33,18 @@ def test_make_tool_request_can_force_approval_for_api_draft():
     assert req["requiresApproval"] is True
 
 
+def test_make_mcp_write_request_reports_write_permission():
+    skill = _skill("remote__publish")
+    skill.SKILL.update({"version": "mcp", "mcp_permission": "write"})
+    req = make_tool_request(
+        "remote__publish",
+        {},
+        {"remote__publish": skill},
+        force_approval=True,
+    )
+    assert req["permissionLevel"] == "write-local"
+
+
 def test_make_tool_request_preserves_work_intent():
     skills = {"safe_tool": _skill("safe_tool")}
     work_intent = {

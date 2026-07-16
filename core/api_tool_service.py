@@ -9,7 +9,7 @@ from __future__ import annotations
 from uuid import uuid4
 
 from core.policy import Decision, check as policy_check
-from core.permission_levels import permission_level_for_tool
+from core.permission_levels import PermissionLevel, permission_level_for_tool
 from core.tool_runtime import ToolResult, invoke as runtime_invoke
 
 
@@ -22,6 +22,12 @@ def _preview_args(args: dict, max_chars: int = 500) -> str:
         parts.append(f"{key}={text}")
     preview = "  ".join(parts)
     return preview[:max_chars]
+
+
+def _permission_level(skill_name: str, args: dict, skills: dict) -> PermissionLevel:
+    mod = skills.get(skill_name)
+    meta = getattr(mod, "SKILL", {}) if mod else {}
+    return permission_level_for_tool(skill_name, args, meta)
 
 
 def make_tool_request(
@@ -50,7 +56,7 @@ def make_tool_request(
             "risk": pr.risk,
             "reason": pr.reason,
         },
-        "permissionLevel": permission_level_for_tool(skill_name, args),
+        "permissionLevel": _permission_level(skill_name, args, skills),
         "requiresApproval": (not blocked) and (
             force_approval or pr.decision in (Decision.CONFIRM, Decision.STRONG_CONFIRM)
         ),
@@ -83,10 +89,10 @@ def execute_tool_request(request: dict, skills: dict, cfg: dict | None = None) -
         }
 
     tr = runtime_invoke(skill_name, args, skills)
-    return _tool_result_payload(skill_name, args, tr, pr)
+    return _tool_result_payload(skill_name, args, tr, pr, skills)
 
 
-def _tool_result_payload(skill_name: str, args: dict, tr: ToolResult, pr) -> dict:
+def _tool_result_payload(skill_name: str, args: dict, tr: ToolResult, pr, skills: dict) -> dict:
     output = tr.content_preview or tr.summary
     if tr.truncated and tr.artifact_path:
         output = f"{output}\n[完整结果已保存：{tr.artifact_path}]"
@@ -105,6 +111,6 @@ def _tool_result_payload(skill_name: str, args: dict, tr: ToolResult, pr) -> dic
         "metadata": metadata,
         "workReceipt": work_receipt if isinstance(work_receipt, dict) else None,
         "policy": {"decision": pr.decision.value, "risk": pr.risk, "reason": pr.reason},
-        "permissionLevel": permission_level_for_tool(skill_name, args),
+        "permissionLevel": _permission_level(skill_name, args, skills),
         "error": tr.error,
     }

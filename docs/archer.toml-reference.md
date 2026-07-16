@@ -112,6 +112,7 @@ vault_path = "/Users/me/Obsidian/Vault"
 | 键 | 类型 | 默认 | 说明 |
 |----|------|------|------|
 | `name` | string | 必填 | 服务 id，工具名前缀 |
+| `enabled` | bool | `false` | 是否启用该 server；必须显式开启 |
 | `transport` | string | `"stdio"` | `stdio` 或 `streamable_http` |
 | `command` | string | — | stdio：启动命令 |
 | `args` | string[] | `[]` | stdio：命令参数 |
@@ -124,6 +125,8 @@ vault_path = "/Users/me/Obsidian/Vault"
 | `headers` | map | — | 额外 HTTP 头 |
 | `reconnect` | bool | `true` | 调用失败时是否重连 |
 | `timeout_s` | number | `45` | 连接/调用超时 |
+| `permissions.tools` | map | `{}` | skill 白名单及能力：`read` / `write`；未列出的工具不注册也不可执行 |
+| `permissions.allowed_domains` | string[] | `[]` | HTTP(S) 目标域名白名单；支持 `*.example.com`，不隐式放行根域名 |
 
 **示例**
 
@@ -134,16 +137,22 @@ reconnect_attempts = 2
 
 [[mcp.servers]]
 name    = "fetch"
+enabled = true
 command = "uvx"
 args    = ["mcp-server-fetch"]
+permissions = { tools = { fetch_url = "read" }, allowed_domains = ["example.com"] }
 
 [[mcp.servers]]
 name             = "remote"
+enabled          = true
 transport        = "streamable_http"
 url              = "https://mcp.example.com/mcp"
 auth_type        = "bearer"
 auth_token_env   = "ARCHER_MCP_TOKEN"
+permissions      = { tools = { search = "read", publish = "write" }, allowed_domains = ["mcp.example.com"] }
 ```
+
+`write` 工具即使在白名单中也必须经过显式确认。远程 MCP endpoint 本身也必须命中 `allowed_domains`；省略 server 开关、工具权限或域名均按拒绝处理。
 
 ---
 

@@ -19,6 +19,7 @@ import types
 from collections import OrderedDict
 from collections.abc import Iterator, Mapping
 from typing import Any
+from urllib.parse import urlparse
 
 try:
     from mcp import ClientSession, StdioServerParameters
@@ -45,6 +46,25 @@ def _normalize_server_config(raw: dict, defaults: dict | None = None) -> dict | 
     cfg = dict(defaults or {})
     cfg.update(raw)
     cfg["name"] = name
+    # Server activation and tool grants must be explicit.  Do not inherit the
+    # global [mcp].enabled switch into each server.
+    cfg["enabled"] = raw.get("enabled") is True
+    permissions = raw.get("permissions")
+    permissions = permissions if isinstance(permissions, dict) else {}
+    raw_tools = permissions.get("tools")
+    raw_tools = raw_tools if isinstance(raw_tools, dict) else {}
+    cfg["tool_permissions"] = {
+        str(tool).strip(): str(level).strip().lower()
+        for tool, level in raw_tools.items()
+        if str(tool).strip() and str(level).strip().lower() in {"read", "write"}
+    }
+    raw_domains = permissions.get("allowed_domains")
+    raw_domains = raw_domains if isinstance(raw_domains, list) else []
+    cfg["allowed_domains"] = [
+        str(domain).strip().lower().rstrip(".")
+        for domain in raw_domains
+        if str(domain).strip()
+    ]
     transport = str(cfg.get("transport", "stdio")).strip().lower()
     cfg["transport"] = transport
     if transport == "stdio":
@@ -58,6 +78,31 @@ def _normalize_server_config(raw: dict, defaults: dict | None = None) -> dict | 
         return None
     cfg["reconnect"] = cfg.get("reconnect", True) is not False
     return cfg
+
+
+def _domain_allowed(host: str, allowed_domains: list[str]) -> bool:
+    candidate = str(host or "").strip().lower().rstrip(".")
+    if not candidate:
+        return False
+    for rule in allowed_domains:
+        normalized = str(rule or "").strip().lower().rstrip(".")
+        if normalized.startswith("*."):
+            suffix = normalized[2:]
+            if candidate.endswith(f".{suffix}") and candidate != suffix:
+                return True
+        elif candidate == normalized:
+            return True
+    return False
+
+
+def _url_domain_allowed(url: str, allowed_domains: list[str]) -> bool:
+    try:
+        parsed = urlparse(str(url).strip())
+    except ValueError:
+        return False
+    return parsed.scheme in {"http", "https"} and _domain_allowed(
+        parsed.hostname or "", allowed_domains
+    )
 
 
 def _resolve_auth_token(cfg: dict) -> str:
@@ -204,9 +249,15 @@ class MCPManager:
     async def _connect_one(self, cfg: dict) -> None:
         name = cfg["name"]
         self._server_configs[name] = cfg
+        if cfg.get("enabled") is not True:
+            return
         transport = cfg.get("transport", "stdio")
         try:
             if transport == "streamable_http":
+                if not _url_domain_allowed(
+                    cfg.get("url", ""), cfg.get("allowed_domains", [])
+                ):
+                    return
                 session = await self._connect_streamable_http(cfg)
             else:
                 session = await self._connect_stdio(cfg)
@@ -215,12 +266,17 @@ class MCPManager:
             self._sessions[name] = session
             resp = await session.list_tools()
             for tool in resp.tools:
+                permission = cfg.get("tool_permissions", {}).get(tool.name)
+                if permission not in {"read", "write"}:
+                    continue
                 key = _fn_name(name, tool.name)
                 self._tools[key] = {
                     "server": name,
                     "tool_name": tool.name,
                     "fn_name": key,
                     "description": tool.description or "",
+                    "permission": permission,
+                    "allowed_domains": list(cfg.get("allowed_domains", [])),
                     "input_schema": tool.inputSchema or {
                         "type": "object", "properties": {},
                     },
@@ -287,6 +343,17 @@ class MCPManager:
         info = self._tools.get(fn_name)
         if info is None:
             raise ValueError(f"MCP 工具不存在：{fn_name}")
+        for value in _iter_string_values(args):
+            try:
+                parsed = urlparse(value.strip())
+            except ValueError as exc:
+                raise PermissionError(f"MCP URL 参数无效：{value}") from exc
+            if parsed.scheme in {"http", "https"} and not _domain_allowed(
+                parsed.hostname or "", info.get("allowed_domains", [])
+            ):
+                raise PermissionError(
+                    f"MCP {fn_name} 的域名未授权：{parsed.hostname or '(invalid)'}"
+                )
 
         attempts = max(1, self._reconnect_attempts + 1)
         last_exc: Exception | None = None
@@ -364,6 +431,17 @@ def _extract_text(result: Any) -> str:
     return "\n".join(parts) if parts else "(empty)"
 
 
+def _iter_string_values(value):
+    if isinstance(value, dict):
+        for child in value.values():
+            yield from _iter_string_values(child)
+    elif isinstance(value, list):
+        for child in value:
+            yield from _iter_string_values(child)
+    elif isinstance(value, str):
+        yield value
+
+
 def _make_module(info: dict, manager: MCPManager) -> types.ModuleType:
     key = info["fn_name"]
     mod = types.ModuleType(f"mcp_skill_{key}")
@@ -373,6 +451,9 @@ def _make_module(info: dict, manager: MCPManager) -> types.ModuleType:
         "version": "mcp",
         "mcp_server": info["server"],
         "mcp_tool": info["tool_name"],
+        "mcp_permission": info.get("permission", ""),
+        "mcp_allowed_domains": list(info.get("allowed_domains", [])),
+        "requires_confirmation": info.get("permission") == "write",
         "risk": "medium",
         "default_timeout": 60,
     }

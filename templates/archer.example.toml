@@ -1,5 +1,5 @@
 # Archer Configuration
-config_version = 1
+config_version = 2
 # Copy this file to archer.toml and fill in your values.
 # archer.toml is gitignored — it will never be committed.
 
@@ -118,5 +118,7 @@ recent_window_turns = 10                        # turns within which a server co
 
 # [[mcp.servers]]
 # name    = "fetch"
+# enabled = true                                  # each server must be explicitly enabled
 # command = "uvx"
 # args    = ["mcp-server-fetch"]
+# permissions = { tools = { fetch_url = "read" }, allowed_domains = ["example.com"] }

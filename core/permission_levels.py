@@ -5,11 +5,18 @@ from typing import Literal
 PermissionLevel = Literal["read-only", "write-local", "write-vault", "deploy-remote"]
 
 
-def permission_level_for_tool(skill_name: str, args: dict | None = None) -> PermissionLevel:
+def permission_level_for_tool(
+    skill_name: str,
+    args: dict | None = None,
+    skill_meta: dict | None = None,
+) -> PermissionLevel:
     name = str(skill_name or "").strip()
     payload = args or {}
     action = str(payload.get("action", "")).strip().lower()
     path = str(payload.get("path", "") or payload.get("filename", "")).strip()
+
+    if (skill_meta or {}).get("version") == "mcp":
+        return "write-local" if (skill_meta or {}).get("mcp_permission") == "write" else "read-only"
 
     if name == "obsidian_write":
         return "write-vault"

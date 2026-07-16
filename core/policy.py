@@ -25,6 +25,7 @@ import re
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
+from urllib.parse import urlparse
 
 
 def _safe_realpath(path: str) -> str | None:
@@ -705,6 +706,49 @@ def _iter_mcp_arg_fields(value, path: tuple[str, ...] = ()):
         yield field, ".".join(path), value
 
 
+def _mcp_server_permission(cfg: dict, server: str, tool_name: str):
+    """Resolve an explicit server/tool grant from Archer config."""
+    mcp_cfg = cfg.get("mcp") if isinstance(cfg, dict) else None
+    if not isinstance(mcp_cfg, dict) or mcp_cfg.get("enabled") is not True:
+        return None, [], "MCP 未启用"
+    servers = mcp_cfg.get("servers")
+    if not isinstance(servers, list):
+        return None, [], f"MCP server {server!r} 未配置"
+    server_cfg = next(
+        (item for item in servers if isinstance(item, dict) and item.get("name") == server),
+        None,
+    )
+    if server_cfg is None:
+        return None, [], f"MCP server {server!r} 未配置"
+    if server_cfg.get("enabled") is not True:
+        return None, [], f"MCP server {server!r} 未启用"
+    permissions = server_cfg.get("permissions")
+    permissions = permissions if isinstance(permissions, dict) else {}
+    tools = permissions.get("tools")
+    tools = tools if isinstance(tools, dict) else {}
+    level = str(tools.get(tool_name, "")).strip().lower()
+    if level not in {"read", "write"}:
+        return None, [], f"MCP 工具 {server}__{tool_name} 未授权"
+    domains = permissions.get("allowed_domains")
+    domains = domains if isinstance(domains, list) else []
+    return level, [str(item).strip().lower().rstrip(".") for item in domains], ""
+
+
+def _mcp_url_hosts(arg_fields) -> list[tuple[str, str]]:
+    hosts: list[tuple[str, str]] = []
+    for _field, field_path, value in arg_fields:
+        if not isinstance(value, str):
+            continue
+        try:
+            parsed = urlparse(value.strip())
+        except ValueError:
+            hosts.append((field_path, ""))
+            continue
+        if parsed.scheme in {"http", "https"}:
+            hosts.append((field_path, parsed.hostname or ""))
+    return hosts
+
+
 def check_mcp_tool(
     server: str,
     tool_name: str,
@@ -714,16 +758,22 @@ def check_mcp_tool(
     """
     检查 MCP 工具调用的安全性，返回 PolicyResult。
 
-    检测逻辑（从高到低优先级）：
-    1. 服务器黑名单 → DENY
-    2. 工具名黑名单 → DENY
-    3. 工具名含危险关键词 → 降级为 CONFIRM
-    4. 路径参数敏感检查（file_ops 逻辑复用）
-    5. shell 命令参数检查（score_shell_risk 复用）
+    生产配置采用拒绝优先：server 必须显式启用，工具必须声明 read/write，
+    HTTP(S) 参数必须命中域名白名单。之后继续执行黑名单、敏感路径与
+    shell 风险检查；write 能力始终要求用户确认。
 
-    cfg 可包含 vault_path 等配置。
+    cfg=None 仅保留给旧的独立策略调用；生产入口始终传入完整配置。
     """
     fn_name = f"{server}__{tool_name}"
+
+    configured_level = None
+    allowed_domains: list[str] = []
+    if cfg is not None:
+        configured_level, allowed_domains, config_error = _mcp_server_permission(
+            cfg, server, tool_name
+        )
+        if config_error:
+            return PolicyResult(Decision.DENY, reason=config_error, risk="high")
 
     # 1. 服务器黑名单检查
     if server in _MCP_SERVER_DENYLIST:
@@ -751,6 +801,17 @@ def check_mcp_tool(
     args = tool_args or {}
 
     arg_fields = list(_iter_mcp_arg_fields(args))
+
+    if configured_level is not None:
+        from core.mcp import _domain_allowed
+
+        for field_path, host in _mcp_url_hosts(arg_fields):
+            if not _domain_allowed(host, allowed_domains):
+                return PolicyResult(
+                    Decision.DENY,
+                    reason=f"MCP {fn_name} 的域名未授权 [{field_path}] → {host or '(invalid)'}",
+                    risk="high",
+                )
 
     # 4. 路径参数敏感检查
     path_fields = ["path", "file", "filepath", "file_path", "url", "uri", "target"]
@@ -799,6 +860,20 @@ def check_mcp_tool(
                 reason=f"MCP {fn_name} 中风险 [{field_path}]：{reason}",
                 risk="medium",
             )
+
+    if configured_level == "write":
+        return PolicyResult(
+            Decision.CONFIRM,
+            reason=f"MCP {fn_name} 具有写入能力，需要显式确认",
+            risk="medium",
+        )
+
+    if configured_level == "read":
+        return PolicyResult(
+            Decision.ALLOW,
+            reason=f"MCP {fn_name} 已获只读授权",
+            risk="low",
+        )
 
     # 6. 有关键词但无具体危险 → medium CONFIRM
     if alert_reason:

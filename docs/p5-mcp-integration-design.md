@@ -13,19 +13,25 @@ reconnect_attempts = 2
 # 本地 stdio（默认 transport=stdio）
 [[mcp.servers]]
 name = "filesystem"
+enabled = true
 command = "npx"
 args = ["-y", "@modelcontextprotocol/server-filesystem", "/path"]
+permissions = { tools = { read_file = "read", write_file = "write" } }
 
 # 远程 streamable HTTP
 [[mcp.servers]]
 name = "remote"
+enabled = true
 transport = "streamable_http"
 url = "https://mcp.example.com/mcp"
 auth_type = "bearer"              # bearer | header | none
 auth_token_env = "ARCHER_MCP_TOKEN"
 headers = { "X-Team" = "archer" }
 reconnect = true
+permissions = { tools = { search = "read", publish = "write" }, allowed_domains = ["mcp.example.com"] }
 ```
+
+权限采用拒绝优先：server 必须显式启用，工具必须声明为 `read` 或 `write`，HTTP(S) 参数与远程 endpoint 必须命中域名白名单。`write` 能力始终进入用户确认流程；连接后未授权的工具不会进入 Archer 技能注册表，执行前仍会再次复核权限和域名。
 
 ## 传输
 
