@@ -16,6 +16,7 @@ from memory.store import DB_PATH
 from core.tool_runtime import invoke as runtime_invoke
 
 SCHEDULES_JSON_PATH = DB_PATH.parent / "schedules.json"
+SCHEDULE_TOOL_TIMEOUT_SECONDS = 30
 
 # ── 间隔别名 ───────────────────────────────────────────────────────────────────
 
@@ -260,7 +261,12 @@ def run_task(task: dict, skills: dict, db_path: Path = DB_PATH) -> Any:
         args = json.loads(task.get("args_json") or "{}")
     except Exception:
         args = {}
-    return runtime_invoke(skill_name, args, skills)
+    return runtime_invoke(
+        skill_name,
+        args,
+        skills,
+        timeout=SCHEDULE_TOOL_TIMEOUT_SECONDS,
+    )
 
 
 def run_due_tasks(

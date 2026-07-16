@@ -282,6 +282,32 @@ def test_run_task_by_id_nonexistent():
     assert run_task_by_id(999, {}, db_path=db) is None
 
 
+def test_run_task_uses_scheduler_owned_timeout(monkeypatch):
+    import core.scheduler as scheduler
+
+    captured = {}
+    monkeypatch.setattr(
+        scheduler,
+        "runtime_invoke",
+        lambda skill_name, args, skills, *, timeout: captured.update({
+            "skill_name": skill_name,
+            "args": args,
+            "timeout": timeout,
+        }),
+    )
+
+    scheduler.run_task(
+        {"skill_name": "weather", "args_json": '{"city": "Shanghai"}'},
+        {"weather": _mock_skill("weather")},
+    )
+
+    assert captured == {
+        "skill_name": "weather",
+        "args": {"city": "Shanghai"},
+        "timeout": scheduler.SCHEDULE_TOOL_TIMEOUT_SECONDS,
+    }
+
+
 def test_sync_schedules_json_writes_mirror(tmp_path):
     from core.scheduler import SCHEDULES_JSON_PATH, sync_schedules_json
 
