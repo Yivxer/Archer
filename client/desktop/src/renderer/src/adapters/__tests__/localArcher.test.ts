@@ -17,6 +17,7 @@ import {
   clearDesktopApiToken,
   ChatBusyError,
   ensureLocalConnection,
+  fetchMemoryItems,
   getDesktopApiToken,
   loadLocalArcher,
   resolveDesktopApiToken,
@@ -81,6 +82,26 @@ describe('localArcher token management', () => {
 
     expect(fetchSpy).toHaveBeenCalledOnce()
     expect(String(fetchSpy.mock.calls[0][0])).toContain('/ready')
+  })
+
+  it('fetchMemoryItems reloads the memory domain without loading the full adapter', async () => {
+    saveDesktopApiToken('test-token')
+    const memory = [{
+      id: 7,
+      status: 'confirmed',
+      type: 'insight',
+      content: '服务端权威记忆',
+      confidence: '0.9',
+      source: 'test',
+    }]
+    const fetchSpy = vi.fn(async () => new Response(JSON.stringify(memory), { status: 200 }))
+    vi.stubGlobal('fetch', fetchSpy)
+
+    await expect(fetchMemoryItems()).resolves.toEqual(memory)
+    expect(fetchSpy).toHaveBeenCalledWith(
+      expect.stringContaining('/memory?include_rejected=true'),
+      expect.any(Object),
+    )
   })
 
   it('confirms active profile by reading settings after switching models', async () => {

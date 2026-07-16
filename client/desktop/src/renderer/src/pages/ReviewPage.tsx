@@ -1,6 +1,5 @@
 import React from 'react'
 import { Brain, ChevronRight, History, Layers, Search } from 'lucide-react'
-import { resolvePendingMemory } from '../adapters/localArcher'
 import { EmptyDetail, SearchBox } from '../components/common'
 import { EmptyState } from '../components/EmptyState'
 import { LoadingState } from '../components/LoadingState'
@@ -15,19 +14,18 @@ import {
 } from '../components/ReviewPanels'
 import type { ArcherAdapter, MemoryItem, Route } from '../types'
 import { clearSessionDetail, loadSessionDetail, searchSessions, useSessionStore } from '../lib/sessionStore'
+import { resolvePendingMemoryAction, useMemoryStore } from '../lib/memoryStore'
 
 export function ReviewPage({
   data,
   onRefresh,
   onOpenSession,
   onNavigate,
-  onMemoryItemsChange,
 }: {
   data: ArcherAdapter
   onRefresh: () => Promise<void>
   onOpenSession: (session: ArcherAdapter['sessions'][number]) => void
   onNavigate: (route: Route) => void
-  onMemoryItemsChange?: (items: MemoryItem[]) => void
 }) {
   const [selectedId, setSelectedId] = React.useState(data.sessions[0]?.id ?? '')
   const sessions = useSessionStore((state) => state.items)
@@ -37,8 +35,8 @@ export function ReviewPage({
   const searchState = useSessionStore((state) => state.searchState)
   const [query, setQuery] = React.useState('')
   const [expertFilter, setExpertFilter] = React.useState('all')
-  const [memoryItems, setMemoryItems] = React.useState(data.memory)
-  const [memoryBusyId, setMemoryBusyId] = React.useState<number | null>(null)
+  const memoryItems = useMemoryStore((state) => state.items)
+  const memoryBusyIds = useMemoryStore((state) => state.busyIds)
   const [memoryNotice, setMemoryNotice] = React.useState('')
   const contentSearching = searchState === 'searching'
   const expertOptions = data.experts?.experts ?? []
@@ -57,11 +55,6 @@ export function ReviewPage({
       setSelectedId(sessions[0].id)
     }
   }, [sessions, selectedId])
-
-  React.useEffect(() => {
-    setMemoryItems(data.memory)
-    setMemoryBusyId(null)
-  }, [data.memory])
 
   React.useEffect(() => {
     if (!selectedId || data.status.adapter !== 'local') {
@@ -133,24 +126,12 @@ export function ReviewPage({
 
   async function resolveReviewMemory(id: number, accepted: boolean) {
     if (!canResolveMemory) return
-    setMemoryBusyId(id)
     setMemoryNotice('')
     try {
-      const result = await resolvePendingMemory(id, accepted)
-      if (!result.ok) {
-        setMemoryNotice('无待处理记忆被更新')
-        return
-      }
-      setMemoryItems((current) => {
-        const nextItems = current.filter((item) => item.id !== id)
-        onMemoryItemsChange?.(nextItems)
-        return nextItems
-      })
+      await resolvePendingMemoryAction(id, accepted)
       setMemoryNotice(accepted ? '已确认，写入长期记忆' : '已放弃')
     } catch (error) {
       setMemoryNotice(error instanceof Error ? error.message : '记忆更新失败')
-    } finally {
-      setMemoryBusyId(null)
     }
   }
 
@@ -314,7 +295,7 @@ export function ReviewPage({
             pendingReviewMemories={pendingReviewMemories}
             memoryNotice={memoryNotice}
             canResolveMemory={canResolveMemory}
-            memoryBusyId={memoryBusyId}
+            memoryBusyId={memoryBusyIds.size ? Array.from(memoryBusyIds)[0] : null}
             onResolve={(id, accepted) => void resolveReviewMemory(id, accepted)}
             onNavigate={onNavigate}
           />

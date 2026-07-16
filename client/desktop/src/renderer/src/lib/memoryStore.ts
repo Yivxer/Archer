@@ -11,6 +11,7 @@ import {
   batchResolvePendingMemory,
   evolveMemory,
   fetchMemoryGroups,
+  fetchMemoryItems,
   fetchMemoryStats,
   resolvePendingMemory,
   updateMemory,
@@ -60,9 +61,7 @@ export async function loadAllMemory(): Promise<void> {
   store.setState((s) => ({ ...s, loadState: 'loading', error: '' }))
   try {
     const [items, stats, groups] = await Promise.all([
-      // items 复用 loadLocalArcher 的 fetch（这里直接调 stats/groups + 假设 items 由 mergeItems 注入）
-      // 实际实现：items 通过 mergeItems 由 main.tsx 注入，loadAll 只补 stats + groups
-      Promise.resolve<MemoryItem[]>(store.getState().items),
+      fetchMemoryItems(),
       fetchMemoryStats(),
       fetchMemoryGroups(),
     ])
@@ -95,7 +94,8 @@ export async function resolvePendingMemoryAction(
     busyIds: new Set([...s.busyIds, id]),
   }))
   try {
-    await resolvePendingMemory(id, accepted)
+    const result = await resolvePendingMemory(id, accepted)
+    if (!result.ok) throw new Error('无待处理记忆被更新')
     // 成功后从 items 移除（rejected 也移除，避免重复显示）
     store.setState((s) => ({
       ...s,
@@ -106,7 +106,7 @@ export async function resolvePendingMemoryAction(
     fetchMemoryStats()
       .then((stats) => store.setState((s) => ({ ...s, stats })))
       .catch(() => {})
-    // L3.7: 通知跨 store 联动（main.tsx 监听后触发 loadLocalArcher refresh）
+    // L3.7: main.tsx 只投影 memory 领域，不再触发 loadLocalArcher 全量刷新。
     emitStoreEvent({ type: 'memory:resolved', id, accepted })
   } catch (err) {
     store.setState((s) => ({
@@ -125,7 +125,8 @@ export async function batchResolvePendingMemoryAction(
   accepted: boolean,
 ): Promise<void> {
   try {
-    await batchResolvePendingMemory(accepted)
+    const result = await batchResolvePendingMemory(accepted)
+    if (!result.ok) throw new Error('批量记忆更新失败')
     // 批量操作后全量 refresh
     await loadAllMemory()
     // L3.7: 通知跨 store 联动
@@ -147,11 +148,13 @@ export async function updateMemoryAction(
   content: string,
 ): Promise<void> {
   try {
-    await updateMemory(id, content)
+    const result = await updateMemory(id, content)
+    if (!result.ok) throw new Error('记忆更新失败')
     store.setState((s) => ({
       ...s,
       items: s.items.map((item) => (item.id === id ? { ...item, content } : item)),
     }))
+    emitStoreEvent({ type: 'memory:updated', id })
   } catch (err) {
     store.setState((s) => ({
       ...s,
@@ -172,10 +175,11 @@ export async function evolveMemoryAction(
   depth?: number,
 ): Promise<void> {
   try {
-    await evolveMemory(id, content, type, importance, depth)
-    // 演化可能改变 type/depth，全量 refresh items 更稳妥
+    const result = await evolveMemory(id, content, type, importance, depth)
+    if (!result.ok) throw new Error('记忆演化失败')
+    // 演化可能改变 type/depth，重新加载 memory 领域快照。
     await loadAllMemory()
-    // L3.7: 通知跨 store 联动（soul 演化可能影响 session 摘要）
+    // L3.7: 通知 main.tsx 投影最新 memory 领域。
     emitStoreEvent({ type: 'memory:evolved', id })
   } catch (err) {
     store.setState((s) => ({

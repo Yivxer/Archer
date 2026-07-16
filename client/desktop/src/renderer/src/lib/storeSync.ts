@@ -2,11 +2,12 @@
  * L3.9a — storeSync
  *
  * 把 ArcherAdapter（loadLocalArcher 返回的全量数据）同步注入到 6 个领域 store。
- * 渐进式接入：store 作为影子真值，不破坏现有 data 流。
+ * 渐进式接入：连接时用 adapter 初始化 store；已迁移领域随后由 store action
+ * 与事件投影维护，不再依赖整份 adapter refresh。
  *
  * 调用时机：
  * - main.tsx connectLocalApi 成功后（setData 之后立即调）
- * - main.tsx patchMemoryItems / patchExpertWorkbench 等局部更新后
+ * - main.tsx connectLocalApi 成功后的初始/重连快照
  *
  * 契约：docs/api-contract.md §「L3 领域 store 契约」
  */

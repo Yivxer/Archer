@@ -9,6 +9,7 @@ import type {
   FileRef,
   MemoryContextMode,
   MemoryGroup,
+  MemoryItem,
   MemoryStats,
   HypothesisItem,
   HypothesisListResult,
@@ -739,6 +740,10 @@ export async function setInitiativeDeliveryOptIn(
 
 export async function batchResolvePendingMemory(accepted: boolean): Promise<{ ok: boolean; count?: number; deleted?: number }> {
   return postJson(`/memory/pending/batch/${accepted ? 'accept' : 'reject'}`, {})
+}
+
+export async function fetchMemoryItems(): Promise<MemoryItem[]> {
+  return getJson<MemoryItem[]>('/memory?include_rejected=true')
 }
 
 export async function importSoul(soulData: Record<string, unknown>): Promise<SoulImportResult> {

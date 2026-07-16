@@ -1,10 +1,16 @@
 import React from 'react'
 import { Check, Database, Edit3, Heart, Settings, TrendingUp, Waves, Compass, X, Search } from 'lucide-react'
-import { batchResolvePendingMemory, resolvePendingMemory, fetchMemoryStats, fetchMemoryGroups, updateMemory } from '../adapters/localArcher'
-import type { ArcherAdapter, MemoryBlockType, MemoryItem, MemoryStats, MemoryGroup } from '../types'
+import type { ArcherAdapter, MemoryBlockType, MemoryItem } from '../types'
 import { ConfirmDialog } from '../components/common'
 import { EmptyState } from '../components/EmptyState'
 import { LoadingState } from '../components/LoadingState'
+import {
+  batchResolvePendingMemoryAction,
+  loadAllMemory,
+  resolvePendingMemoryAction,
+  updateMemoryAction,
+  useMemoryStore,
+} from '../lib/memoryStore'
 
 type ViewMode = 'pending' | 'groups'
 type BlockFilter = 'all' | MemoryBlockType
@@ -25,22 +31,19 @@ const groupIcons: Record<string, React.ElementType> = {
 
 export function MemoryPage({
   data,
-  onRefresh,
-  onMemoryItemsChange,
 }: {
   data: ArcherAdapter
-  onRefresh: () => Promise<void>
-  onMemoryItemsChange?: (items: MemoryItem[]) => void
 }) {
   const [viewMode, setViewMode] = React.useState<ViewMode>('pending')
-  const [items, setItems] = React.useState(data.memory)
-  const [busyId, setBusyId] = React.useState<number | null>(null)
+  const items = useMemoryStore((state) => state.items)
+  const busyIds = useMemoryStore((state) => state.busyIds)
+  const stats = useMemoryStore((state) => state.stats)
+  const groups = useMemoryStore((state) => state.groups)
+  const memoryLoadState = useMemoryStore((state) => state.loadState)
   const [batchBusy, setBatchBusy] = React.useState(false)
   const [memoryMessage, setMemoryMessage] = React.useState('')
   const [query, setQuery] = React.useState('')
   const [blockFilter, setBlockFilter] = React.useState<BlockFilter>('all')
-  const [stats, setStats] = React.useState<MemoryStats | null>(null)
-  const [groups, setGroups] = React.useState<Record<string, MemoryGroup> | null>(null)
   const [editingId, setEditingId] = React.useState<number | null>(null)
   const [editText, setEditText] = React.useState('')
   const [confirmState, setConfirmState] = React.useState<{
@@ -48,48 +51,28 @@ export function MemoryPage({
   } | null>(null)
 
   React.useEffect(() => {
-    setItems(data.memory)
-    setBusyId(null)
-  }, [data])
-
-  React.useEffect(() => {
     if (data.status.adapter === 'local') {
-      fetchMemoryStats().then(setStats).catch(() => setStats(null))
-      if (viewMode === 'groups') {
-        fetchMemoryGroups().then(setGroups).catch(() => setGroups(null))
-      }
+      void loadAllMemory()
     }
-  }, [data.status.adapter, data.memory.length, viewMode])
+  }, [data.status.adapter])
 
   async function performResolveMemory(id: number, accepted: boolean) {
     setMemoryMessage('')
-    setBusyId(id)
     try {
-      const result = await resolvePendingMemory(id, accepted)
-      if (!result.ok) { setMemoryMessage('无待处理记忆被更新'); return }
-      setItems((current) => {
-        const nextItems = updateResolvedMemoryItems(current, id)
-        onMemoryItemsChange?.(nextItems)
-        return nextItems
-      })
+      await resolvePendingMemoryAction(id, accepted)
       setMemoryMessage(accepted ? '已确认，已写入长期记忆' : '已放弃')
     } catch (error) {
       setMemoryMessage(error instanceof Error ? error.message : '记忆更新失败')
-    } finally { setBusyId(null) }
+    }
   }
 
   async function performBatchResolve(accepted: boolean) {
     setMemoryMessage('')
     setBatchBusy(true)
     try {
-      const result = await batchResolvePendingMemory(accepted)
-      const resolvedIds = new Set(items.filter((item) => item.status === 'pending').map((item) => item.id))
-      setItems((current) => {
-        const nextItems = current.filter((item) => !resolvedIds.has(item.id))
-        onMemoryItemsChange?.(nextItems)
-        return nextItems
-      })
-      setMemoryMessage(accepted ? `已全部确认，写入 ${result.count ?? 0} 条` : `已全部放弃，共 ${result.deleted ?? 0} 条`)
+      const count = items.filter((item) => item.status === 'pending').length
+      await batchResolvePendingMemoryAction(accepted)
+      setMemoryMessage(accepted ? `已全部确认，写入 ${count} 条` : `已全部放弃，共 ${count} 条`)
     } catch (error) {
       setMemoryMessage(error instanceof Error ? error.message : '批量操作失败')
     } finally { setBatchBusy(false) }
@@ -110,14 +93,9 @@ export function MemoryPage({
   async function handleSaveEdit(id: number) {
     if (!editText.trim() || editText.trim().length < 10) return
     try {
-      const result = await updateMemory(id, editText.trim())
-      if (result.ok) {
-        setMemoryMessage('记忆已更新')
-        setEditingId(null)
-        await onRefresh()
-      } else {
-        setMemoryMessage('更新失败')
-      }
+      await updateMemoryAction(id, editText.trim())
+      setMemoryMessage('记忆已更新')
+      setEditingId(null)
     } catch (error) {
       setMemoryMessage(error instanceof Error ? error.message : '更新失败')
     }
@@ -210,7 +188,7 @@ export function MemoryPage({
             <div className="stack">
               {pending.filter(matchesFilters).length ? (
                 pending.filter(matchesFilters).map((item) => (
-                  <MemoryCard key={`pending-${item.id}`} item={item} busy={busyId === item.id || batchBusy}
+                  <MemoryCard key={`pending-${item.id}`} item={item} busy={busyIds.has(item.id) || batchBusy}
                     onResolve={canResolveMemory ? performResolveMemory : undefined} compact />
                 ))
               ) : (
@@ -229,13 +207,13 @@ export function MemoryPage({
       {viewMode === 'groups' && (
         <section className="memory-groups-view">
           {memoryMessage && <div className="memory-state">{memoryMessage}</div>}
-          {groups ? (
-            Object.entries(groups).map(([key, group]) => {
+          {memoryLoadState === 'ready' ? (
+            groups.map((group) => {
               const Icon = groupIcons[group.icon] || Database
               const filtered = group.memories.filter(matchesFilters)
               if (!filtered.length && (cleanQuery || blockFilter !== 'all')) return null
               return (
-                <div key={key} className="memory-group-block">
+                <div key={group.label} className="memory-group-block">
                   <div className="memory-group-head">
                     <Icon size={16} />
                     <h3>{group.label}</h3>
@@ -333,10 +311,6 @@ function MemoryCard({
       )}
     </article>
   )
-}
-
-function updateResolvedMemoryItems(items: MemoryItem[], id: number): MemoryItem[] {
-  return items.filter((item) => item.id !== id)
 }
 
 function memorySourceLabel(item: MemoryItem): string {

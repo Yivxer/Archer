@@ -6,7 +6,7 @@
  *
  * 设计：
  * - store 间不直接调用（低耦合）
- * - main.tsx 作为协调者，监听事件后触发 loadLocalArcher refresh
+ * - main.tsx 作为协调者，优先做领域投影；未迁移事件保留兼容 refresh
  * - store 的 action 不需要知道谁在监听
  *
  * 契约：docs/api-contract.md §「跨 store 联动（L3.7）」
@@ -18,6 +18,7 @@ export type StoreEvent =
   | { type: 'memory:resolved'; id: number; accepted: boolean }
   | { type: 'memory:batch-resolved'; accepted: boolean; count?: number }
   | { type: 'memory:evolved'; id: number }
+  | { type: 'memory:updated'; id: number }
   | { type: 'soul:imported'; imported: number }
   | { type: 'soul:reflection-triggered' }
   | { type: 'job:created'; jobId: string }

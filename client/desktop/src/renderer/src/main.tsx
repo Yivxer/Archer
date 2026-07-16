@@ -235,7 +235,7 @@ function App() {
       const result = await syncBrainData({ previous: data, silent: options.silent })
       if (result.adapter) {
         setData(result.adapter)
-        // L3.9: 同步注入到 6 个领域 store（影子真值）
+        // L3.9: 连接/重连时初始化 6 个领域 store；后续由领域 action 与事件维护。
         syncStoresFromAdapter(result.adapter)
         if (result.state === 'connected') {
           setConversationMode(result.adapter.modes.current || 'auto')
@@ -284,18 +284,6 @@ function App() {
         ...current.settings,
         activeExpert: snapshot.experts.current,
         experts: snapshot.experts.experts,
-      },
-    }))
-  }
-
-  function patchMemoryItems(memory: ArcherAdapter['memory']) {
-    setData((current) => ({
-      ...current,
-      memory,
-      status: {
-        ...current.status,
-        pendingMemoryCount: memory.filter((item) => item.status === 'pending').length,
-        memoryCount: memory.filter((item) => item.status === 'confirmed').length,
       },
     }))
   }
@@ -396,13 +384,19 @@ function App() {
   // L3.9: 领域事件优先做定向投影；尚未迁移的事件保留 silent refresh。
   React.useEffect(() => {
     const unsubs: Array<() => void> = []
-    unsubs.push(onStoreEvent('memory:resolved', () => {
-      const memory = getMemoryStoreState().items
-      setData((current) => projectMemoryStoreToAdapter(current, memory))
-    }))
-    const refreshEvents = [
+    const memoryProjectionEvents = [
+      'memory:resolved',
       'memory:batch-resolved',
       'memory:evolved',
+      'memory:updated',
+    ] as const
+    for (const type of memoryProjectionEvents) {
+      unsubs.push(onStoreEvent(type, () => {
+        const memory = getMemoryStoreState().items
+        setData((current) => projectMemoryStoreToAdapter(current, memory))
+      }))
+    }
+    const refreshEvents = [
       'soul:imported',
       'soul:reflection-triggered',
       'job:created',
@@ -687,15 +681,12 @@ function App() {
               onRefresh={connectLocalApi}
               onOpenSession={openSession}
               onNavigate={setRoute}
-              onMemoryItemsChange={patchMemoryItems}
             />
           )}
           {route === 'Today' && <TodayPage data={data} onRefresh={connectLocalApi} />}
           {route === 'Tasks' && <TasksPage data={data} />}
           {route === 'Memory' && <MemoryPage
             data={data}
-            onRefresh={connectLocalApi}
-            onMemoryItemsChange={patchMemoryItems}
           />}
           {route === 'Skills' && <SkillsPage data={data} onRefresh={connectLocalApi} />}
           {route === 'Projects' && (
