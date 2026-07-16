@@ -127,7 +127,7 @@ export function ChatPage({
   const [activeComposerMenu, setActiveComposerMenu] = React.useState<'attach' | 'screenshot' | 'model' | 'persona' | null>(null)
   const [captureSources, setCaptureSources] = React.useState<Array<{ id: string; name: string; kind: 'screen' | 'window'; thumbnailEmpty?: boolean; screenStatus?: string }>>([])
   const [captureSourcesState, setCaptureSourcesState] = React.useState<'idle' | 'loading' | 'error'>('idle')
-  const [selectedModel, setSelectedModel] = React.useState<'lite' | 'pro' | 'max'>(data.settings.activeProfile || 'lite')
+  const activeModelProfile = data.settings.activeProfile || 'lite'
   const [switchingModel, setSwitchingModel] = React.useState<'lite' | 'pro' | 'max' | null>(null)
   const [localExpertId, setLocalExpertId] = React.useState<string | null>(null)
   const [expertSwitching, setExpertSwitching] = React.useState(false)
@@ -163,10 +163,6 @@ export function ChatPage({
       summary: activeThread?.summary,
     }
   }
-
-  React.useEffect(() => {
-    setSelectedModel(data.settings.activeProfile || 'lite')
-  }, [data.settings.activeProfile])
 
   React.useEffect(() => {
     if (data.status.adapter !== 'local') {
@@ -1190,16 +1186,14 @@ export function ChatPage({
   }
 
   async function chooseChatModelProfile(profileId: 'lite' | 'pro' | 'max') {
-    if (switchingModel || profileId === selectedModel) {
+    if (switchingModel || profileId === activeModelProfile) {
       setActiveComposerMenu(null)
       return
     }
-    const previousModel = selectedModel
-    setSelectedModel(profileId)
+    const previousModel = activeModelProfile
     setSwitchingModel(profileId)
     setActiveComposerMenu(null)
     if (!(await ensureConnectionReady())) {
-      setSelectedModel(data.settings.activeProfile || 'lite')
       setSwitchingModel(null)
       setChatError('大脑未就绪，暂时无法切换模型。')
       return
@@ -1207,7 +1201,6 @@ export function ChatPage({
     try {
       const result = await switchLocalActiveProfile(profileId)
       if (!result.ok) {
-        setSelectedModel(data.settings.activeProfile || 'lite')
         setSwitchingModel(null)
         setChatError(`模型切换失败：${result.error || '配置未保存'}`)
         return
@@ -1221,7 +1214,6 @@ export function ChatPage({
       setChatError('')
       await onRefresh?.()
     } catch (error) {
-      setSelectedModel(data.settings.activeProfile || 'lite')
       setChatError(error instanceof Error ? error.message : '模型切换失败')
     } finally {
       setSwitchingModel(null)
@@ -1368,7 +1360,7 @@ export function ChatPage({
                 ? '接着这段聊…'
                 : '继续说…'
 
-  const modelButtonLabel = modelProfileShortLabel(selectedModel)
+  const modelButtonLabel = modelProfileShortLabel(activeModelProfile)
   const activeExpertTitle = expertOptions.find((item) => item.id === activeExpertId)?.label
     || data.status.expertLabel
     || '基础 Archer'
@@ -1589,10 +1581,10 @@ export function ChatPage({
               <div className="composer-popover choice-menu">
                 {modelProfiles.map((option) => (
                   <button
-                    className={selectedModel === option.id ? 'active' : ''}
+                    className={activeModelProfile === option.id ? 'active' : ''}
                     type="button"
                     key={option.id}
-                    disabled={Boolean(switchingModel) || selectedModel === option.id}
+                    disabled={Boolean(switchingModel) || activeModelProfile === option.id}
                     onClick={() => {
                       void chooseChatModelProfile(option.id)
                     }}
@@ -1602,7 +1594,7 @@ export function ChatPage({
                       <strong>{modelProfileShortLabel(option.id)}</strong>
                       <em>{option.provider}{option.model ? ` · ${option.model}` : ''}{option.configured ? '' : ' · 未配置'}</em>
                     </span>
-                    {selectedModel === option.id && <Check size={14} />}
+                    {activeModelProfile === option.id && <Check size={14} />}
                   </button>
                 ))}
                 <button type="button" onClick={() => onNavigate?.('Settings')}>
