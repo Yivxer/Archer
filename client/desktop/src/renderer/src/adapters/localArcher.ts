@@ -764,6 +764,14 @@ export async function fetchSoulFiles(): Promise<SoulFiles> {
   return getJson<SoulFiles>('/soul-files')
 }
 
+export async function exportPortableData(): Promise<{
+  ok: boolean
+  jsonPath: string
+  markdownPath: string
+}> {
+  return postJson('/exports/portable', {})
+}
+
 export async function importSoul(soulData: Record<string, unknown>): Promise<SoulImportResult> {
   return postJson<SoulImportResult>('/soul/import', { soulData })
 }

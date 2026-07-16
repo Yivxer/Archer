@@ -17,6 +17,7 @@ import {
   clearDesktopApiToken,
   ChatBusyError,
   ensureLocalConnection,
+  exportPortableData,
   fetchMemoryItems,
   getDesktopApiToken,
   loadLocalArcher,
@@ -115,6 +116,23 @@ describe('localArcher token management', () => {
     }), { status: 200 })))
 
     await expect(fetchMemoryItems()).rejects.toThrow('Archer API 协议版本不兼容')
+  })
+
+  it('exports portable Soul and Memory files through the local API', async () => {
+    const fetchSpy = vi.fn(async (_url: string) => new Response(JSON.stringify({
+      contractVersion: 1,
+      ok: true,
+      jsonPath: '/tmp/archer-portable.json',
+      markdownPath: '/tmp/archer-portable.md',
+    }), { status: 200 }))
+    vi.stubGlobal('fetch', fetchSpy)
+
+    await expect(exportPortableData()).resolves.toMatchObject({
+      ok: true,
+      jsonPath: '/tmp/archer-portable.json',
+      markdownPath: '/tmp/archer-portable.md',
+    })
+    expect(String(fetchSpy.mock.calls[0][0])).toContain('/exports/portable')
   })
 
   it('confirms active profile by reading settings after switching models', async () => {

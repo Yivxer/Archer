@@ -1,14 +1,17 @@
 import React from 'react'
-import { BarChart3, BookOpenText, CheckCircle2, Clock3, Compass, FileText, Heart, PenLine, RotateCcw, Sparkles, TrendingUp, Upload, Waves, XCircle } from 'lucide-react'
+import { BarChart3, BookOpenText, CheckCircle2, Clock3, Compass, Download, FileText, Heart, PenLine, RotateCcw, Sparkles, TrendingUp, Upload, Waves, XCircle } from 'lucide-react'
 import type { ArcherAdapter, HypothesisItem, ReviewPeriod, SoulFileName, SoulProfileSection, VaultReflection } from '../types'
 import { ConfirmDialog, MarkdownMessage } from '../components/common'
 import { EmptyState } from '../components/EmptyState'
 import { LoadingState } from '../components/LoadingState'
 import { importSoulAction, loadAllSoul, useSoulStore } from '../lib/soulStore'
+import { exportPortableData } from '../adapters/localArcher'
 
 export function SoulPage({ data }: { data: ArcherAdapter }) {
   const [file, setFile] = React.useState<SoulFileName>('SOUL.md')
   const [refreshing, setRefreshing] = React.useState(false)
+  const [exporting, setExporting] = React.useState(false)
+  const [exportMessage, setExportMessage] = React.useState('')
   const soulProfile = useSoulStore((state) => state.profile ?? data.soulProfile)
   const soulFiles = useSoulStore((state) => state.files)
   const reflections = useSoulStore((state) => state.reflections)
@@ -37,6 +40,20 @@ export function SoulPage({ data }: { data: ArcherAdapter }) {
       await loadAllSoul()
     } finally {
       setRefreshing(false)
+    }
+  }
+
+  async function handleExport() {
+    setExporting(true)
+    setExportMessage('')
+    setFileError('')
+    try {
+      const result = await exportPortableData()
+      setExportMessage(`已导出 JSON + Markdown：${result.jsonPath}`)
+    } catch (err) {
+      setFileError(err instanceof Error ? err.message : '导出失败')
+    } finally {
+      setExporting(false)
     }
   }
 
@@ -128,8 +145,18 @@ export function SoulPage({ data }: { data: ArcherAdapter }) {
           <Upload size={14} />
           {importing ? '导入中' : '导入 Soul'}
         </button>
+        <button
+          className="quiet-button"
+          type="button"
+          disabled={exporting || data.status.adapter !== 'local'}
+          onClick={handleExport}
+          title="将 Soul 与 Memory 导出为 JSON + Markdown"
+        >
+          <Download size={14} />
+          {exporting ? '导出中' : '导出备份'}
+        </button>
       </div>
-      {(fileError || importMessage) && <div className="memory-state">{fileError || importMessage}</div>}
+      {(fileError || importMessage || exportMessage) && <div className="memory-state">{fileError || importMessage || exportMessage}</div>}
       <div className="soul-layout">
         <section className="soul-profile-overview">
           {soulProfile.empty ? (
