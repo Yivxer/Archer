@@ -4,13 +4,19 @@ import type { ArcherAdapter, HypothesisItem, ReviewPeriod, SoulFileName, SoulPro
 import { ConfirmDialog, MarkdownMessage } from '../components/common'
 import { EmptyState } from '../components/EmptyState'
 import { LoadingState } from '../components/LoadingState'
-import { importSoul, fetchVaultReflections } from '../adapters/localArcher'
+import { importSoulAction, loadAllSoul, useSoulStore } from '../lib/soulStore'
 
-export function SoulPage({ data, onRefresh }: { data: ArcherAdapter; onRefresh: () => Promise<void> }) {
+export function SoulPage({ data }: { data: ArcherAdapter }) {
   const [file, setFile] = React.useState<SoulFileName>('SOUL.md')
   const [refreshing, setRefreshing] = React.useState(false)
-  const [importing, setImporting] = React.useState(false)
-  const [importMessage, setImportMessage] = React.useState('')
+  const soulProfile = useSoulStore((state) => state.profile ?? data.soulProfile)
+  const soulFiles = useSoulStore((state) => state.files)
+  const reflections = useSoulStore((state) => state.reflections)
+  const reflectionLoadState = useSoulStore((state) => state.loadState)
+  const soulError = useSoulStore((state) => state.error)
+  const importing = useSoulStore((state) => state.importing)
+  const importMessage = useSoulStore((state) => state.importMessage)
+  const [fileError, setFileError] = React.useState('')
   const [confirmImportOpen, setConfirmImportOpen] = React.useState(false)
   const [reviewView, setReviewView] = React.useState<ReviewView | null>(null)
   const sortedHypotheses = React.useMemo(() => {
@@ -28,7 +34,7 @@ export function SoulPage({ data, onRefresh }: { data: ArcherAdapter; onRefresh: 
   async function handleRefresh() {
     setRefreshing(true)
     try {
-      await onRefresh()
+      await loadAllSoul()
     } finally {
       setRefreshing(false)
     }
@@ -36,39 +42,28 @@ export function SoulPage({ data, onRefresh }: { data: ArcherAdapter; onRefresh: 
 
   async function startImportSoul() {
     setConfirmImportOpen(false)
-    setImporting(true)
-    setImportMessage('')
+    setFileError('')
     try {
       const input = document.createElement('input')
       input.type = 'file'
       input.accept = '.json'
       input.onchange = async () => {
         const file = input.files?.[0]
-        if (!file) { setImporting(false); return }
+        if (!file) return
         try {
           const text = await file.text()
           const soulData = JSON.parse(text)
           if (!soulData.soulAnswers && !soulData.initialAnswers && !soulData.deepAnswers) {
-            setImportMessage('文件格式不正确：缺少 soulAnswers/initialAnswers/deepAnswers')
-            return
+            throw new Error('文件格式不正确：缺少 soulAnswers/initialAnswers/deepAnswers')
           }
-          const result = await importSoul(soulData)
-          if (result.ok) {
-            setImportMessage(`已导入 ${result.imported} 条待确认记忆`)
-            await onRefresh()
-          } else {
-            setImportMessage('导入失败')
-          }
+          await importSoulAction(soulData)
         } catch (err) {
-          setImportMessage(err instanceof Error ? err.message : '文件解析失败')
-        } finally {
-          setImporting(false)
+          setFileError(err instanceof Error ? err.message : '文件解析失败')
         }
       }
       input.click()
     } catch (err) {
-      setImportMessage(err instanceof Error ? err.message : '导入失败')
-      setImporting(false)
+      setFileError(err instanceof Error ? err.message : '导入失败')
     }
   }
 
@@ -88,7 +83,7 @@ export function SoulPage({ data, onRefresh }: { data: ArcherAdapter; onRefresh: 
           <h1>灵魂档案</h1>
         </div>
         <div className="soul-file-tabs">
-          {(Object.keys(data.soulFiles) as SoulFileName[]).map((name) => (
+          {(Object.keys(soulFiles) as SoulFileName[]).map((name) => (
             <button
               key={name}
               className={`tab ${file === name ? 'active' : ''}`}
@@ -134,24 +129,29 @@ export function SoulPage({ data, onRefresh }: { data: ArcherAdapter; onRefresh: 
           {importing ? '导入中' : '导入 Soul'}
         </button>
       </div>
-      {importMessage && <div className="memory-state">{importMessage}</div>}
+      {(fileError || importMessage) && <div className="memory-state">{fileError || importMessage}</div>}
       <div className="soul-layout">
         <section className="soul-profile-overview">
-          {data.soulProfile.empty ? (
+          {soulProfile.empty ? (
             <EmptyState compact title="暂无结构化 Soul Profile" />
           ) : (
-            data.soulProfile.sections.map((section) => (
+            soulProfile.sections.map((section) => (
               <SoulProfileBlock section={section} key={section.id} />
             ))
           )}
-          <VaultReflectionsPanel adapterStatus={data.status.adapter} />
+          <VaultReflectionsPanel
+            adapterStatus={data.status.adapter}
+            reflections={reflections}
+            loading={reflectionLoadState === 'loading'}
+            error={soulError}
+          />
           <HypothesisPanel hypotheses={sortedHypotheses} />
         </section>
         <div className="markdown-preview soul-markdown-reader">
           {activeReviewText ? (
             <MarkdownMessage text={activeReviewText} />
-          ) : data.soulFiles[file]?.trim() ? (
-            <MarkdownMessage text={data.soulFiles[file]} />
+          ) : soulFiles[file]?.trim() ? (
+            <MarkdownMessage text={soulFiles[file]} />
           ) : (
             <EmptyState compact title="此文件未配置路径或为空" />
           )}
@@ -191,28 +191,15 @@ function SoulProfileBlock({ section }: { section: SoulProfileSection }) {
   )
 }
 
-function VaultReflectionsPanel({ adapterStatus }: { adapterStatus: string }) {
-  const [reflections, setReflections] = React.useState<VaultReflection[]>([])
-  const [loading, setLoading] = React.useState(false)
-  const [error, setError] = React.useState('')
-
-  const load = React.useCallback(async () => {
-    if (adapterStatus !== 'local') return
-    setLoading(true)
-    setError('')
-    try {
-      const result = await fetchVaultReflections(10)
-      setReflections(result.reflections || [])
-    } catch (err) {
-      setError(err instanceof Error ? err.message : '加载失败')
-    } finally {
-      setLoading(false)
-    }
-  }, [adapterStatus])
-
+function VaultReflectionsPanel({ adapterStatus, reflections, loading, error }: {
+  adapterStatus: string
+  reflections: VaultReflection[]
+  loading: boolean
+  error: string
+}) {
   React.useEffect(() => {
-    void load()
-  }, [load])
+    if (adapterStatus === 'local' && reflections.length === 0) void loadAllSoul()
+  }, [adapterStatus])
 
   if (adapterStatus !== 'local') return null
 
@@ -223,7 +210,7 @@ function VaultReflectionsPanel({ adapterStatus }: { adapterStatus: string }) {
           <span>Vault Bridge</span>
           <h2 id="vault-reflections-title">近期笔记结晶</h2>
         </div>
-        <button className="quiet-button" type="button" disabled={loading} onClick={load} title="刷新">
+        <button className="quiet-button" type="button" disabled={loading} onClick={() => void loadAllSoul()} title="刷新">
           <RotateCcw size={12} />
           {loading ? '加载中' : '刷新'}
         </button>

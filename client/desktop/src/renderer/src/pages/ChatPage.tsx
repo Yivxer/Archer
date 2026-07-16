@@ -1,6 +1,6 @@
 import React from 'react'
 import { ArrowUp, Check, ChevronDown, Copy, CornerDownLeft, Crop, Download, Edit3, FileText, Github, Loader2, Mic, Monitor, Paperclip, RotateCcw, Send, Terminal, X } from 'lucide-react'
-import { appendLocalSession, approveJobToolEvent, cancelBackgroundJobEvent, createBackgroundJobEvent, ensureLocalConnection, fetchBackgroundJob, listBackgroundJobs, pollBackgroundJobEvents, retryBackgroundJobEvent, saveLocalSession, spawnChildJobs, streamLocalChat, ChatBusyError, StreamIdleTimeoutError, submitToolApprovalEvent, switchLocalExpert, switchLocalActiveProfile } from '../adapters/localArcher'
+import { appendLocalSession, approveJobToolEvent, cancelBackgroundJobEvent, createBackgroundJobEvent, ensureLocalConnection, fetchBackgroundJob, pollBackgroundJobEvents, retryBackgroundJobEvent, saveLocalSession, spawnChildJobs, streamLocalChat, ChatBusyError, StreamIdleTimeoutError, submitToolApprovalEvent, switchLocalExpert, switchLocalActiveProfile } from '../adapters/localArcher'
 import { pickChatGreeting } from '../lib/chatGreetings'
 import { extendedConversationModes, modelProfileShortLabel, modelSwitchNotice } from '../lib/conversationPersona'
 import { canDeploy, isInputDisabled, isSendDisabled, type ConnectionState } from '../lib/connectionState'
@@ -24,7 +24,7 @@ import { PermissionPrompt } from '../components/PermissionPrompt'
 import { TracePanel } from '../components/TracePanel'
 import { WorkReceipt as WorkReceiptComponent } from '../components/WorkReceipt'
 import { buildThinkingMutter } from '../lib/thinkingMutter'
-import { mergeJobEvent } from '../lib/jobStore'
+import { loadJobList, mergeJobEvent, useJobStore } from '../lib/jobStore'
 import { buildTraceDiagnostics, createInitialRuntimeState, createPersistentEventLog, reduceRuntimeEvent, restoreRuntimeStateFromEvents, isForegroundOnlyWritingFeedbackPlan, isHugoBlogPublishPlan, jobSnapshotToAgentEvent, buildPlanChildJobSpecs, buildPlanCoordinatorPrompt, buildPlanExecutionPrompt, planWithStatus } from '../../../agent'
 import type { AgentEvent, ApprovalResultEvent, EventLog, JobEvent, OrchestrationEvent, PlanEvent, TraceDiagnostics } from '../../../agent'
 import type { FailureHintEvent, InitiativeEvent } from '../../../agent/contracts'
@@ -131,8 +131,11 @@ export function ChatPage({
   const [switchingModel, setSwitchingModel] = React.useState<'lite' | 'pro' | 'max' | null>(null)
   const [localExpertId, setLocalExpertId] = React.useState<string | null>(null)
   const [expertSwitching, setExpertSwitching] = React.useState(false)
-  const [workspaceJobs, setWorkspaceJobs] = React.useState<BackgroundJob[]>([])
-  const [workspaceJobsState, setWorkspaceJobsState] = React.useState<'idle' | 'loading' | 'error'>('idle')
+  const workspaceJobs = useJobStore((state) => state.jobs)
+  const workspaceJobsLoadState = useJobStore((state) => state.loadState)
+  const workspaceJobsState: 'idle' | 'loading' | 'error' = workspaceJobsLoadState === 'loading'
+    ? 'loading'
+    : workspaceJobsLoadState === 'error' ? 'error' : 'idle'
   const [workspaceContextOpen, setWorkspaceContextOpen] = React.useState(() => (
     window.localStorage.getItem('archer-workspace-context-open') === '1'
   ))
@@ -165,27 +168,7 @@ export function ChatPage({
   }
 
   React.useEffect(() => {
-    if (data.status.adapter !== 'local') {
-      setWorkspaceJobs([])
-      setWorkspaceJobsState('idle')
-      return
-    }
-    let cancelled = false
-    setWorkspaceJobsState('loading')
-    listBackgroundJobs()
-      .then((result) => {
-        if (cancelled) return
-        setWorkspaceJobs(result.jobs)
-        setWorkspaceJobsState('idle')
-      })
-      .catch(() => {
-        if (cancelled) return
-        setWorkspaceJobs([])
-        setWorkspaceJobsState('error')
-      })
-    return () => {
-      cancelled = true
-    }
+    if (data.status.adapter === 'local') void loadJobList()
   }, [data.status.adapter])
 
   React.useEffect(() => {
@@ -224,11 +207,12 @@ export function ChatPage({
     eventLogRef.current?.append(event)
     setRuntimeState((current) => reduceRuntimeEvent(current, event))
     if (event.type === 'job.event') {
-      mergeJobEvent(event.jobId, {
+      const merged = mergeJobEvent(event.jobId, {
         status: event.status,
         result: event.detail,
         stale: event.stale,
       })
+      if (!merged) void loadJobList()
     }
     if (event.type === 'initiative.event') onInitiativeEvent?.(event)
   }

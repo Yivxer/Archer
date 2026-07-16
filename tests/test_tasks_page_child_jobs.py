@@ -16,6 +16,9 @@ def test_tasks_page_uses_server_authoritative_job_store():
     assert "loadJobDetail" in source
     assert "setTimeout(() => void refreshJobs" not in source
     assert "mergeJobEvent" in chat_source
+    assert "useJobStore" in chat_source
+    assert "loadJobList" in chat_source
+    assert "listBackgroundJobs" not in chat_source
 
 
 def test_tasks_page_shows_child_job_summaries():

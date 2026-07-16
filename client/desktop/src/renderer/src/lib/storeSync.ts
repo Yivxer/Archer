@@ -12,7 +12,7 @@
  * 契约：docs/api-contract.md §「L3 领域 store 契约」
  */
 
-import type { ArcherAdapter, MemoryItem } from '../types'
+import type { ArcherAdapter, MemoryItem, SoulFiles, SoulProfileSummary } from '../types'
 import { mergeMemoryItems } from './memoryStore'
 import { mergeSoulFiles, mergeSoulProfile } from './soulStore'
 import { mergeSessionItems } from './sessionStore'
@@ -62,5 +62,17 @@ export function projectMemoryStoreToAdapter(
       memoryCount: memory.filter((item) => item.status === 'confirmed').length,
       pendingMemoryCount: memory.filter((item) => item.status === 'pending').length,
     },
+  }
+}
+
+/** 把 soulStore 已确认的领域状态投影回兼容 adapter，不触碰其他领域。 */
+export function projectSoulStoreToAdapter(
+  adapter: ArcherAdapter,
+  soul: { profile: SoulProfileSummary | null; files: SoulFiles },
+): ArcherAdapter {
+  return {
+    ...adapter,
+    soulProfile: soul.profile ?? adapter.soulProfile,
+    soulFiles: soul.files,
   }
 }

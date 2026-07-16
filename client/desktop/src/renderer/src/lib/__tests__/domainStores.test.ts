@@ -433,19 +433,21 @@ describe('jobStore — L3.5', () => {
   })
 
   it('mergeJobEvent 对未知 job 忽略（不追加）', () => {
-    mergeJobEvent('job-unknown', { status: 'running' })
+    const merged = mergeJobEvent('job-unknown', { status: 'running' })
     expect(getJobStoreState().jobs).toEqual([])
+    expect(merged).toBe(false)
   })
 
   it('mergeJobEvent 对已知 job 局部更新', () => {
     mergeJobItems([serverJob])
-    mergeJobEvent('job-1', { status: 'running', result: '服务端 SSE 进度' })
+    const merged = mergeJobEvent('job-1', { status: 'running', result: '服务端 SSE 进度' })
 
     expect(getJobStoreState().jobs).toEqual([{
       ...serverJob,
       status: 'running',
       result: '服务端 SSE 进度',
     }])
+    expect(merged).toBe(true)
   })
 
   it('clearJobDetail 清空详情', () => {

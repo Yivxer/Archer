@@ -7,7 +7,7 @@
 
 import { describe, expect, it, beforeEach } from 'vitest'
 import { mockArcher } from '../../adapters/mockArcher'
-import { projectMemoryStoreToAdapter, syncStoresFromAdapter } from '../storeSync'
+import { projectMemoryStoreToAdapter, projectSoulStoreToAdapter, syncStoresFromAdapter } from '../storeSync'
 import { getMemoryStoreState, resetMemoryStore } from '../memoryStore'
 import { getSoulStoreState, resetSoulStore } from '../soulStore'
 import { getSessionStoreState, resetSessionStore } from '../sessionStore'
@@ -85,6 +85,19 @@ describe('storeSync — L3.9a syncStoresFromAdapter', () => {
     expect(next.status.pendingMemoryCount).toBe(memory.filter((item) => item.status === 'pending').length)
     expect(next.sessions).toBe(mockArcher.sessions)
     expect(next.soulProfile).toBe(mockArcher.soulProfile)
+    expect(next.initiativeShadow).toBe(mockArcher.initiativeShadow)
+  })
+
+  it('soul 领域事件只投影 profile/files，不替换 memory 与 sessions', () => {
+    const profile = { empty: false, sections: [] }
+    const files = { ...mockArcher.soulFiles, 'SOUL.md': '# Updated Soul' }
+
+    const next = projectSoulStoreToAdapter(mockArcher, { profile, files })
+
+    expect(next.soulProfile).toBe(profile)
+    expect(next.soulFiles).toBe(files)
+    expect(next.memory).toBe(mockArcher.memory)
+    expect(next.sessions).toBe(mockArcher.sessions)
     expect(next.initiativeShadow).toBe(mockArcher.initiativeShadow)
   })
 })

@@ -8,6 +8,8 @@
  */
 
 import {
+  fetchSoulFiles,
+  fetchSoulProfile,
   fetchVaultReflections,
   importSoul,
   triggerVaultReflection,
@@ -54,15 +56,20 @@ export function subscribeSoulStore(listener: () => void): () => void {
 
 /**
  * 全量加载 soul 数据（profile + files + reflections 并发）。
- * profile 和 files 由 loadLocalArcher 注入，loadAll 只补 reflections。
  */
 export async function loadAllSoul(): Promise<void> {
   store.setState((s) => ({ ...s, loadState: 'loading', error: '' }))
   try {
-    const result = await fetchVaultReflections(10)
+    const [profile, files, reflectionResult] = await Promise.all([
+      fetchSoulProfile(),
+      fetchSoulFiles(),
+      fetchVaultReflections(10),
+    ])
     store.setState((s) => ({
       ...s,
-      reflections: result.reflections,
+      profile,
+      files,
+      reflections: reflectionResult.reflections,
       loadState: 'ready',
       error: '',
     }))
@@ -82,15 +89,15 @@ export async function importSoulAction(soulData: Record<string, unknown>): Promi
   store.setState((s) => ({ ...s, importing: true, importMessage: '' }))
   try {
     const result = await importSoul(soulData)
+    if (!result.ok) throw new Error(result.message || 'Soul 导入失败')
+    await loadAllSoul()
     store.setState((s) => ({
       ...s,
       importing: false,
       importMessage: result.message || `已导入 ${result.imported} 条`,
     }))
-    // L3.7: 通知跨 store 联动（soul 导入可能产生 pending memory，main.tsx 监听后 refresh）
+    // 跨域副作用只通过事件通知；main.tsx 定向重载 memoryStore。
     emitStoreEvent({ type: 'soul:imported', imported: result.imported })
-    // 导入成功后需要 main.tsx onRefresh 刷新 profile + files
-    // 这里只更新 importing 状态，实际 profile/files 由 mergeProfile/mergeFiles 注入
   } catch (err) {
     store.setState((s) => ({
       ...s,
@@ -113,7 +120,7 @@ export async function triggerReflectionAction(
     // 触发后 refresh reflections
     const result = await fetchVaultReflections(10)
     store.setState((s) => ({ ...s, reflections: result.reflections }))
-    // L3.7: 通知跨 store 联动（reflection 可能产生 pending memory）
+    // 跨域副作用只通过事件通知；main.tsx 定向重载 memoryStore。
     emitStoreEvent({ type: 'soul:reflection-triggered' })
   } catch (err) {
     store.setState((s) => ({

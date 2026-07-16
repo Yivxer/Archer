@@ -48,6 +48,7 @@ const initialState: JobStoreState = {
 // ───────────────────────── Store 单例 ─────────────────────────
 
 const store = createExternalStore<JobStoreState>(initialState)
+let jobListLoadInFlight: Promise<void> | null = null
 
 export function getJobStoreState(): JobStoreState {
   return store.getState()
@@ -79,21 +80,30 @@ function projectServerJob(state: JobStoreState, job: BackgroundJob): Pick<JobSto
  * 加载 job 列表。
  */
 export async function loadJobList(): Promise<void> {
-  store.setState((s) => ({ ...s, loadState: 'loading', error: '' }))
+  if (jobListLoadInFlight) return jobListLoadInFlight
+  const run = (async () => {
+    store.setState((s) => ({ ...s, loadState: 'loading', error: '' }))
+    try {
+      const result = await listBackgroundJobs()
+      store.setState((s) => ({
+        ...s,
+        jobs: result.jobs,
+        loadState: 'ready',
+        error: '',
+      }))
+    } catch (err) {
+      store.setState((s) => ({
+        ...s,
+        loadState: 'error',
+        error: err instanceof Error ? err.message : String(err),
+      }))
+    }
+  })()
+  jobListLoadInFlight = run
   try {
-    const result = await listBackgroundJobs()
-    store.setState((s) => ({
-      ...s,
-      jobs: result.jobs,
-      loadState: 'ready',
-      error: '',
-    }))
-  } catch (err) {
-    store.setState((s) => ({
-      ...s,
-      loadState: 'error',
-      error: err instanceof Error ? err.message : String(err),
-    }))
+    await run
+  } finally {
+    if (jobListLoadInFlight === run) jobListLoadInFlight = null
   }
 }
 
@@ -268,16 +278,19 @@ export async function spawnChildren(
  *
  * 注意：JobEvent 和 BackgroundJob 字段不完全一致，这里只更新 status/detail/stale。
  */
-export function mergeJobEvent(jobId: string, patch: Partial<BackgroundJob>): void {
+export function mergeJobEvent(jobId: string, patch: Partial<BackgroundJob>): boolean {
+  let merged = false
   store.setState((s) => {
     const idx = s.jobs.findIndex((j) => j.id === jobId)
-    if (idx === -1) return s // 列表里没有，忽略（等下次 loadJobList）
+    if (idx === -1) return s
+    merged = true
     const jobs = s.jobs.map((j) => (j.id === jobId ? { ...j, ...patch } : j))
     const currentDetail = s.currentDetail?.id === jobId
       ? { ...s.currentDetail, ...patch }
       : s.currentDetail
     return { ...s, jobs, currentDetail }
   })
+  return merged
 }
 
 /**
@@ -291,6 +304,7 @@ export function clearJobDetail(): void {
  * 重置 store。
  */
 export function resetJobStore(): void {
+  jobListLoadInFlight = null
   store.setState(() => initialState)
 }
 

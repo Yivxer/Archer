@@ -18,8 +18,9 @@ import { connectionStatusLabel, expertShortLabel, modelProfileShortLabel } from 
 import { mergeInitiativeShadowEvent } from './lib/initiativeShadow'
 import { mergeSseInitiativeEvent } from './lib/initiativeStore'
 import { onStoreEvent } from './lib/storeEventBus'
-import { projectMemoryStoreToAdapter, syncStoresFromAdapter } from './lib/storeSync'
-import { getMemoryStoreState } from './lib/memoryStore'
+import { projectMemoryStoreToAdapter, projectSoulStoreToAdapter, syncStoresFromAdapter } from './lib/storeSync'
+import { getMemoryStoreState, loadAllMemory } from './lib/memoryStore'
+import { getSoulStoreState } from './lib/soulStore'
 import { upsertThreadFromSave } from './lib/threadStore'
 import { deleteSession, getSessionStoreState, loadSessionDetail } from './lib/sessionStore'
 import { createOfflineLocalShell, syncBrainData, wasBrainEverLinked } from './lib/brainConnection'
@@ -396,14 +397,18 @@ function App() {
         setData((current) => projectMemoryStoreToAdapter(current, memory))
       }))
     }
-    const refreshEvents = [
+    const soulProjectionEvents = [
       'soul:imported',
       'soul:reflection-triggered',
-      'job:created',
     ] as const
-    for (const type of refreshEvents) {
+    for (const type of soulProjectionEvents) {
       unsubs.push(onStoreEvent(type, () => {
-        void connectLocalApi({ silent: true })
+        const soul = getSoulStoreState()
+        setData((current) => projectSoulStoreToAdapter(current, soul))
+        void loadAllMemory().then(() => {
+          const memory = getMemoryStoreState().items
+          setData((current) => projectMemoryStoreToAdapter(current, memory))
+        })
       }))
     }
     return () => { for (const unsub of unsubs) unsub() }
@@ -700,7 +705,7 @@ function App() {
               onCreateProject={createProject}
             />
           )}
-          {route === 'Soul' && <SoulPage data={data} onRefresh={connectLocalApi} />}
+          {route === 'Soul' && <SoulPage data={data} />}
           {route === 'Settings' && (
             <SettingsPage
               data={data}

@@ -28,7 +28,9 @@ import type {
   ScheduledTask,
   ScheduleListResult,
   ScheduleMutationResult,
+  SoulFiles,
   SoulImportResult,
+  SoulProfileSummary,
   ReviewPeriod,
   ToolApprovalResult,
   ToolEvent,
@@ -744,6 +746,14 @@ export async function batchResolvePendingMemory(accepted: boolean): Promise<{ ok
 
 export async function fetchMemoryItems(): Promise<MemoryItem[]> {
   return getJson<MemoryItem[]>('/memory?include_rejected=true')
+}
+
+export async function fetchSoulProfile(): Promise<SoulProfileSummary> {
+  return getJson<SoulProfileSummary>('/soul-profile')
+}
+
+export async function fetchSoulFiles(): Promise<SoulFiles> {
+  return getJson<SoulFiles>('/soul-files')
 }
 
 export async function importSoul(soulData: Record<string, unknown>): Promise<SoulImportResult> {
