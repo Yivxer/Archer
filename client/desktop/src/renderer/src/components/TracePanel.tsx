@@ -29,12 +29,24 @@ export type TracePanelProps = {
   onRetry?: () => void
 }
 
+function shortTraceText(value: string, maxLength = 96): string {
+  const compact = value.replace(/\s+/g, ' ').trim()
+  if (compact.length <= maxLength) return compact
+  return `${compact.slice(0, maxLength - 1)}…`
+}
+
 function describeTraceEvent(event: AgentEvent): string {
   if (event.type === 'runtime.context') return `${event.task} / ${event.phase}`
   if (event.type === 'failure.hint') return `${event.keyword} / ${event.stage}`
-  if (event.type === 'tool.request') return `${event.toolName} / ${event.status} / ${event.permissionLevel || 'unknown'}`
-  if (event.type === 'tool.result') return `${event.toolName} / ${event.status}`
-  if (event.type === 'approval.result') return `${event.decision} / ${event.executed ? 'executed' : 'skipped'}`
+  if (event.type === 'tool.request') {
+    return `${event.toolName} / ${event.status} / ${shortTraceText(event.summary || event.detail || '无摘要')}`
+  }
+  if (event.type === 'tool.result') {
+    return `${event.toolName} / ${event.status} / ${shortTraceText(event.message || event.output || '无摘要')}`
+  }
+  if (event.type === 'approval.result') {
+    return `${event.decision} / ${event.executed ? 'executed' : 'skipped'} / ${shortTraceText(event.message || event.output || '无摘要')}`
+  }
   if (event.type === 'job.event') return `${event.title} / ${event.status}${event.stale ? ' / stale' : ''}`
   if (event.type === 'status.event') return `${event.intentType} / ${event.intentLabel}`
   return event.type
@@ -58,6 +70,7 @@ export function TracePanel({
   onRetry,
 }: TracePanelProps): React.ReactElement {
   const context = diagnostics.runtimeContext
+  const modelContext = diagnostics.modelContext
   const failure = diagnostics.failureHint
   const [failureExpanded, setFailureExpanded] = React.useState(defaultExpandFailure)
   const canRetry = Boolean(failure?.recoverable && onRetry)
@@ -104,6 +117,18 @@ export function TracePanel({
               <dd>
                 {failure ? `${failure.keyword} · ${failure.recoverable ? '可恢复' : '不可恢复'}` : '无'}
               </dd>
+            </div>
+            <div>
+              <dt>Provider</dt>
+              <dd>{modelContext?.provider || '未记录'}</dd>
+            </div>
+            <div>
+              <dt>Model</dt>
+              <dd>{modelContext?.model || '未记录'}</dd>
+            </div>
+            <div>
+              <dt>Endpoint</dt>
+              <dd>{modelContext?.baseUrlSummary || '未记录'}</dd>
             </div>
           </dl>
 

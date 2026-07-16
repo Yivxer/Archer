@@ -39,7 +39,7 @@ from terminal.api.turn_pipeline import (
     trim_model_messages as _trim_model_messages_for_context,
 )
 from terminal.api.tool_stage import summarize_api_tool_events
-from terminal.api.model_stream import has_fake_tool_markup as _has_fake_xml, iter_model_stream, iter_rescue_stream, select_model_for_turn, split_safe_model_chunk as _split_safe_model_chunk, stream_failure_events
+from terminal.api.model_stream import has_fake_tool_markup as _has_fake_xml, iter_model_stream, iter_rescue_stream, model_trace_metadata, select_model_for_turn, split_safe_model_chunk as _split_safe_model_chunk, stream_failure_events
 from terminal.api.memory_extraction import _bg_extract_api, _do_extract_api
 from terminal.api.turn_receipt import empty_reply_events, memory_compaction_events
 
@@ -344,6 +344,7 @@ def _chat_reply_dependencies() -> ChatReplyDependencies:
             hint_factory=_failure_hint_event,
         ),
         empty_events=empty_reply_events,
+        model_trace=model_trace_metadata,
     )
 
 
@@ -470,9 +471,22 @@ def _iter_simple_chat_path(
 
     # 主模型 stream
     active_model = select_model_for_turn(
-        _load_config(), query=query, intent="chat", needs_tools=False,
+        _cfg, query=query, intent="chat", needs_tools=False,
         file_refs=file_refs, resolver=resolve_active_model,
     )
+    yield {
+        "type": "runtimeContextEvent",
+        "runtimeContextEvent": {
+            "id": f"model-context-{uuid4().hex[:8]}",
+            "traceId": trace_id,
+            "task": "chat",
+            "phase": "model_stream",
+            "userIntent": "chat",
+            "lastResult": "model_selected",
+            "expectedNext": "stream_model_reply",
+            **model_trace_metadata(_cfg, active_model),
+        },
+    }
     ai_reply_parts: list[str] = []
     streamed_safe_text = ""
     fake_markup_detected = False

@@ -24,6 +24,19 @@ describe('trace diagnostics', () => {
       },
       {
         ...base,
+        type: 'runtime.context',
+        id: 'ctx-model-1',
+        task: 'blog_publish',
+        phase: 'model_stream',
+        userIntent: 'publish',
+        lastResult: 'model_selected',
+        expectedNext: 'stream_model_reply',
+        provider: 'Kimi',
+        model: 'kimi-k2-fast',
+        baseUrlSummary: 'https://api.moonshot.cn',
+      },
+      {
+        ...base,
         type: 'tool.request',
         id: 'tool-1',
         toolName: 'hugo_blog',
@@ -63,9 +76,16 @@ describe('trace diagnostics', () => {
     expect(diagnostics.empty).toBe(false)
     expect(diagnostics.traceId).toBe('trace-1')
     expect(diagnostics.runtimeContext?.task).toBe('blog_publish')
+    expect(diagnostics.runtimeContext?.phase).toBe('deploy')
+    expect(diagnostics.modelContext).toMatchObject({
+      provider: 'Kimi',
+      model: 'kimi-k2-fast',
+      baseUrlSummary: 'https://api.moonshot.cn',
+    })
     expect(diagnostics.failureHint?.keyword).toBe('command_timeout')
-    expect(diagnostics.recentEvents).toHaveLength(4)
+    expect(diagnostics.recentEvents).toHaveLength(5)
     expect(diagnostics.recentEvents.map((event) => event.type)).toEqual([
+      'runtime.context',
       'runtime.context',
       'tool.request',
       'failure.hint',

@@ -142,6 +142,9 @@ export const runtimeContextEventSchema = base.extend({
   lastResult: z.string(),
   expectedNext: z.string(),
   matchedSkills: z.array(z.string()).optional(),
+  provider: z.string().optional(),
+  model: z.string().optional(),
+  baseUrlSummary: z.string().optional(),
 })
 
 export const failureHintEventSchema = base.extend({

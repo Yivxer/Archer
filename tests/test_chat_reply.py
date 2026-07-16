@@ -22,6 +22,11 @@ def _dependencies(*, stream, rescue=None, fake=False):
         split_safe_chunk=lambda buffer, chunk: (buffer + chunk, chunk, False),
         failure_events=lambda exc, **kwargs: [{"type": "error", "detail": str(exc)}],
         empty_events=lambda **kwargs: [{"type": "empty"}],
+        model_trace=lambda config, model: {
+            "provider": "TestProvider",
+            "model": model,
+            "baseUrlSummary": "https://api.example.com",
+        },
     )
 
 
@@ -33,7 +38,19 @@ def test_chat_reply_streams_chunks_and_returns_full_reply():
         dependencies=_dependencies(stream=lambda *args, **kwargs: iter([{"type": "chunk", "text": "hello"}])),
     ))
 
-    assert events == [{"type": "token", "text": "hello"}]
+    assert events[0]["runtimeContextEvent"] == {
+        "id": events[0]["runtimeContextEvent"]["id"],
+        "traceId": "trace-1",
+        "task": "chat",
+        "phase": "model_stream",
+        "userIntent": "chat",
+        "lastResult": "model_selected",
+        "expectedNext": "stream_model_reply",
+        "provider": "TestProvider",
+        "model": "test-model",
+        "baseUrlSummary": "https://api.example.com",
+    }
+    assert events[1:] == [{"type": "token", "text": "hello"}]
     assert reply == "hello"
 
 
@@ -52,7 +69,7 @@ def test_chat_reply_emits_heartbeat_and_uses_runtime_llm_client():
     ))
 
     assert captured == [client]
-    assert events[0]["statusEvent"]["intentLabel"] == "模型响应中"
+    assert events[1]["statusEvent"]["intentLabel"] == "模型响应中"
     assert reply == "ok"
 
 
@@ -81,7 +98,7 @@ def test_chat_reply_failure_returns_none_after_terminal_events():
         had_tool_activity=False, runtime_context=None, dependencies=_dependencies(stream=failing_stream),
     ))
 
-    assert events == [{"type": "error", "detail": "boom"}]
+    assert events[-1] == {"type": "error", "detail": "boom"}
     assert reply is None
 
 
@@ -92,5 +109,5 @@ def test_chat_reply_emits_empty_receipt_for_blank_reply():
         dependencies=_dependencies(stream=lambda *args, **kwargs: iter([])),
     ))
 
-    assert events == [{"type": "empty"}]
+    assert events[-1] == {"type": "empty"}
     assert reply == ""

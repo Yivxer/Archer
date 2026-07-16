@@ -148,6 +148,9 @@ export type RuntimeContextEvent = AgentEventBase & {
   lastResult: string
   expectedNext: string
   matchedSkills?: string[]
+  provider?: string
+  model?: string
+  baseUrlSummary?: string
 }
 
 export type FailureHintEvent = AgentEventBase & {

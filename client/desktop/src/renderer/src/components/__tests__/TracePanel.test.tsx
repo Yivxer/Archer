@@ -47,6 +47,17 @@ const failureHint: FailureHintEvent = {
   detail: '命令在 30s 内无响应',
 }
 
+const modelContext: RuntimeContextEvent = {
+  ...runtimeContext,
+  id: 'evt-model-1',
+  phase: 'model_stream',
+  lastResult: 'model_selected',
+  expectedNext: 'stream_model_reply',
+  provider: 'Kimi',
+  model: 'kimi-k2-fast',
+  baseUrlSummary: 'https://api.moonshot.cn',
+}
+
 const failureHintUnrecoverable: FailureHintEvent = {
   ...failureHint,
   id: 'evt-fh-2',
@@ -67,7 +78,7 @@ const toolResultEvent: AgentEvent = {
   status: 'complete',
   ok: true,
   output: '已写入',
-  message: 'success',
+  message: '已写入 Obsidian',
 } as AgentEvent
 
 function buildDiagnostics(overrides: Partial<TraceDiagnostics> = {}): TraceDiagnostics {
@@ -75,6 +86,7 @@ function buildDiagnostics(overrides: Partial<TraceDiagnostics> = {}): TraceDiagn
     traceId: 'trace-abc',
     empty: false,
     runtimeContext,
+    modelContext,
     failureHint,
     recentEvents: [toolResultEvent],
     ...overrides,
@@ -150,6 +162,12 @@ describe('TracePanel — runtime context 字段', () => {
     expect(html).toContain('下一步')
     expect(html).toContain('用户审批')
     expect(html).toContain('故障')
+    expect(html).toContain('Provider')
+    expect(html).toContain('Kimi')
+    expect(html).toContain('Model')
+    expect(html).toContain('kimi-k2-fast')
+    expect(html).toContain('Endpoint')
+    expect(html).toContain('https://api.moonshot.cn')
   })
 
   it('runtimeContext 缺失时显示「未知」/「未记录」', () => {
@@ -360,7 +378,7 @@ describe('TracePanel — recent events 时间线', () => {
   it('渲染事件类型 + summary', () => {
     const html = render(<TracePanel diagnostics={buildDiagnostics()} onClose={() => {}} />)
     expect(html).toContain('tool.result')
-    expect(html).toContain('obsidian_write / complete')
+    expect(html).toContain('obsidian_write / complete / 已写入 Obsidian')
   })
 
   it('多事件按顺序渲染', () => {
@@ -394,7 +412,7 @@ describe('TracePanel — recent events 时间线', () => {
     expect(html).toContain('runtime.context')
     expect(html).toContain('写入 Obsidian 笔记 / awaiting_approval')
     expect(html).toContain('tool.request')
-    expect(html).toContain('obsidian_write / waiting_approval / write-vault')
+    expect(html).toContain('obsidian_write / waiting_approval / 写入笔记')
   })
 
   it('status.event 用 intentType/intentLabel 描述', () => {

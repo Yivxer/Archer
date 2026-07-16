@@ -7,6 +7,7 @@ import re
 import threading
 import time
 from collections.abc import Callable, Iterator
+from urllib.parse import urlsplit
 
 from core.llm_client import LLMClient
 
@@ -15,6 +16,32 @@ FAKE_XML_RE = re.compile(
     r"<(读取文件|写入文件|搜索文件|文件查找|参数|tool_call|invoke|function_call|execute)[^>]{0,60}>",
     re.IGNORECASE,
 )
+
+
+def model_trace_metadata(config: dict, model: str) -> dict[str, str]:
+    """Return model diagnostics without credentials, path, query, or API keys."""
+    from core.model_profiles import active_api_config
+
+    api = active_api_config(config)
+    raw_url = str(api.get("base_url") or "").strip()
+    base_url_summary = ""
+    if raw_url:
+        try:
+            has_scheme = "://" in raw_url
+            parsed = urlsplit(raw_url if has_scheme else f"//{raw_url}")
+            host = parsed.hostname or ""
+            if host:
+                if ":" in host and not host.startswith("["):
+                    host = f"[{host}]"
+                port = f":{parsed.port}" if parsed.port else ""
+                base_url_summary = f"{parsed.scheme}://{host}{port}" if has_scheme else f"{host}{port}"
+        except (TypeError, ValueError):
+            base_url_summary = ""
+    return {
+        "provider": str(api.get("provider") or api.get("active_profile") or "unknown"),
+        "model": str(model or api.get("model") or "unknown"),
+        "baseUrlSummary": base_url_summary,
+    }
 
 
 def has_fake_tool_markup(text: str) -> bool:

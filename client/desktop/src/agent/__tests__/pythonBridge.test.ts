@@ -140,6 +140,9 @@ describe('python bridge', () => {
         userIntent: 'deploy_existing_post',
         lastResult: 'hugo_file_created',
         expectedNext: 'build_and_deploy',
+        provider: 'Kimi',
+        model: 'kimi-k2-fast',
+        baseUrlSummary: 'https://api.moonshot.cn',
       },
       toolEvent: {
         id: 'tool-1',
@@ -217,6 +220,9 @@ describe('python bridge', () => {
       task: 'blog_publish',
       phase: 'execute',
       expectedNext: 'build_and_deploy',
+      provider: 'Kimi',
+      model: 'kimi-k2-fast',
+      baseUrlSummary: 'https://api.moonshot.cn',
     })
     expect(events[5]).toMatchObject({
       type: 'initiative.event',

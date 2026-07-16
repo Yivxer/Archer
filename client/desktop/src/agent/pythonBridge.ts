@@ -206,6 +206,9 @@ type PythonRuntimeContextEvent = {
   lastResult?: string
   expectedNext: string
   matchedSkills?: string[]
+  provider?: string
+  model?: string
+  baseUrlSummary?: string
 }
 
 type PythonFailureHintEvent = {
@@ -281,6 +284,9 @@ export function pythonRuntimeContextToAgentEvent(
     lastResult: snapshot.lastResult || '',
     expectedNext: snapshot.expectedNext,
     matchedSkills: snapshot.matchedSkills ?? [],
+    provider: snapshot.provider,
+    model: snapshot.model,
+    baseUrlSummary: snapshot.baseUrlSummary,
   }
 }
 

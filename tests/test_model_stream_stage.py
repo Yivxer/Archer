@@ -5,6 +5,7 @@ from terminal.api.model_stream import (
     has_fake_tool_markup,
     iter_model_stream,
     iter_rescue_stream,
+    model_trace_metadata,
     select_model_for_turn,
     split_safe_model_chunk,
     stream_failure_events,
@@ -33,6 +34,27 @@ def test_model_selection_detects_image_attachment():
     model = select_model_for_turn({}, query="look", intent="chat", needs_tools=False, file_refs=[{"type": "image"}], resolver=lambda config, **kwargs: (calls.append(kwargs) or "vision", {}))
     assert model == "vision"
     assert calls[0]["has_images"] is True
+
+
+def test_model_trace_metadata_excludes_credentials_path_query_and_api_key():
+    metadata = model_trace_metadata({
+        "api": {
+            "active_profile": "lite",
+            "provider": "Kimi",
+            "model": "kimi-k2",
+            "base_url": "https://user:secret@api.example.com:8443/v1/chat?token=leak",
+            "api_key": "sk-should-never-appear",
+        },
+        "model_profiles": {},
+    }, "kimi-k2-fast")
+
+    assert metadata == {
+        "provider": "Kimi",
+        "model": "kimi-k2-fast",
+        "baseUrlSummary": "https://api.example.com:8443",
+    }
+    assert "secret" not in str(metadata)
+    assert "sk-should-never-appear" not in str(metadata)
 
 
 def test_safe_chunk_stops_before_split_dsml_markup():

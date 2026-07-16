@@ -162,6 +162,9 @@ describe('contract schemas', () => {
       lastResult: '',
       expectedNext: 'select_workflow_or_model',
       matchedSkills: ['hugo_blog'],
+      provider: 'Kimi',
+      model: 'kimi-k2-fast',
+      baseUrlSummary: 'https://api.moonshot.cn',
     }).type).toBe('runtime.context')
 
     expect(parseAgentEvent({

@@ -17,6 +17,7 @@ class ChatReplyDependencies:
     split_safe_chunk: Callable
     failure_events: Callable
     empty_events: Callable
+    model_trace: Callable
 
 
 def iter_chat_reply_events(
@@ -25,13 +26,27 @@ def iter_chat_reply_events(
     runtime_context, dependencies: ChatReplyDependencies,
     heartbeat_seconds: float = 8.0, total_timeout_seconds: float = 180.0,
 ):
+    config = dependencies.load_config()
     active_model = dependencies.select_model(
-        dependencies.load_config(),
+        config,
         query=query,
         intent=intent,
         needs_tools=bool(selected_tools),
         file_refs=file_refs,
     )
+    yield {
+        "type": "runtimeContextEvent",
+        "runtimeContextEvent": {
+            "id": f"model-context-{uuid4().hex[:8]}",
+            "traceId": trace_id,
+            "task": intent,
+            "phase": "model_stream",
+            "userIntent": intent,
+            "lastResult": "model_selected",
+            "expectedNext": "stream_model_reply",
+            **dependencies.model_trace(config, active_model),
+        },
+    }
     llm_client = getattr(runtime_context, "llm_client", None)
     reply_parts: list[str] = []
     streamed_safe_text = ""
