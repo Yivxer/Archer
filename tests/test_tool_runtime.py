@@ -3,6 +3,7 @@ Step 1 — ToolRuntime Tests
 验证 timeout / 异常 / 截断 / 不存在技能 四类边界。
 """
 import sys
+import subprocess
 import tempfile
 import time
 import types
@@ -62,6 +63,30 @@ def test_runtime_timeout():
         assert tr.error["type"] == "TimeoutError"
         assert tr.error["retryable"] is True
         assert elapsed < 5, f"超时保护失效，等待了 {elapsed:.1f}s"
+
+
+def test_runtime_timeout_does_not_keep_process_alive():
+    """超时后的技能 worker 不得阻止 Archer 进程退出。"""
+    script = """
+import time
+import types
+from core.tool_runtime import invoke
+
+skill = types.ModuleType("slow_exit")
+skill.SKILL = {"name": "slow_exit", "default_timeout": 1}
+skill.run = lambda _args: time.sleep(60)
+result = invoke("slow_exit", {}, {"slow_exit": skill})
+raise SystemExit(0 if result.error and result.error["type"] == "TimeoutError" else 1)
+"""
+
+    completed = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=ROOT,
+        timeout=5,
+        check=False,
+    )
+
+    assert completed.returncode == 0
 
 
 # ─── 3. 技能内部异常 ───────────────────────────────────────────────────────────

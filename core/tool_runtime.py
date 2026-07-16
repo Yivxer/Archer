@@ -8,9 +8,9 @@ Skill Runtime Wrapper (Step 1)
   - 超长结果截断 + artifact 存储
 """
 import logging
+import queue
+import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
-from concurrent.futures import TimeoutError as FutureTimeoutError
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -78,15 +78,29 @@ def invoke(skill_name: str, args: dict, skills: dict,
     started_at = time.time()
     started_str = _fmt_ts(started_at)
 
-    executor = ThreadPoolExecutor(max_workers=1)
     structured_runner = getattr(mod, "run_structured", None)
     runner = structured_runner or mod.run
     runner_name = "structured" if structured_runner else "run"
+    outcome: queue.Queue[tuple[str, object]] = queue.Queue(maxsize=1)
+
+    def _worker() -> None:
+        try:
+            outcome.put(("result", runner(args)))
+        except BaseException as exc:
+            outcome.put(("error", exc))
+
+    worker = threading.Thread(
+        target=_worker,
+        name=f"archer-tool-{skill_name}",
+        daemon=True,
+    )
+    worker.start()
     try:
-        future = executor.submit(runner, args)
-        raw = future.result(timeout=effective_timeout)
-    except FutureTimeoutError:
-        executor.shutdown(wait=False)
+        outcome_kind, outcome_value = outcome.get(timeout=effective_timeout)
+        if outcome_kind == "error":
+            raise outcome_value
+        raw = outcome_value
+    except queue.Empty:
         # B3.1: P0 skill 失败额外记日志，便于诊断
         try:
             from core.permission_levels import is_p0_critical_skill
@@ -106,7 +120,6 @@ def invoke(skill_name: str, args: dict, skills: dict,
             meta=_build_meta(started_str, started_at),
         )
     except Exception as e:
-        executor.shutdown(wait=False)
         # B3.1: P0 skill 失败额外记日志，便于诊断
         try:
             from core.permission_levels import is_p0_critical_skill
@@ -125,9 +138,6 @@ def invoke(skill_name: str, args: dict, skills: dict,
             },
             meta=_build_meta(started_str, started_at),
         )
-    finally:
-        executor.shutdown(wait=False)
-
     raw_ok = True
     raw_summary = ""
     raw_metadata: dict[str, Any] = {}
