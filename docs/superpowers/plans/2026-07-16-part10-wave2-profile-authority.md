@@ -9,4 +9,4 @@
 - [x] Derive the active model button and menu state from `data.settings.activeProfile`.
 - [x] Keep only `switchingModel` as transient UI state during the request.
 - [x] Run profile/settings focused Python and Desktop tests plus production build.
-- [ ] Run full closure verification, update canonical documents, and commit.
+- [x] Run full closure verification, update canonical documents, and commit.
