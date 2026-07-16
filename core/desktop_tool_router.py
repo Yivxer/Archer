@@ -408,11 +408,19 @@ def classify_hugo_intent(query: str, file_refs: list | None = None) -> str:
         return HUGO_INTENT_CONTENT_REVIEW
 
     lowered = query.lower()
-    if has_hugo_blog_target(query) and any(term in lowered for term in ("删除", "下架", "移除", "撤回", "删掉")):
+    if has_hugo_blog_target(query) and any(
+        _term_is_active(query, term) for term in ("删除", "下架", "移除", "撤回", "删掉")
+    ):
         return HUGO_INTENT_DELETE_OR_UNPUBLISH
+    if has_hugo_blog_target(query) and any(term in lowered for term in _HUGO_DEPLOY_TERMS) and not any(
+        _term_is_active(query, term) for term in _HUGO_DEPLOY_TERMS
+    ):
+        return HUGO_INTENT_NONE
     if wants_hugo_deploy(query) or wants_hugo_creation(query):
         return HUGO_INTENT_EXECUTE_PUBLISH
-    if has_hugo_blog_target(query) and any(term in lowered for term in _HUGO_PUBLISH_HINT_TERMS):
+    if has_hugo_blog_target(query) and any(
+        _term_is_active(query, term) for term in ("发到", "发布", "部署", "上线", "投稿", "同步")
+    ):
         return HUGO_INTENT_EXECUTE_PUBLISH
     if re.search(r"/Users/[^\n\r`'\"]+?\.md", query) and any(
         term in lowered for term in (*_HUGO_BLOG_TARGET_TERMS, "发布", "部署", "上线", "文章", "笔记")

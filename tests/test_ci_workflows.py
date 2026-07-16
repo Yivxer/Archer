@@ -17,6 +17,7 @@ def test_pr_ci_is_deterministic_and_never_runs_real_model_journeys():
     assert "ARCHER_API_KEY" not in source
     assert "DEEPSEEK_API_KEY" not in source
     assert "tests/test_ci_workflows.py" in source
+    assert "tests/test_workflow_evals.py" in source
 
 
 @pytest.mark.contract

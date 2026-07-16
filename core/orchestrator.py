@@ -160,6 +160,10 @@ _SIDE_EFFECT_KEYWORDS = (
     "发布",
     "部署",
     "上线",
+    "删除",
+    "下架",
+    "移除",
+    "撤回",
     "shell",
     "git",
 )
@@ -189,6 +193,25 @@ def keyword_is_negated(text: str, keyword: str, *, window: int = 8) -> bool:
 def has_actionable_side_effect(text: str) -> bool:
     """Detect side-effect intent while ignoring negated requests like「不要发布」."""
     if _is_readonly_writing_feedback_turn(text):
+        return False
+    capability_question = bool(re.search(
+        r"(?:(?:能不能|能否|是否|可以|支持|怎么|如何).{0,12}"
+        r"(?:写入|保存|修改|生成|发布|部署|上线|删除|下架|移除|撤回|shell|git)|"
+        r"(?:写入|保存|修改|生成|发布|部署|上线|删除|下架|移除|撤回|shell|git).{0,8}"
+        r"(?:吗|么|？|\?|可以吗|支持吗|怎么|如何))",
+        text,
+        re.IGNORECASE,
+    ))
+    has_command = bool(re.search(
+        r"(?:帮我|请|麻烦|直接|立刻|马上|把|将).{0,16}(?:发布|部署|上线|删除|下架|移除|撤回)",
+        text,
+        re.IGNORECASE,
+    ))
+    if capability_question and not has_command:
+        return False
+    if re.search(r"(?:发布|部署|上传|上线)了", text) and any(
+        term in text for term in ("看看", "如何", "怎么样", "评价", "建议", "分析", "优化", "调整")
+    ):
         return False
     if re.search(
         r"(?:帮我|请|并|然后|再|直接|把|将).{0,12}更新.{0,12}obsidian",

@@ -1,0 +1,188 @@
+{
+  "context.conservative_skip": {
+    "core_prompt_sha256": "e12f3c9dae10c12d712f2ed9dafeda81d3f135ab09ce99b732b431d035f3141c",
+    "event_statuses": [
+      "complete"
+    ],
+    "message_roles": [
+      "user"
+    ],
+    "retrieval_called": false,
+    "retrieval_query": "",
+    "system_messages": []
+  },
+  "context.empty_result": {
+    "core_prompt_sha256": "e12f3c9dae10c12d712f2ed9dafeda81d3f135ab09ce99b732b431d035f3141c",
+    "event_statuses": [
+      "running",
+      "complete"
+    ],
+    "message_roles": [
+      "user"
+    ],
+    "retrieval_called": true,
+    "retrieval_query": "Archer 下一步是什么",
+    "system_messages": []
+  },
+  "context.full_followup": {
+    "core_prompt_sha256": "e12f3c9dae10c12d712f2ed9dafeda81d3f135ab09ce99b732b431d035f3141c",
+    "event_statuses": [
+      "running",
+      "complete"
+    ],
+    "message_roles": [
+      "system",
+      "user"
+    ],
+    "retrieval_called": true,
+    "retrieval_query": "我们之前讨论过 Archer 的配置迁移 接着说",
+    "system_messages": [
+      "以下是 Archer 本地记忆检索结果。只在明显相关时使用；不要主动逐条展示记忆内容，也不要声称已经展示全部记忆。\n\nfixture memory"
+    ]
+  },
+  "context.off": {
+    "core_prompt_sha256": "e12f3c9dae10c12d712f2ed9dafeda81d3f135ab09ce99b732b431d035f3141c",
+    "event_statuses": [
+      "complete"
+    ],
+    "message_roles": [
+      "user"
+    ],
+    "retrieval_called": false,
+    "retrieval_query": "",
+    "system_messages": []
+  },
+  "hugo.capability": {
+    "hugo_intent": "ask_capability",
+    "needs_job": false,
+    "needs_tools": false,
+    "side_effect_level": "none",
+    "wants_publish_workflow": false
+  },
+  "hugo.delete": {
+    "hugo_intent": "delete_or_unpublish",
+    "needs_job": false,
+    "needs_tools": true,
+    "side_effect_level": "approval_required",
+    "wants_publish_workflow": true
+  },
+  "hugo.negated": {
+    "hugo_intent": "none",
+    "needs_job": false,
+    "needs_tools": true,
+    "side_effect_level": "none",
+    "wants_publish_workflow": false
+  },
+  "hugo.publish": {
+    "hugo_intent": "execute_publish",
+    "needs_job": false,
+    "needs_tools": true,
+    "side_effect_level": "approval_required",
+    "wants_publish_workflow": true
+  },
+  "hugo.review": {
+    "hugo_intent": "content_review",
+    "needs_job": false,
+    "needs_tools": false,
+    "side_effect_level": "none",
+    "wants_publish_workflow": false
+  },
+  "intent.decision": {
+    "intent": "decision",
+    "needs_memory": true,
+    "needs_project": false,
+    "needs_soul": true,
+    "needs_tools": false,
+    "source": "rules"
+  },
+  "intent.emotional": {
+    "intent": "emotional",
+    "needs_memory": false,
+    "needs_project": false,
+    "needs_soul": true,
+    "needs_tools": false,
+    "source": "rules"
+  },
+  "intent.followup": {
+    "intent": "project",
+    "needs_memory": true,
+    "needs_project": true,
+    "needs_soul": false,
+    "needs_tools": true,
+    "source": "inherit"
+  },
+  "intent.greeting": {
+    "intent": "chat",
+    "needs_memory": false,
+    "needs_project": false,
+    "needs_soul": false,
+    "needs_tools": false,
+    "source": "rules"
+  },
+  "intent.project": {
+    "intent": "project",
+    "needs_memory": true,
+    "needs_project": true,
+    "needs_soul": false,
+    "needs_tools": true,
+    "source": "rules"
+  },
+  "tools.github": {
+    "filtered_skills": [
+      "github_ops"
+    ],
+    "obsidian_preview": false,
+    "obsidian_write": false,
+    "preflight_tools": [
+      "github_ops"
+    ],
+    "raw_selected": [
+      "github_ops"
+    ]
+  },
+  "tools.hugo_capability": {
+    "filtered_skills": [],
+    "obsidian_preview": false,
+    "obsidian_write": false,
+    "preflight_tools": [],
+    "raw_selected": [
+      "hugo_blog"
+    ]
+  },
+  "tools.hugo_publish": {
+    "filtered_skills": [
+      "hugo_blog"
+    ],
+    "obsidian_preview": false,
+    "obsidian_write": false,
+    "preflight_tools": [],
+    "raw_selected": [
+      "file_ops",
+      "hugo_blog"
+    ]
+  },
+  "tools.shell": {
+    "filtered_skills": [
+      "shell"
+    ],
+    "obsidian_preview": false,
+    "obsidian_write": false,
+    "preflight_tools": [
+      "shell"
+    ],
+    "raw_selected": [
+      "shell"
+    ]
+  },
+  "tools.writing": {
+    "filtered_skills": [],
+    "obsidian_preview": false,
+    "obsidian_write": false,
+    "preflight_tools": [],
+    "raw_selected": [
+      "file_ops",
+      "obsidian_write",
+      "web_search"
+    ]
+  }
+}

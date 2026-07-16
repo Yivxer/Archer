@@ -1,0 +1,24 @@
+[
+  {"id":"intent.greeting","domain":"intent","query":"你好，今天过得怎么样？"},
+  {"id":"intent.decision","domain":"intent","query":"我该辞职还是继续留下？帮我分析这个选择"},
+  {"id":"intent.project","domain":"intent","query":"继续推进 Archer 的配置迁移项目"},
+  {"id":"intent.emotional","domain":"intent","query":"我最近很焦虑，总觉得自己做不好"},
+  {"id":"intent.followup","domain":"intent","query":"那接下来呢？","history":[{"role":"user","content":"帮我规划 Archer 下一阶段的开发任务"}]},
+
+  {"id":"tools.shell","domain":"tool_selection","query":"执行 ls -la","skills":["shell","github_ops"],"intent":"task","needs_tools":true},
+  {"id":"tools.github","domain":"tool_selection","query":"列出 GitHub issue","skills":["github_ops","web_search"],"intent":"task","needs_tools":true},
+  {"id":"tools.writing","domain":"tool_selection","query":"帮我分析一下这篇文章的结构","skills":["file_ops","obsidian_write","web_search"],"intent":"reflection","needs_tools":false},
+  {"id":"tools.hugo_capability","domain":"tool_selection","query":"枫弋札记可以部署图片吗？","skills":["hugo_blog","web_search"],"intent":"chat","needs_tools":true},
+  {"id":"tools.hugo_publish","domain":"tool_selection","query":"把 /Users/demo/文章.md 发布到枫弋札记","skills":["hugo_blog","file_ops","obsidian_write"],"intent":"task","needs_tools":true},
+
+  {"id":"context.conservative_skip","domain":"context","query":"你好","history":[],"intent":"chat","needs_memory":false,"memory_mode":"conservative","has_retrieval":true},
+  {"id":"context.full_followup","domain":"context","query":"接着说","history":[{"role":"user","content":"我们之前讨论过 Archer 的配置迁移"}],"intent":"project","needs_memory":true,"memory_mode":"full","has_retrieval":true},
+  {"id":"context.off","domain":"context","query":"回忆一下之前的决定","history":[],"intent":"decision","needs_memory":true,"memory_mode":"off","has_retrieval":true},
+  {"id":"context.empty_result","domain":"context","query":"Archer 下一步是什么","history":[],"intent":"project","needs_memory":true,"memory_mode":"full","has_retrieval":false},
+
+  {"id":"hugo.capability","domain":"hugo_side_effect","query":"现在可以部署博客了吗？"},
+  {"id":"hugo.review","domain":"hugo_side_effect","query":"我让 Codex 部署了这篇文章，你看看内容写得如何"},
+  {"id":"hugo.publish","domain":"hugo_side_effect","query":"把 /Users/demo/文章.md 发布到枫弋札记"},
+  {"id":"hugo.negated","domain":"hugo_side_effect","query":"先不要发布到枫弋札记，只分析内容"},
+  {"id":"hugo.delete","domain":"hugo_side_effect","query":"把枫弋札记里的测试文章删除"}
+]

@@ -43,6 +43,7 @@ jobs:
             tests/test_p0_skill_wrapping.py \
             tests/test_thread_store.py \
             tests/test_ci_workflows.py \
+            tests/test_workflow_evals.py \
             tests/test_desktop_contract.py \
             tests/test_journey_smoke_script.py \
             tests/test_desktop_api.py::TestDesktopSessions \
