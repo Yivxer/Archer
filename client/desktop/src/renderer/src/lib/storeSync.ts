@@ -11,7 +11,7 @@
  * 契约：docs/api-contract.md §「L3 领域 store 契约」
  */
 
-import type { ArcherAdapter } from '../types'
+import type { ArcherAdapter, MemoryItem } from '../types'
 import { mergeMemoryItems } from './memoryStore'
 import { mergeSoulFiles, mergeSoulProfile } from './soulStore'
 import { mergeSessionItems } from './sessionStore'
@@ -40,4 +40,26 @@ export function syncStoresFromAdapter(adapter: ArcherAdapter): void {
 
   // L3.8 threadStore
   mergeThreadItems(adapter.threads)
+}
+
+/**
+ * 把 memoryStore 已确认的领域状态投影回仍由 App 持有的兼容 adapter。
+ *
+ * 这是 storeSync 从“全量快照注入”迁往“领域事件投影”的第一步：只更新
+ * memory 及其派生计数，其他领域保持引用不变，避免一次 memory action
+ * 重新拉取并覆盖整份 loadLocalArcher 快照。
+ */
+export function projectMemoryStoreToAdapter(
+  adapter: ArcherAdapter,
+  memory: MemoryItem[],
+): ArcherAdapter {
+  return {
+    ...adapter,
+    memory,
+    status: {
+      ...adapter.status,
+      memoryCount: memory.filter((item) => item.status === 'confirmed').length,
+      pendingMemoryCount: memory.filter((item) => item.status === 'pending').length,
+    },
+  }
 }

@@ -18,7 +18,8 @@ import { connectionStatusLabel, expertShortLabel, modelProfileShortLabel } from 
 import { mergeInitiativeShadowEvent } from './lib/initiativeShadow'
 import { mergeSseInitiativeEvent } from './lib/initiativeStore'
 import { onStoreEvent } from './lib/storeEventBus'
-import { syncStoresFromAdapter } from './lib/storeSync'
+import { projectMemoryStoreToAdapter, syncStoresFromAdapter } from './lib/storeSync'
+import { getMemoryStoreState } from './lib/memoryStore'
 import { upsertThreadFromSave } from './lib/threadStore'
 import { deleteSession, getSessionStoreState, loadSessionDetail } from './lib/sessionStore'
 import { createOfflineLocalShell, syncBrainData, wasBrainEverLinked } from './lib/brainConnection'
@@ -392,11 +393,14 @@ function App() {
     return () => clearInterval(timer)
   }, [apiState])
 
-  // L3.9: 订阅 storeEventBus，store action 成功后 silent refresh（影子真值同步）
+  // L3.9: 领域事件优先做定向投影；尚未迁移的事件保留 silent refresh。
   React.useEffect(() => {
     const unsubs: Array<() => void> = []
+    unsubs.push(onStoreEvent('memory:resolved', () => {
+      const memory = getMemoryStoreState().items
+      setData((current) => projectMemoryStoreToAdapter(current, memory))
+    }))
     const refreshEvents = [
-      'memory:resolved',
       'memory:batch-resolved',
       'memory:evolved',
       'soul:imported',

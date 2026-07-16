@@ -7,7 +7,7 @@
 
 import { describe, expect, it, beforeEach } from 'vitest'
 import { mockArcher } from '../../adapters/mockArcher'
-import { syncStoresFromAdapter } from '../storeSync'
+import { projectMemoryStoreToAdapter, syncStoresFromAdapter } from '../storeSync'
 import { getMemoryStoreState, resetMemoryStore } from '../memoryStore'
 import { getSoulStoreState, resetSoulStore } from '../soulStore'
 import { getSessionStoreState, resetSessionStore } from '../sessionStore'
@@ -72,5 +72,19 @@ describe('storeSync — L3.9a syncStoresFromAdapter', () => {
   it('sync 后 threadStore.currentThreadId 仍为 null（未设置活跃 thread）', () => {
     syncStoresFromAdapter(mockArcher)
     expect(getThreadStoreState().currentThreadId).toBeNull()
+  })
+
+  it('memory 领域事件只投影 memory 与计数，不替换其他 adapter 领域', () => {
+    const memory = mockArcher.memory.slice(1)
+
+    const next = projectMemoryStoreToAdapter(mockArcher, memory)
+
+    expect(next).not.toBe(mockArcher)
+    expect(next.memory).toBe(memory)
+    expect(next.status.memoryCount).toBe(memory.filter((item) => item.status === 'confirmed').length)
+    expect(next.status.pendingMemoryCount).toBe(memory.filter((item) => item.status === 'pending').length)
+    expect(next.sessions).toBe(mockArcher.sessions)
+    expect(next.soulProfile).toBe(mockArcher.soulProfile)
+    expect(next.initiativeShadow).toBe(mockArcher.initiativeShadow)
   })
 })
