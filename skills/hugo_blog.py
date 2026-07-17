@@ -181,7 +181,7 @@ def _safe_slug(text: str) -> str:
         slug = _slugify(slug)
         slug = re.sub(r"[^a-z0-9-]", "", slug)
     slug = re.sub(r"-+", "-", slug).strip("-")
-    return slug[:80] or "untitled"
+    return slug[:80].rstrip("-") or "untitled"
 
 
 def _post_path(filename: str) -> Path:

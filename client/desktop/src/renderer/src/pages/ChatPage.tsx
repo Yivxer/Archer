@@ -884,8 +884,8 @@ export function ChatPage({
       const notice = result.executed
         ? (result.output?.trim() || result.message)
         : decision === 'denied' ? (result.message || '已取消，未执行。') : `未执行：${result.message}`
-      setToolNotice(notice)
       if (pendingEvent?.name === 'hugo_blog') {
+        setToolNotice('')
         const followUp = result.executed
           ? (result.output?.trim() || result.message || '枫弋札记部署已完成。')
           : decision === 'denied' ? '已取消本次枫弋札记操作，未执行部署。' : `部署未完成：${result.message}`
@@ -893,13 +893,19 @@ export function ChatPage({
           ...current,
           { id: current.length + 1, role: 'assistant', text: followUp },
         ])
+      } else {
+        setToolNotice(notice)
       }
     } catch (error) {
       setToolNotice(error instanceof Error ? error.message : '审批失败')
     }
   }
 
-  const visibleToolEvents = toolEvents.filter((event) => !event.id.startsWith('mock-') && !isHiddenToolEvent(event.name))
+  const visibleToolEvents = toolEvents.filter((event) => (
+    !event.id.startsWith('mock-')
+    && !isHiddenToolEvent(event.name)
+    && !isCompletedHugoToolEvent(event)
+  ))
   const hasRuntimeActivity = runtimePlans.length > 0 || runtimeJobs.length > 0 || runtimeState.pendingApprovals.length > 0 || visibleToolEvents.length > 0
   const isHome = messages.length === 0 && !isTyping && !isSending && !activeSession && !hasRuntimeActivity
   const displayToolEvents = React.useMemo(() => (
@@ -907,6 +913,7 @@ export function ChatPage({
       .filter((event) => !isHiddenToolEvent(event.name))
       .map((event) => toolEventWithRuntimeResult(event, runtimeState.toolResults[event.id]))
       .filter((event) => !event.requiresApproval)
+      .filter((event) => !isCompletedHugoToolEvent(event))
   ), [toolEvents, runtimeState.toolResults])
   const approvalToolEvents = React.useMemo(() => {
     const merged = new Map<string, ToolEvent>()
@@ -1863,6 +1870,10 @@ function mergeWorkspaceJobs(runtimeJobs: JobEvent[], workspaceJobs: BackgroundJo
 /** Convert a runtime ToolRequestEvent to display-friendly ToolEvent for ToolEventCard rendering */
 function isHiddenToolEvent(name: string): boolean {
   return ['obsidian_search', 'obsidian_read', 'memory.retrieve', 'memory-retrieve', 'file.reference'].includes(name)
+}
+
+function isCompletedHugoToolEvent(event: ToolEvent): boolean {
+  return event.name === 'hugo_blog' && event.status === 'complete'
 }
 
 function toolEventFromRuntimeRequest(req: import('../../../agent').ToolRequestEvent): ToolEvent {

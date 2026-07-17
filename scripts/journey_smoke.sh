@@ -311,17 +311,27 @@ journey_5() {
     return 3
   fi
 
-  local sse
-  sse="$(curl_stream /chat/stream "{\"messages\":[{\"role\":\"user\",\"content\":\"发布一篇测试博客 journey5-test-${TS}\"}],\"session_id\":\"journey5-${TS}\"}" 2>&1)" || true
+  # 只验证生产路由，不执行真实发布。Journey smoke 不能往公开博客写测试文章。
+  local route
+  route="$(cd "$ROOT" && "${PYTHON:-python3}" -c '
+from core.desktop_tool_router import plan_desktop_turn
+plan = plan_desktop_turn(
+    "把这篇文章发布到枫弋札记，分类是阅读",
+    all_skills={"hugo_blog": object()},
+    intent="task",
+    needs_tools=True,
+    llm_fallback=False,
+)
+print(",".join(sorted(plan.filtered_skills)))
+' 2>&1)" || true
 
-  if echo "$sse" | grep -q "hugo_blog"; then
-    ok "hugo_blog 工具被触发"
+  if [[ "$route" == "hugo_blog" ]]; then
+    ok "生产路由确定性选择 hugo_blog"
   else
-    fail "hugo_blog 未被触发"
-    replay_hint "$(echo "$sse" | extract_trace_id)"
+    fail "生产路由未唯一选择 hugo_blog: ${route}"
     return 2
   fi
-  ok "Journey 5 基础检查通过（完整发布需手动 approval + HTTP 200 验证）"
+  ok "Journey 5 通过（未产生公开副作用）"
   return 0
 }
 
@@ -329,31 +339,29 @@ journey_5() {
 journey_6() {
   echo ""
   echo "── Journey 6: 工具确认 → Trace 可查 ─────────────"
-  # 用纯闲聊 prompt 避免触发工具 approval 卡 semaphore
-  # 验证 trace_id 全程贯通 + 流正常结束（工具 approval 需用户在 UI 确认，不在此 journey 验证）
-  local sse
-  sse="$(curl_stream /chat/stream "{\"messages\":[{\"role\":\"user\",\"content\":\"journey6 简短回复一下\"}],\"session_id\":\"journey6-${TS}\"}" 2>&1)" || true
+  # 直接调用生产 approval handler，避开模型延迟和 chat semaphore；deny 保证零副作用。
+  local contract
+  contract="$(cd "$ROOT" && "${PYTHON:-python3}" -c "
+import json
+from terminal.api._config import PENDING_TOOL_DRAFTS
+from terminal.api._routes import _tool_approval
+event_id = 'journey6-${TS}'
+trace_id = 'trace-journey6-${TS}'
+PENDING_TOOL_DRAFTS[event_id] = {
+    'kind': 'tool_request',
+    'eventId': event_id,
+    'traceId': trace_id,
+    'skillName': 'obsidian_write',
+    'args': {'path': 'journey6-denied-${TS}.md', 'content': '不应落盘'},
+}
+result = _tool_approval({'eventId': event_id, 'decision': 'denied'})
+print(json.dumps(result, ensure_ascii=False))
+" 2>&1)" || true
 
-  local trace_id
-  trace_id="$(echo "$sse" | extract_trace_id)"
-  if [[ -n "$trace_id" ]]; then
-    ok "trace_id 存在: ${trace_id}"
+  if echo "$contract" | python3 -c "import sys,json; d=json.load(sys.stdin); assert d['decision']=='denied'; assert d['executed'] is False; assert d['traceId']=='trace-journey6-${TS}'" 2>/dev/null; then
+    ok "真实 approval deny 回执保持同一 Trace（零副作用）"
   else
-    fail "无 trace_id"
-    return 2
-  fi
-
-  if echo "$sse" | grep -q "tool_event"; then
-    ok "tool 事件存在"
-  else
-    warn "无 tool 事件（闲聊不触发工具，符合预期）"
-  fi
-
-  if echo "$sse" | grep -qE '"type":[[:space:]]*"(token|done)"'; then
-    ok "流正常结束"
-  else
-    fail "流未正常结束"
-    replay_hint "$trace_id"
+    fail "approval/Trace 契约断裂: ${contract}"
     return 2
   fi
   return 0
@@ -365,9 +373,21 @@ journey_7() {
   echo "── Journey 7: 连续话题 smoke ────────────────────"
   local sid="journey7-${TS}"
 
+  local history='[]'
   for i in 1 2 3; do
+    history="$(HISTORY_JSON="$history" TURN="$i" python3 -c '
+import json, os
+items = json.loads(os.environ["HISTORY_JSON"])
+items.append({"role": "user", "content": f"继续同一个话题（第{os.environ["TURN"]}轮）"})
+print(json.dumps(items, ensure_ascii=False))
+')"
+    local body
+    body="$(HISTORY_JSON="$history" SID="$sid" python3 -c '
+import json, os
+print(json.dumps({"messages": json.loads(os.environ["HISTORY_JSON"]), "session_id": os.environ["SID"]}, ensure_ascii=False))
+')"
     local sse
-    sse="$(curl_stream /chat/stream "{\"messages\":[{\"role\":\"user\",\"content\":\"继续话题 (第${i}轮)\"}],\"session_id\":\"${sid}\"}" 2>&1)" || true
+    sse="$(curl_stream /chat/stream "$body" 2>&1)" || true
     if echo "$sse" | grep -qE '"type":[[:space:]]*"(token|done)"'; then
       ok "第 ${i} 轮有回复"
     else
@@ -375,16 +395,25 @@ journey_7() {
       replay_hint "$(echo "$sse" | extract_trace_id)"
       return 2
     fi
+    history="$(HISTORY_JSON="$history" TURN="$i" python3 -c '
+import json, os
+items = json.loads(os.environ["HISTORY_JSON"])
+items.append({"role": "assistant", "content": f"第{os.environ["TURN"]}轮已完成"})
+print(json.dumps(items, ensure_ascii=False))
+')"
   done
 
-  # chat/stream 不自动保存 session，session 保存能力已在 journey 1 验证
-  # 这里只验证连续对话流畅性 + threads 列表可读
-  local threads
-  threads="$(curl_api GET /threads 2>&1)" || true
-  local thread_count
-  thread_count="$(echo "$threads" | python3 -c "import sys,json; d=json.load(sys.stdin); print(len(d.get('threads',[])))" 2>/dev/null || echo '?')"
-  info "当前 threads 数量: ${thread_count}"
-  ok "Journey 7 基础检查通过（连续 3 轮对话流畅）"
+  local thread thread_id detail
+  thread="$(curl_api POST /threads "{\"messages\":${history},\"title\":\"Journey 7 history ${TS}\"}" 2>&1)" || true
+  thread_id="$(echo "$thread" | python3 -c "import sys,json; print(json.load(sys.stdin).get('id',''))" 2>/dev/null || echo '')"
+  detail="$(curl_api GET "/threads/${thread_id}" 2>&1)" || true
+  if [[ -n "$thread_id" ]] && echo "$detail" | grep -q "Journey 7 history ${TS}"; then
+    ok "ConversationThread 由完整 3 轮历史创建并可恢复"
+  else
+    fail "ConversationThread 历史契约失败: ${thread} ${detail}"
+    return 2
+  fi
+  ok "Journey 7 通过（每轮请求均携带累积历史）"
   return 0
 }
 

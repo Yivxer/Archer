@@ -70,3 +70,38 @@ raise SystemExit(0 if "--smoke" in sys.argv else 2)
 
     assert result.returncode == 0
     assert "终端 smoke 通过" in result.stdout
+
+
+def _journey_body(case: int) -> str:
+    source = (Path(__file__).resolve().parents[1] / "scripts/journey_smoke.sh").read_text(encoding="utf-8")
+    start = source.index(f"journey_{case}()")
+    next_case = source.find(f"journey_{case + 1}()", start)
+    return source[start:] if next_case == -1 else source[start:next_case]
+
+
+def test_journey_five_checks_production_route_without_publishing():
+    body = _journey_body(5)
+
+    assert "plan_desktop_turn" in body
+    assert '[[ "$route" == "hugo_blog" ]]' in body
+    assert "curl_stream /chat/stream" not in body
+
+
+def test_journey_six_denies_real_approval_and_requires_same_trace():
+    body = _journey_body(6)
+
+    assert "PENDING_TOOL_DRAFTS" in body
+    assert "from terminal.api._routes import _tool_approval" in body
+    assert "'decision': 'denied'" in body
+    assert "d['executed'] is False" in body
+    assert "d['traceId']=='trace-journey6-${TS}'" in body
+    assert "curl_stream /chat/stream" not in body
+
+
+def test_journey_seven_sends_accumulated_history_and_creates_thread():
+    body = _journey_body(7)
+
+    assert 'local history=\'[]\'' in body
+    assert '"messages": json.loads(os.environ["HISTORY_JSON"])' in body
+    assert "POST /threads" in body
+    assert "完整 3 轮历史" in body

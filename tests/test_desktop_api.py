@@ -45,6 +45,30 @@ def _reset_background_jobs(routes, path):
     jobs.BACKGROUND_JOBS_PATH = path
 
 
+def _stub_direct_hugo_execution(monkeypatch):
+    calls = []
+
+    def fake_run(*, title, actions, summary_prefix=None):
+        calls.append({"title": title, "actions": actions, "summaryPrefix": summary_prefix})
+        args = actions[0][1]
+        return ([{
+            "type": "tool_event",
+            "toolEvent": {
+                "id": "hugo-direct-test",
+                "name": "hugo_blog",
+                "status": "complete",
+                "risk": "low",
+                "summary": "部署枫弋札记",
+                "detail": "部署成功，HTTP 200",
+                "requiresApproval": False,
+                "draft": {"workflow": "hugo_publish", "workflowArgs": args},
+            },
+        }], f"《{title}》已发布并验证 HTTP 200。")
+
+    monkeypatch.setattr("terminal.api.hugo_workflow._run_hugo_publish_workflow", fake_run)
+    return calls
+
+
 def test_thread_context_is_injected_as_system_message():
     from terminal.api._config import _clean_chat_messages, _inject_thread_context
 
@@ -1086,6 +1110,7 @@ class TestApiSkillRouting:
         note.write_text("# 测试发布\n\n正文内容。", encoding="utf-8")
 
         monkeypatch.setattr(tools, "_select_api_skills", lambda _query: {"hugo_blog": object()})
+        calls = _stub_direct_hugo_execution(monkeypatch)
 
         events = list(tools._iter_chat_chunks(
             [{"role": "user", "content": "把这篇发到枫弋札记"}],
@@ -1096,13 +1121,12 @@ class TestApiSkillRouting:
 
         hugo_events = [event["toolEvent"] for event in events if event.get("toolEvent", {}).get("name") == "hugo_blog"]
         assert len(hugo_events) == 1
-        assert hugo_events[0]["status"] == "waiting"
-        assert hugo_events[0]["requiresApproval"] is True
-        assert hugo_events[0]["draft"]["args"]["action"] == "publish"
-        assert hugo_events[0]["draft"]["args"]["title"] == "测试发布"
-        assert hugo_events[0]["draft"]["workIntent"]["action"] == "publish"
-        assert hugo_events[0]["draft"]["workIntent"]["verifyPlan"] == "发布后验证文章 URL 返回 HTTP 200"
-        assert any("已生成枫弋札记确认卡" in event.get("text", "") for event in events)
+        assert hugo_events[0]["status"] == "complete"
+        assert hugo_events[0]["requiresApproval"] is False
+        args = calls[0]["actions"][0][1]
+        assert args["action"] == "publish"
+        assert args["title"] == "测试发布"
+        assert not any("确认卡" in event.get("text", "") for event in events)
 
     def test_direct_hugo_delete_removes_post_and_deploys(self, monkeypatch, tmp_path):
         from terminal.api import _tools as tools
@@ -1137,6 +1161,7 @@ class TestApiSkillRouting:
         from terminal.api import _tools as tools
 
         monkeypatch.setattr(tools, "_select_api_skills", lambda _query: {"hugo_blog": object()})
+        calls = _stub_direct_hugo_execution(monkeypatch)
 
         with tempfile.TemporaryDirectory(prefix=".tmp-hugo-heartbeat-", dir=Path.cwd()) as root:
             note_dir = Path(root) / "Mobile Documents" / "iCloud~md~obsidian"
@@ -1152,10 +1177,11 @@ class TestApiSkillRouting:
 
         hugo_events = [event["toolEvent"] for event in events if event.get("toolEvent", {}).get("name") == "hugo_blog"]
         assert len(hugo_events) == 1
-        assert hugo_events[0]["draft"]["args"]["action"] == "publish"
-        assert hugo_events[0]["draft"]["args"]["title"] == "Archer 初衍的诞生日记·第一篇"
-        assert hugo_events[0]["draft"]["args"]["sourcePath"].endswith("Archer 初衍的诞生日记·第一篇.md")
-        assert hugo_events[0]["draft"]["workIntent"]["verifyPlan"] == "发布后验证文章 URL 返回 HTTP 200"
+        args = calls[0]["actions"][0][1]
+        assert hugo_events[0]["status"] == "complete"
+        assert args["action"] == "publish"
+        assert args["title"] == "Archer 初衍的诞生日记·第一篇"
+        assert args["sourcePath"].endswith("Archer 初衍的诞生日记·第一篇.md")
         assert events[-1] == {"type": "done", "done": True}
 
     def test_hugo_upload_path_routes_even_when_needs_tools_is_false(self, monkeypatch, tmp_path):
@@ -1186,6 +1212,7 @@ class TestApiSkillRouting:
                 memory_scope=[],
             ),
         )
+        calls = _stub_direct_hugo_execution(monkeypatch)
 
         with tempfile.TemporaryDirectory(prefix=".tmp-hugo-upload-", dir=Path.cwd()) as root:
             note_dir = Path(root) / "Mobile Documents" / "iCloud~md~obsidian"
@@ -1201,9 +1228,10 @@ class TestApiSkillRouting:
 
         hugo_events = [event["toolEvent"] for event in events if event.get("toolEvent", {}).get("name") == "hugo_blog"]
         assert len(hugo_events) == 1
-        assert hugo_events[0]["status"] == "waiting"
-        assert hugo_events[0]["draft"]["args"]["action"] == "publish"
-        assert hugo_events[0]["draft"]["args"]["sourcePath"] == str(note)
+        assert hugo_events[0]["status"] == "complete"
+        args = calls[0]["actions"][0][1]
+        assert args["action"] == "publish"
+        assert args["sourcePath"] == str(note)
         assert not any(event.get("toolEvent", {}).get("name") == "obsidian_write" for event in events)
 
     def test_desktop_tool_loop_normalizes_sdk_messages(self, monkeypatch):
@@ -1308,9 +1336,9 @@ class TestApiSkillRouting:
         note.write_text("# 测试发布\n\n正文内容。", encoding="utf-8")
 
         def fail_hugo_run(args):
-            raise AssertionError("hugo_blog.run should not execute before approval")
+            raise RuntimeError("simulated publish failure")
 
-        monkeypatch.setattr("skills.hugo_blog.run", fail_hugo_run)
+        monkeypatch.setattr("skills.hugo_blog.run_structured", fail_hugo_run)
         monkeypatch.setattr(tools, "_select_api_skills", lambda _query: {"hugo_blog": object()})
 
         events = list(tools._iter_chat_chunks(
@@ -1322,10 +1350,8 @@ class TestApiSkillRouting:
 
         hugo_events = [event["toolEvent"] for event in events if event.get("toolEvent", {}).get("name") == "hugo_blog"]
         assert len(hugo_events) == 1
-        assert hugo_events[0]["status"] == "waiting"
-        assert hugo_events[0]["draft"]["args"]["action"] == "publish"
-        assert hugo_events[0]["draft"]["workIntent"]["action"] == "publish"
-        assert not [event["failureHintEvent"] for event in events if event.get("type") == "failureHintEvent"]
+        assert hugo_events[0]["status"] == "blocked"
+        assert [event["failureHintEvent"] for event in events if event.get("type") == "failureHintEvent"]
         assert events[-1] == {"type": "done", "done": True}
 
     def test_hugo_followup_deploy_uses_conversation_frontmatter(self, monkeypatch, tmp_path):
@@ -1345,6 +1371,7 @@ class TestApiSkillRouting:
         )
 
         monkeypatch.setattr(tools, "_select_api_skills", lambda _query: {"hugo_blog": object()})
+        calls = _stub_direct_hugo_execution(monkeypatch)
 
         events = list(tools._iter_chat_chunks(
             [
@@ -1359,11 +1386,9 @@ class TestApiSkillRouting:
 
         hugo_events = [event["toolEvent"] for event in events if event.get("toolEvent", {}).get("name") == "hugo_blog"]
         assert len(hugo_events) == 1
-        assert hugo_events[0]["status"] == "waiting"
-        assert hugo_events[0]["draft"]["args"] == {"action": "deploy", "filename": f"{slug}.md"}
-        assert hugo_events[0]["draft"]["workIntent"]["action"] == "deploy"
-        assert hugo_events[0]["draft"]["workIntent"]["verifyPlan"] == "部署后验证文章 URL 返回 HTTP 200"
-        assert any("已生成枫弋札记确认卡" in event.get("text", "") for event in events)
+        assert hugo_events[0]["status"] == "complete"
+        assert calls[0]["actions"][0][1] == {"action": "deploy", "filename": f"{slug}.md"}
+        assert not any("确认卡" in event.get("text", "") for event in events)
 
     def test_hugo_new_approval_runs_deploy_after_create(self, monkeypatch):
         PENDING_TOOL_DRAFTS.clear()
@@ -1904,6 +1929,150 @@ class TestToolApproval:
         result = _tool_approval({"eventId": event_id, "decision": "approved"})
 
         assert result["traceId"] == "trace-approval-1"
+
+    def test_tool_request_denial_preserves_trace_id(self):
+        event_id = "tool-test-denied-trace"
+        PENDING_TOOL_DRAFTS[event_id] = {
+            "kind": "tool_request",
+            "eventId": event_id,
+            "traceId": "trace-denied-1",
+            "skillName": "safe_tool",
+            "args": {"value": "x"},
+        }
+
+        result = _tool_approval({"eventId": event_id, "decision": "denied"})
+
+        assert result["decision"] == "denied"
+        assert result["traceId"] == "trace-denied-1"
+
+    def test_tool_approval_records_sent_outbox_with_injected_runtime(self, tmp_path, monkeypatch):
+        from infrastructure.outbox import get_item
+        from core.runtime_context import create_runtime_context
+        from memory.migrations import run_migrations
+        from terminal.api import _routes as routes
+
+        db_path = tmp_path / "archer.db"
+        run_migrations(db_path)
+        context = create_runtime_context(db_path=db_path)
+        event_id = "tool-outbox-sent"
+        PENDING_TOOL_DRAFTS[event_id] = {
+            "kind": "tool_request", "eventId": event_id, "traceId": "trace-outbox",
+            "skillName": "safe_tool", "args": {"value": "x"},
+        }
+        monkeypatch.setattr(
+            routes, "_run_approved_draft",
+            lambda draft: __import__("terminal.api.tool_stage", fromlist=["ApprovalExecution"]).ApprovalExecution(
+                True, "done", "safe_tool 完成",
+            ),
+        )
+
+        status, result = routes.payload_post(
+            "/tool-approvals", {"eventId": event_id, "decision": "approved"}, context,
+        )
+
+        assert status == 200
+        assert result["executed"] is True
+        assert result["outbox"]["status"] == "sent"
+        assert get_item(db_path, result["outbox"]["id"])["result"]["traceId"] == "trace-outbox"
+
+    def test_tool_denial_records_cancelled_outbox_without_execution(self, tmp_path):
+        from core.runtime_context import create_runtime_context
+        from memory.migrations import run_migrations
+        from terminal.api import _routes as routes
+
+        db_path = tmp_path / "archer.db"
+        run_migrations(db_path)
+        context = create_runtime_context(db_path=db_path)
+        event_id = "tool-outbox-cancelled"
+        PENDING_TOOL_DRAFTS[event_id] = {
+            "kind": "tool_request", "eventId": event_id,
+            "skillName": "safe_tool", "args": {"value": "x"},
+        }
+
+        _, result = routes.payload_post(
+            "/tool-approvals", {"eventId": event_id, "decision": "denied"}, context,
+        )
+
+        assert result["executed"] is False
+        assert result["outbox"]["status"] == "cancelled"
+
+    def test_outbox_list_and_retry_failed_tool_delivery(self, tmp_path, monkeypatch):
+        from infrastructure.outbox import approve, claim_for_sending, enqueue, mark_failed
+        from core.runtime_context import create_runtime_context
+        from memory.migrations import run_migrations
+        from terminal.api import _routes as routes
+        from terminal.api.tool_stage import ApprovalExecution
+
+        db_path = tmp_path / "archer.db"
+        run_migrations(db_path)
+        context = create_runtime_context(db_path=db_path)
+        draft = {
+            "kind": "tool_request", "eventId": "retry-event", "traceId": "retry-trace",
+            "skillName": "safe_tool", "args": {"value": "x"},
+        }
+        item = enqueue(
+            db_path, kind="tool.execute", payload={"eventId": "retry-event", "draft": draft},
+            idempotency_key="tool-event:retry-event",
+        )
+        approve(db_path, item["id"])
+        claim_for_sending(db_path, item["id"])
+        mark_failed(db_path, item["id"], "network")
+        monkeypatch.setattr(
+            routes, "_run_approved_draft",
+            lambda stored: ApprovalExecution(True, "done", "retry complete"),
+        )
+
+        list_status, listed = routes.payload_get("/outbox?status=failed", context)
+        retry_status, result = routes.payload_post(f"/outbox/{item['id']}/retry", {}, context)
+
+        assert list_status == 200
+        assert [entry["id"] for entry in listed["items"]] == [item["id"]]
+        assert "payload" not in listed["items"][0]
+        assert "result" not in listed["items"][0]
+        assert retry_status == 200
+        assert result["executed"] is True
+        assert result["outbox"]["status"] == "sent"
+
+    def test_idempotent_tool_outbox_reuses_sent_result_after_cache_loss(self, tmp_path, monkeypatch):
+        from core.runtime_context import create_runtime_context
+        from memory.migrations import run_migrations
+        from terminal.api import _config, _routes as routes
+        from terminal.api.tool_stage import ApprovalExecution
+
+        db_path = tmp_path / "archer.db"
+        run_migrations(db_path)
+        context = create_runtime_context(db_path=db_path)
+        calls = []
+        monkeypatch.setattr(
+            routes, "_run_approved_draft",
+            lambda draft: calls.append(draft) or ApprovalExecution(True, "done", "write complete"),
+        )
+        first_id = "obsidian-idempotent-first"
+        PENDING_TOOL_DRAFTS[first_id] = {
+            "kind": "tool_request", "eventId": first_id, "traceId": "trace-first",
+            "skillName": "obsidian_write", "args": {"path": "safe.md", "content": "same"},
+        }
+        _, first = routes.payload_post(
+            "/tool-approvals", {"eventId": first_id, "decision": "approved"}, context,
+        )
+        _config.PENDING_TOOL_RESULTS.clear()
+        _config.PENDING_TOOL_FINGERPRINT_RESULTS.clear()
+        second_id = "obsidian-idempotent-second"
+        PENDING_TOOL_DRAFTS[second_id] = {
+            "kind": "tool_request", "eventId": second_id, "traceId": "trace-second",
+            "skillName": "obsidian_write", "args": {"path": "safe.md", "content": "same"},
+        }
+
+        _, second = routes.payload_post(
+            "/tool-approvals", {"eventId": second_id, "decision": "approved"}, context,
+        )
+
+        assert first["executed"] is True
+        assert len(calls) == 1
+        assert second["reused"] is True
+        assert second["eventId"] == second_id
+        assert second["traceId"] == "trace-second"
+        assert second["outbox"]["id"] == first["outbox"]["id"]
 
     def test_tool_request_approval_is_idempotent_for_duplicate_clicks(self, monkeypatch):
         from terminal.api import _config

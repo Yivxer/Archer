@@ -64,6 +64,24 @@ def test_tool_approval_cards_use_runtime_state_as_source_of_truth():
     assert "博客发布已执行" not in source
 
 
+def test_completed_hugo_tools_do_not_stay_in_chat_or_composer_notice():
+    source = CHAT_PAGE.read_text()
+
+    assert "isCompletedHugoToolEvent" in source
+    assert ".filter((event) => !isCompletedHugoToolEvent(event))" in source
+    assert "pendingEvent?.name === 'hugo_blog'" in source
+    assert "setToolNotice('')" in source
+
+
+def test_conversation_thread_followup_sends_accumulated_history():
+    source = CHAT_PAGE.read_text()
+
+    assert "const nextMessages = [...messages, userMessage]" in source
+    assert "const requestMessages = nextMessages.map" in source
+    assert "await streamLocalChat(\n        requestMessages," in source
+    assert "saveLocalSession([...requestMessages" in source
+
+
 def test_chat_styles_keep_conversation_chrome_quiet():
     css = CHAT_CSS.read_text()
 

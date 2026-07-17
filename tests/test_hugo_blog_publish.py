@@ -488,6 +488,15 @@ def test_safe_slug_chinese_to_pinyin():
     assert hugo_blog._safe_slug("爱不该成为ego的放大器") == "ai-bu-gai-cheng-wei-ego-de-fang-da-qi"
 
 
+def test_safe_slug_long_chinese_title_does_not_end_with_hyphen():
+    title = "健身的第一个谎言，就是告诉你只要坚持就能看到改变"
+
+    slug = hugo_blog._safe_slug(title)
+
+    assert len(slug) <= 80
+    assert not slug.endswith("-")
+
+
 def test_safe_slug_pure_ascii_unchanged():
     """纯 ASCII 英文/数字/连字符应直接保留。"""
     assert hugo_blog._safe_slug("from-claude-to-codex-cursor") == "from-claude-to-codex-cursor"

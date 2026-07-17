@@ -420,6 +420,14 @@ def _hugo_confirmation_result(
     verify_plan: str,
     rollback_plan: str,
 ) -> tuple[list[dict], str]:
+    # “发布 / 重新部署”已经由用户的明确指令授权，直接执行一次即可。
+    # 删除仍保留确认卡，避免不可逆操作被误触发。
+    if action in {"publish", "deploy"}:
+        return _run_hugo_publish_workflow(
+            title=title,
+            actions=[("deploy", args)],
+        )
+
     event_id = f"hugo-blog-{action}-{uuid4().hex[:8]}"
     work_intent = {
         "workflowName": "枫弋札记",
@@ -882,5 +890,4 @@ def _run_hugo_agent_turn(
                     break
 
     return messages, tool_events, final_text
-
 

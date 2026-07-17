@@ -40,6 +40,25 @@ def test_thread_store_creates_updates_and_appends_sessions(tmp_path):
     assert json.loads(path.read_text(encoding="utf-8"))[0]["id"] == thread["id"]
 
 
+def test_conversation_thread_summary_uses_first_and_latest_turn_from_full_history(tmp_path):
+    path = tmp_path / "conversation_threads.json"
+    history = [
+        {"role": "user", "content": "第一轮：讨论发布流程"},
+        {"role": "assistant", "content": "第一轮结论"},
+        {"role": "user", "content": "第二轮：继续检查审批"},
+        {"role": "assistant", "content": "第二轮结论"},
+        {"role": "user", "content": "第三轮：确认 Trace 是否闭环"},
+        {"role": "assistant", "content": "第三轮结论"},
+    ]
+
+    thread = create_thread(history, path=path)
+
+    assert thread["title"] == "第一轮：讨论发布流程"
+    assert "目标：第一轮：讨论发布流程" in thread["summary"]
+    assert "最近问题：第三轮：确认 Trace 是否闭环" in thread["summary"]
+    assert "最近结论：第三轮结论" in thread["summary"]
+
+
 def test_thread_store_normalizes_bad_records(tmp_path):
     path = tmp_path / "conversation_threads.json"
 
