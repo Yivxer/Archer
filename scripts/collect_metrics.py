@@ -145,11 +145,12 @@ def collect_trace_metrics(events: list[dict[str, Any]]) -> dict[str, Any]:
         if t["tool_requests"] > 0 and t["tool_requests"] > t["tool_results"]
     )
 
-    def distribution(field: str) -> dict[str, int]:
-        values = sorted(
-            int(event[field]) for event in performance_events
-            if isinstance(event.get(field), (int, float))
-        )
+    def distribution(field: str, *, nested: str = "") -> dict[str, int]:
+        raw_values = [
+            (event.get(nested) or {}).get(field) if nested else event.get(field)
+            for event in performance_events
+        ]
+        values = sorted(int(value) for value in raw_values if isinstance(value, (int, float)))
         if not values:
             return {"count": 0}
         count = len(values)
@@ -175,7 +176,26 @@ def collect_trace_metrics(events: list[dict[str, Any]]) -> dict[str, Any]:
             "tool_duration_ms": distribution("toolDurationMs"),
             "cpu_time_ms": distribution("cpuTimeMs"),
             "peak_rss_bytes": distribution("peakRssBytes"),
+            "prompt_tokens": distribution("promptTokens", nested="tokenUsage"),
+            "completion_tokens": distribution("completionTokens", nested="tokenUsage"),
+            "total_tokens": distribution("totalTokens", nested="tokenUsage"),
+            "history_estimated_tokens": distribution("historyEstimatedTokens", nested="tokenUsage"),
+            "compression_trigger_rate": _compression_trigger_rate(performance_events),
         },
+    }
+
+
+def _compression_trigger_rate(events: list[dict[str, Any]]) -> dict[str, int | str]:
+    values = [
+        bool(event["tokenUsage"].get("compressionTriggered"))
+        for event in events if isinstance(event.get("tokenUsage"), dict)
+        and "compressionTriggered" in event["tokenUsage"]
+    ]
+    triggered = sum(values)
+    return {
+        "count": len(values),
+        "triggered": triggered,
+        "rate": f"{triggered / len(values) * 100:.1f}%" if values else "n/a",
     }
 
 

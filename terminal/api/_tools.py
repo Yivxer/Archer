@@ -39,7 +39,7 @@ from terminal.api.turn_pipeline import (
     trim_model_messages as _trim_model_messages_for_context,
 )
 from terminal.api.tool_stage import summarize_api_tool_events
-from terminal.api.model_stream import has_fake_tool_markup as _has_fake_xml, iter_model_stream, iter_rescue_stream, model_trace_metadata, select_model_for_turn, split_safe_model_chunk as _split_safe_model_chunk, stream_failure_events
+from terminal.api.model_stream import has_fake_tool_markup as _has_fake_xml, iter_model_stream, iter_rescue_stream, model_trace_metadata, select_model_for_turn, split_safe_model_chunk as _split_safe_model_chunk, stream_failure_events, default_profile_fallback, token_context_snapshot
 from terminal.api.memory_extraction import _bg_extract_api, _do_extract_api
 from terminal.api.turn_receipt import empty_reply_events, memory_compaction_events
 
@@ -345,6 +345,8 @@ def _chat_reply_dependencies() -> ChatReplyDependencies:
         ),
         empty_events=empty_reply_events,
         model_trace=model_trace_metadata,
+        fallback_factory=default_profile_fallback,
+        token_context=token_context_snapshot,
     )
 
 
@@ -398,8 +400,6 @@ def _iter_simple_chat_path(
     4. 主模型 stream + heartbeat + DSML 救援 + fallback
     5. yield done
     """
-    from core.model_select import resolve_active_model
-
     _cfg = _load_config()
     from core.experts import active_expert, format_expert_block, active_expert_id
     _expert = active_expert(_cfg)
@@ -470,86 +470,20 @@ def _iter_simple_chat_path(
     )
     yield {"type": "_metric", "stage": "context_ready", "traceId": trace_id}
 
-    # 主模型 stream
-    active_model = select_model_for_turn(
-        _cfg, query=query, intent="chat", needs_tools=False,
-        file_refs=file_refs, resolver=resolve_active_model,
+    yield from iter_chat_reply_events(
+        model_messages,
+        query=query,
+        intent="chat",
+        file_refs=file_refs,
+        selected_tools={},
+        memory_scope=[],
+        trace_id=trace_id,
+        had_tool_activity=False,
+        runtime_context=runtime_context,
+        dependencies=_chat_reply_dependencies(),
+        heartbeat_seconds=MODEL_STREAM_HEARTBEAT_SECONDS,
+        total_timeout_seconds=MODEL_STREAM_TOTAL_TIMEOUT_SECONDS,
     )
-    yield {
-        "type": "runtimeContextEvent",
-        "runtimeContextEvent": {
-            "id": f"model-context-{uuid4().hex[:8]}",
-            "traceId": trace_id,
-            "task": "chat",
-            "phase": "model_stream",
-            "userIntent": "chat",
-            "lastResult": "model_selected",
-            "expectedNext": "stream_model_reply",
-            **model_trace_metadata(_cfg, active_model),
-        },
-    }
-    ai_reply_parts: list[str] = []
-    streamed_safe_text = ""
-    fake_markup_detected = False
-    try:
-        for item in iter_model_stream(
-            model_messages,
-            heartbeat_seconds=MODEL_STREAM_HEARTBEAT_SECONDS,
-            total_timeout_seconds=MODEL_STREAM_TOTAL_TIMEOUT_SECONDS,
-            model=active_model,
-        ):
-            if item.get("type") == "heartbeat":
-                yield {
-                    "type": "statusEvent",
-                    "statusEvent": {
-                        "id": f"model-wait-{uuid4().hex[:8]}",
-                        "intentType": "chat",
-                        "intentLabel": "模型响应中",
-                        "matchedSkills": [],
-                        "isBackground": False,
-                        "memoryScope": [],
-                        "traceId": trace_id,
-                    },
-                }
-                continue
-            chunk = str(item.get("text") or "")
-            if chunk:
-                ai_reply_parts.append(chunk)
-                if fake_markup_detected:
-                    continue
-                streamed_safe_text, safe_chunk, detected = _split_safe_model_chunk(streamed_safe_text, chunk)
-                if safe_chunk:
-                    yield {"type": "token", "text": safe_chunk}
-                if detected:
-                    fake_markup_detected = True
-    except Exception as stream_exc:
-        yield from stream_failure_events(stream_exc, trace_id=trace_id, hint_factory=_failure_hint_event)
-        return
-    ai_reply = "".join(ai_reply_parts)
-
-    # DSML / 伪 XML 救援
-    if _has_fake_xml(ai_reply):
-        for item in iter_rescue_stream(
-            model_messages, ai_reply, model=active_model,
-            heartbeat_seconds=MODEL_STREAM_HEARTBEAT_SECONDS,
-            total_timeout_seconds=MODEL_STREAM_TOTAL_TIMEOUT_SECONDS,
-        ):
-            if item.get("type") == "chunk":
-                yield {"type": "token", "text": item["text"]}
-            elif item.get("type") == "done" and item.get("text"):
-                ai_reply = str(item["text"])
-
-    # B1.1: 模型无回复兜底
-    if not ai_reply.strip():
-        yield {"type": "token", "text": "模型没有返回内容，请重试或检查诊断。"}
-        yield {
-            "type": "failureHintEvent",
-            "failureHintEvent": _failure_hint_event(
-                RuntimeError("model_empty_response"),
-                stage="model_stream",
-                trace_id=trace_id,
-            ),
-        }
 
     yield {"type": "done", "done": True}
 

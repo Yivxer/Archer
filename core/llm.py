@@ -5,7 +5,7 @@ from openai.types.chat import ChatCompletionMessage
 from typing import Generator
 
 from core.config_contract import load_config_file
-from core.model_profiles import cfg_with_active_api
+from core.model_profiles import cfg_with_active_api, model_profiles
 from core.observability import trace_span
 from core.provider_breaker import is_provider_connection_error, record_failure, record_success
 from core.token_usage import get_last_call_usage, get_session_usage, record_call_usage, reset_session_usage
@@ -117,6 +117,26 @@ def _get_client() -> tuple[OpenAI, dict]:
     return _client, cfg
 
 
+def _profile_client(profile_id: str) -> tuple[OpenAI, dict]:
+    """Build an isolated client without changing the persisted active profile."""
+    raw = _apply_env_overrides(load_config_file(_CONFIG_PATH))
+    profile = dict(model_profiles(raw).get(profile_id) or {})
+    profile["active_profile"] = profile_id
+    cfg = dict(raw)
+    cfg["api"] = profile
+    api_key = str(profile.get("api_key") or "")
+    base_url = str(profile.get("base_url") or "")
+    model = str(profile.get("model") or "")
+    if not api_key or not model:
+        raise ValueError(f"模型配置 '{profile_id}' 不完整，无法作为回退档位")
+    return OpenAI(
+        api_key=api_key,
+        base_url=base_url,
+        timeout=_api_timeout(cfg),
+        max_retries=_api_max_retries(cfg),
+    ), cfg
+
+
 def _connection_hint(base_url: str, err: Exception) -> RuntimeError:
     cause = getattr(err, "__cause__", None)
     cause_text = str(cause or err)
@@ -170,14 +190,15 @@ def _record_provider_success(cfg: dict) -> None:
         pass
 
 
-def stream_chat(
+def _stream_chat_with_client(
+    client: OpenAI,
+    cfg: dict,
     messages: list[dict],
     model: str = "",
     *,
     track_usage: bool = True,
 ) -> Generator[str, None, None]:
-    """流式输出，无 function calling。同时捕获 token 用量到 session state。"""
-    client, cfg = _get_client()
+    """Shared streaming implementation for active and isolated profile clients."""
     m = model or cfg["api"]["model"]
     base_url = cfg["api"]["base_url"]
 
@@ -232,6 +253,33 @@ def stream_chat(
             # B6.1: 流式正常完成 → 记录成功，清零熔断计数
             if _stream_completed:
                 _record_provider_success(cfg)
+
+
+def stream_chat(
+    messages: list[dict],
+    model: str = "",
+    *,
+    track_usage: bool = True,
+) -> Generator[str, None, None]:
+    """流式输出，无 function calling。同时捕获 token 用量到 session state。"""
+    client, cfg = _get_client()
+    yield from _stream_chat_with_client(
+        client, cfg, messages, model=model, track_usage=track_usage,
+    )
+
+
+def stream_chat_for_profile(
+    messages: list[dict],
+    *,
+    profile_id: str,
+    model: str = "",
+    track_usage: bool = True,
+) -> Generator[str, None, None]:
+    """Stream with one profile without mutating Archer's active profile."""
+    client, cfg = _profile_client(profile_id)
+    yield from _stream_chat_with_client(
+        client, cfg, messages, model=model, track_usage=track_usage,
+    )
 
 
 def get_last_usage() -> dict[str, int]:

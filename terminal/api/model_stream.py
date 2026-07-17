@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import queue
+import random
 import re
 import threading
 import time
@@ -10,6 +11,11 @@ from collections.abc import Callable, Iterator
 from urllib.parse import urlsplit
 
 from core.llm_client import LLMClient
+
+PRIMARY_ATTEMPTS = 3
+RETRY_BASE_SECONDS = 0.5
+RETRY_CAP_SECONDS = 2.0
+DEFAULT_FALLBACK_PROFILE = "lite"
 
 DSML_MARKER = "｜｜DSML｜｜"
 FAKE_XML_RE = re.compile(
@@ -135,22 +141,76 @@ def select_model_for_turn(
     return model
 
 
-def iter_model_stream(
-    messages: list[dict], *, heartbeat_seconds: float = 8.0,
-    total_timeout_seconds: float = 180.0, stream: Callable | None = None,
-    llm_client: LLMClient | None = None, **kwargs,
+def is_retryable_model_error(exc: Exception) -> bool:
+    status = getattr(exc, "status_code", None)
+    if status in (401, 403) or (status is not None and 400 <= int(status) < 500 and int(status) != 429):
+        return False
+    if status == 429 or (status is not None and int(status) >= 500):
+        return True
+    text = f"{type(exc).__name__}: {exc}".lower()
+    denied = ("auth", "api key", "鉴权", "无权限", "content policy", "invalid request")
+    if any(marker in text for marker in denied):
+        return False
+    retryable = ("timeout", "connect", "connection", "429", "rate", "limit", "限流", "频率", "http 5")
+    return isinstance(exc, (TimeoutError, ConnectionError)) or any(marker in text for marker in retryable)
+
+
+def default_profile_fallback(config: dict, active_model: str) -> tuple[Callable | None, str, str]:
+    from core.model_profiles import active_model_profile_id, model_profiles
+
+    if active_model_profile_id(config) == DEFAULT_FALLBACK_PROFILE:
+        return None, "", ""
+    profile = model_profiles(config).get(DEFAULT_FALLBACK_PROFILE) or {}
+    fallback_model = str(profile.get("model") or "")
+    if not fallback_model or fallback_model == active_model or not profile.get("api_key"):
+        return None, "", ""
+    from core.llm import stream_chat_for_profile
+
+    def fallback(messages: list[dict], **kwargs) -> Iterator[str]:
+        kwargs.pop("llm_client", None)
+        kwargs["model"] = fallback_model
+        return stream_chat_for_profile(
+            messages, profile_id=DEFAULT_FALLBACK_PROFILE, **kwargs,
+        )
+
+    return fallback, fallback_model, DEFAULT_FALLBACK_PROFILE
+
+
+def token_context_snapshot(messages: list[dict]) -> dict[str, int | bool]:
+    from core.compressor import DEFAULT_TOKEN_LIMIT, estimate_history_tokens, should_compress
+
+    estimated = estimate_history_tokens(messages)
+    return {
+        "historyEstimatedTokens": estimated,
+        "tokenLimit": DEFAULT_TOKEN_LIMIT,
+        "compressionTriggered": should_compress(
+            messages, prompt_tokens=estimated, token_limit=DEFAULT_TOKEN_LIMIT,
+        ),
+    }
+
+
+def _token_usage_since(initial_call_count: int) -> dict[str, int] | None:
+    from core.token_usage import get_last_call_usage, get_session_usage
+
+    session = get_session_usage()
+    if int(session.get("call_count") or 0) <= initial_call_count:
+        return None
+    usage = get_last_call_usage()
+    return {
+        "promptTokens": int(usage.get("prompt_tokens") or 0),
+        "completionTokens": int(usage.get("completion_tokens") or 0),
+        "totalTokens": int(usage.get("total_tokens") or 0),
+    }
+
+
+def _run_stream_attempt(
+    active_stream: Callable, messages: list[dict], kwargs: dict,
+    *, heartbeat_seconds: float, deadline: float,
 ) -> Iterator[dict]:
     output: queue.Queue[tuple[str, object]] = queue.Queue()
 
     def worker() -> None:
         try:
-            if stream is None and llm_client is not None:
-                active_stream = llm_client.stream_chat
-            elif stream is None:
-                from core.llm import stream_chat
-                active_stream = stream_chat
-            else:
-                active_stream = stream
             for chunk in active_stream(messages, **kwargs):
                 output.put(("chunk", chunk))
             output.put(("done", None))
@@ -158,12 +218,12 @@ def iter_model_stream(
             output.put(("error", exc))
 
     threading.Thread(target=worker, daemon=True).start()
-    started = time.monotonic()
     while True:
-        if time.monotonic() - started > total_timeout_seconds:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
             raise TimeoutError("model stream total timeout")
         try:
-            kind, value = output.get(timeout=heartbeat_seconds)
+            kind, value = output.get(timeout=min(heartbeat_seconds, remaining))
         except queue.Empty:
             yield {"type": "heartbeat"}
             continue
@@ -172,4 +232,67 @@ def iter_model_stream(
         elif kind == "error":
             raise value
         else:
-            break
+            return
+
+
+def iter_model_stream(
+    messages: list[dict], *, heartbeat_seconds: float = 8.0,
+    total_timeout_seconds: float = 180.0, stream: Callable | None = None,
+    llm_client: LLMClient | None = None, fallback_stream: Callable | None = None,
+    fallback_model: str = "", fallback_profile: str = "",
+    sleep: Callable[[float], None] = time.sleep,
+    random_value: Callable[[], float] = random.random,
+    **kwargs,
+) -> Iterator[dict]:
+    from core.token_usage import get_session_usage
+
+    initial_call_count = int(get_session_usage().get("call_count") or 0)
+    if stream is None and llm_client is not None:
+        primary_stream = llm_client.stream_chat
+    elif stream is None:
+        from core.llm import stream_chat
+        primary_stream = stream_chat
+    else:
+        primary_stream = stream
+    deadline = time.monotonic() + total_timeout_seconds
+    emitted_chunk = False
+    for attempt in range(1, PRIMARY_ATTEMPTS + 1):
+        try:
+            for event in _run_stream_attempt(
+                primary_stream, messages, kwargs,
+                heartbeat_seconds=heartbeat_seconds, deadline=deadline,
+            ):
+                if event.get("type") == "chunk":
+                    emitted_chunk = True
+                yield event
+            usage = _token_usage_since(initial_call_count)
+            if usage:
+                yield {"type": "usage", "tokenUsage": usage}
+            return
+        except Exception as exc:
+            if emitted_chunk or not is_retryable_model_error(exc):
+                raise
+            if attempt < PRIMARY_ATTEMPTS:
+                delay = min(RETRY_CAP_SECONDS, RETRY_BASE_SECONDS * (2 ** (attempt - 1))) * random_value()
+                if time.monotonic() + delay >= deadline:
+                    raise TimeoutError("model stream total timeout") from exc
+                yield {"type": "retry", "attempt": attempt + 1, "maxAttempts": PRIMARY_ATTEMPTS}
+                sleep(delay)
+                continue
+            if fallback_stream is None:
+                raise
+            yield {
+                "type": "fallback", "attempt": 1, "maxAttempts": 1,
+                "fallbackProfile": fallback_profile, "model": fallback_model,
+            }
+            fallback_kwargs = dict(kwargs)
+            if fallback_model:
+                fallback_kwargs["model"] = fallback_model
+            yield from _run_stream_attempt(
+                fallback_stream, messages, fallback_kwargs,
+                heartbeat_seconds=heartbeat_seconds, deadline=deadline,
+            )
+            usage = _token_usage_since(initial_call_count)
+            if usage:
+                yield {"type": "usage", "tokenUsage": usage}
+            return

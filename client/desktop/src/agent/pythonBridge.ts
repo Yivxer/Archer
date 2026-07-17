@@ -184,6 +184,10 @@ type PythonStatusEvent = {
   matchedSkills: string[]
   isBackground: boolean
   memoryScope: string[]
+  phase?: 'retry' | 'fallback'
+  attempt?: number
+  maxAttempts?: number
+  fallbackProfile?: string
 }
 
 type PythonInitiativeEvent = {
@@ -216,6 +220,14 @@ type PythonRuntimeContextEvent = {
   toolDurationMs?: number
   cpuTimeMs?: number
   peakRssBytes?: number
+  tokenUsage?: {
+    promptTokens?: number
+    completionTokens?: number
+    totalTokens?: number
+    historyEstimatedTokens?: number
+    tokenLimit?: number
+    compressionTriggered?: boolean
+  }
 }
 
 type PythonFailureHintEvent = {
@@ -254,6 +266,10 @@ export function pythonStatusToAgentEvent(
     matchedSkills: snapshot.matchedSkills ?? [],
     isBackground: snapshot.isBackground ?? false,
     memoryScope: snapshot.memoryScope ?? [],
+    phase: snapshot.phase,
+    attempt: snapshot.attempt,
+    maxAttempts: snapshot.maxAttempts,
+    fallbackProfile: snapshot.fallbackProfile,
   }
 }
 
@@ -302,6 +318,7 @@ export function pythonRuntimeContextToAgentEvent(
     toolDurationMs: snapshot.toolDurationMs,
     cpuTimeMs: snapshot.cpuTimeMs,
     peakRssBytes: snapshot.peakRssBytes,
+    tokenUsage: snapshot.tokenUsage,
   }
 }
 

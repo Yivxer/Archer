@@ -149,6 +149,9 @@ describe('contract schemas', () => {
       matchedSkills: ['hugo_blog'],
       isBackground: false,
       memoryScope: ['project'],
+      phase: 'retry',
+      attempt: 2,
+      maxAttempts: 3,
     }).type).toBe('status.event')
 
     expect(parseAgentEvent({
@@ -172,6 +175,14 @@ describe('contract schemas', () => {
       toolDurationMs: 40,
       cpuTimeMs: 10,
       peakRssBytes: 123456,
+      tokenUsage: {
+        promptTokens: 900,
+        completionTokens: 100,
+        totalTokens: 1000,
+        historyEstimatedTokens: 850,
+        tokenLimit: 50000,
+        compressionTriggered: false,
+      },
     }).type).toBe('runtime.context')
 
     expect(parseAgentEvent({

@@ -18,6 +18,23 @@ def test_turn_performance_builds_bounded_terminal_snapshot():
         now=10.08,
         step_duration_ms=10,
     )
+    perf.observe(
+        {
+            "type": "_metric", "stage": "token_context",
+            "historyEstimatedTokens": 900, "tokenLimit": 50_000,
+            "compressionTriggered": False,
+        },
+        now=10.09,
+        step_duration_ms=1,
+    )
+    perf.observe(
+        {
+            "type": "_metric", "stage": "token_usage",
+            "tokenUsage": {"promptTokens": 950, "completionTokens": 50, "totalTokens": 1000},
+        },
+        now=10.10,
+        step_duration_ms=1,
+    )
 
     event = perf.terminal_event(now=10.20, cpu_now=2.04, peak_rss_bytes=123_456)
     snapshot = event["performanceEvent"]
@@ -31,6 +48,14 @@ def test_turn_performance_builds_bounded_terminal_snapshot():
     assert snapshot["cpuTimeMs"] == 40
     assert snapshot["peakRssBytes"] == 123_456
     assert snapshot["outcome"] == "complete"
+    assert snapshot["tokenUsage"] == {
+        "historyEstimatedTokens": 900,
+        "tokenLimit": 50_000,
+        "compressionTriggered": False,
+        "promptTokens": 950,
+        "completionTokens": 50,
+        "totalTokens": 1000,
+    }
 
 
 def test_turn_performance_marks_failed_outcome_without_copying_error_text():

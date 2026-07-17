@@ -122,6 +122,10 @@ export const statusEventSchema = base.extend({
   matchedSkills: z.array(z.string()),
   isBackground: z.boolean(),
   memoryScope: z.array(z.string()),
+  phase: z.enum(['retry', 'fallback']).optional(),
+  attempt: z.number().int().positive().optional(),
+  maxAttempts: z.number().int().positive().optional(),
+  fallbackProfile: z.string().optional(),
 })
 
 export const initiativeEventSchema = base.extend({
@@ -152,6 +156,14 @@ export const runtimeContextEventSchema = base.extend({
   toolDurationMs: z.number().nonnegative().optional(),
   cpuTimeMs: z.number().nonnegative().optional(),
   peakRssBytes: z.number().nonnegative().optional(),
+  tokenUsage: z.object({
+    promptTokens: z.number().nonnegative().optional(),
+    completionTokens: z.number().nonnegative().optional(),
+    totalTokens: z.number().nonnegative().optional(),
+    historyEstimatedTokens: z.number().nonnegative().optional(),
+    tokenLimit: z.number().nonnegative().optional(),
+    compressionTriggered: z.boolean().optional(),
+  }).optional(),
 })
 
 export const failureHintEventSchema = base.extend({

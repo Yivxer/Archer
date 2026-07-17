@@ -29,6 +29,85 @@ def test_model_stream_uses_injected_llm_client():
     )) == [{"type": "chunk", "text": "injected"}]
 
 
+def test_model_stream_retries_recoverable_failure_before_first_chunk():
+    calls = []
+    delays = []
+
+    def flaky(messages, **kwargs):
+        calls.append(1)
+        if len(calls) < 3:
+            raise TimeoutError("provider timeout")
+        yield "ok"
+
+    events = list(iter_model_stream(
+        [{"role": "user", "content": "hi"}],
+        stream=flaky,
+        sleep=delays.append,
+        random_value=lambda: 1.0,
+    ))
+
+    assert len(calls) == 3
+    assert delays == [0.5, 1.0]
+    assert [event["type"] for event in events] == ["retry", "retry", "chunk"]
+
+
+def test_model_stream_does_not_retry_auth_or_after_visible_chunk():
+    auth_calls = []
+
+    def auth_failure(messages, **kwargs):
+        auth_calls.append(1)
+        raise RuntimeError("模型 API 鉴权失败：API key 无效")
+        yield
+
+    try:
+        list(iter_model_stream([], stream=auth_failure, sleep=lambda _: None))
+        assert False, "auth failure should propagate"
+    except RuntimeError:
+        pass
+    assert len(auth_calls) == 1
+
+    partial_calls = []
+
+    def partial_failure(messages, **kwargs):
+        partial_calls.append(1)
+        yield "visible"
+        raise TimeoutError("late timeout")
+
+    try:
+        list(iter_model_stream([], stream=partial_failure, sleep=lambda _: None))
+        assert False, "partial failure should propagate"
+    except TimeoutError:
+        pass
+    assert len(partial_calls) == 1
+
+
+def test_model_stream_uses_one_visible_default_fallback_after_primary_exhausted():
+    primary_calls = []
+    fallback_calls = []
+
+    def primary(messages, **kwargs):
+        primary_calls.append(1)
+        raise ConnectionError("offline")
+        yield
+
+    def fallback(messages, **kwargs):
+        fallback_calls.append(kwargs["model"])
+        yield "fallback-ok"
+
+    events = list(iter_model_stream(
+        [], stream=primary, fallback_stream=fallback,
+        fallback_model="deepseek-chat", fallback_profile="lite",
+        sleep=lambda _: None, random_value=lambda: 0.0,
+    ))
+
+    assert len(primary_calls) == 3
+    assert fallback_calls == ["deepseek-chat"]
+    assert events[-2:] == [
+        {"type": "fallback", "attempt": 1, "maxAttempts": 1, "fallbackProfile": "lite", "model": "deepseek-chat"},
+        {"type": "chunk", "text": "fallback-ok"},
+    ]
+
+
 def test_model_selection_detects_image_attachment():
     calls = []
     model = select_model_for_turn({}, query="look", intent="chat", needs_tools=False, file_refs=[{"type": "image"}], resolver=lambda config, **kwargs: (calls.append(kwargs) or "vision", {}))

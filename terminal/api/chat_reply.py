@@ -18,6 +18,8 @@ class ChatReplyDependencies:
     failure_events: Callable
     empty_events: Callable
     model_trace: Callable
+    fallback_factory: Callable | None = None
+    token_context: Callable | None = None
 
 
 def iter_chat_reply_events(
@@ -48,6 +50,18 @@ def iter_chat_reply_events(
         },
     }
     llm_client = getattr(runtime_context, "llm_client", None)
+    fallback_stream = None
+    fallback_model = ""
+    fallback_profile = ""
+    if llm_client is None and dependencies.fallback_factory is not None:
+        fallback_stream, fallback_model, fallback_profile = dependencies.fallback_factory(
+            config, active_model,
+        )
+    if dependencies.token_context is not None:
+        yield {
+            "type": "_metric", "stage": "token_context", "traceId": trace_id,
+            **dependencies.token_context(model_messages),
+        }
     reply_parts: list[str] = []
     streamed_safe_text = ""
     fake_markup_detected = False
@@ -58,6 +72,9 @@ def iter_chat_reply_events(
             total_timeout_seconds=total_timeout_seconds,
             model=active_model,
             llm_client=llm_client,
+            fallback_stream=fallback_stream,
+            fallback_model=fallback_model,
+            fallback_profile=fallback_profile,
         ):
             if item.get("type") == "heartbeat":
                 yield {
@@ -71,6 +88,31 @@ def iter_chat_reply_events(
                         "memoryScope": memory_scope,
                         "traceId": trace_id,
                     },
+                }
+                continue
+            if item.get("type") in {"retry", "fallback"}:
+                is_fallback = item.get("type") == "fallback"
+                yield {
+                    "type": "statusEvent",
+                    "statusEvent": {
+                        "id": f"model-{'fallback' if is_fallback else 'retry'}-{uuid4().hex[:8]}",
+                        "intentType": intent,
+                        "intentLabel": "正在切换默认模型" if is_fallback else "模型连接不稳，正在重试",
+                        "matchedSkills": list(selected_tools.keys()),
+                        "isBackground": False,
+                        "memoryScope": memory_scope,
+                        "traceId": trace_id,
+                        "phase": item.get("type"),
+                        "attempt": item.get("attempt"),
+                        "maxAttempts": item.get("maxAttempts"),
+                        "fallbackProfile": item.get("fallbackProfile") or None,
+                    },
+                }
+                continue
+            if item.get("type") == "usage":
+                yield {
+                    "type": "_metric", "stage": "token_usage", "traceId": trace_id,
+                    "tokenUsage": item.get("tokenUsage") or {},
                 }
                 continue
             chunk = str(item.get("text") or "")

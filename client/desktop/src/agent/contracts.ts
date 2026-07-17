@@ -128,6 +128,10 @@ export type StatusEvent = AgentEventBase & {
   matchedSkills: string[]
   isBackground: boolean
   memoryScope: string[]
+  phase?: 'retry' | 'fallback'
+  attempt?: number
+  maxAttempts?: number
+  fallbackProfile?: string
 }
 
 export type InitiativeEvent = AgentEventBase & {
@@ -158,6 +162,14 @@ export type RuntimeContextEvent = AgentEventBase & {
   toolDurationMs?: number
   cpuTimeMs?: number
   peakRssBytes?: number
+  tokenUsage?: {
+    promptTokens?: number
+    completionTokens?: number
+    totalTokens?: number
+    historyEstimatedTokens?: number
+    tokenLimit?: number
+    compressionTriggered?: boolean
+  }
 }
 
 export type FailureHintEvent = AgentEventBase & {

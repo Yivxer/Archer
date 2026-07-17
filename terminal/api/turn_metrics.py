@@ -5,7 +5,7 @@ import resource
 import sys
 import time
 from dataclasses import dataclass
-from typing import Callable, Iterator
+from typing import Any, Callable, Iterator
 from uuid import uuid4
 
 
@@ -34,11 +34,28 @@ class TurnPerformance:
     tool_duration_ms: int = 0
     ttft_ms: int | None = None
     outcome: str = "complete"
+    token_usage: dict[str, Any] | None = None
 
     def observe(self, event: dict, *, now: float, step_duration_ms: int) -> None:
         self.trace_id = self.trace_id or _trace_id(event)
         if event.get("type") == "_metric" and event.get("stage") == "context_ready":
             self.context_build_ms = max(0, round((now - self.started_at) * 1000))
+            return
+        if event.get("type") == "_metric" and event.get("stage") == "token_context":
+            self.token_usage = {
+                "historyEstimatedTokens": max(0, int(event.get("historyEstimatedTokens") or 0)),
+                "tokenLimit": max(0, int(event.get("tokenLimit") or 0)),
+                "compressionTriggered": bool(event.get("compressionTriggered")),
+            }
+            return
+        if event.get("type") == "_metric" and event.get("stage") == "token_usage":
+            usage = event.get("tokenUsage") if isinstance(event.get("tokenUsage"), dict) else {}
+            self.token_usage = {
+                **(self.token_usage or {}),
+                "promptTokens": max(0, int(usage.get("promptTokens") or 0)),
+                "completionTokens": max(0, int(usage.get("completionTokens") or 0)),
+                "totalTokens": max(0, int(usage.get("totalTokens") or 0)),
+            }
             return
         if event.get("toolEvent"):
             self.tool_duration_ms += max(0, int(step_duration_ms))
@@ -66,6 +83,8 @@ class TurnPerformance:
         }
         if self.ttft_ms is not None:
             snapshot["ttftMs"] = self.ttft_ms
+        if self.token_usage:
+            snapshot["tokenUsage"] = self.token_usage
         return {"type": "performanceEvent", "performanceEvent": snapshot}
 
 

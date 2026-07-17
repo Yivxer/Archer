@@ -177,6 +177,10 @@ describe('python bridge', () => {
         matchedSkills: ['obsidian_read'],
         isBackground: false,
         memoryScope: ['project'],
+        phase: 'fallback',
+        attempt: 1,
+        maxAttempts: 1,
+        fallbackProfile: 'lite',
       },
       planEvent: {
         id: 'plan-1',
@@ -224,6 +228,9 @@ describe('python bridge', () => {
       model: 'kimi-k2-fast',
       baseUrlSummary: 'https://api.moonshot.cn',
     })
+    expect(events.find((event) => event.type === 'status.event')).toMatchObject({
+      phase: 'fallback', attempt: 1, maxAttempts: 1, fallbackProfile: 'lite',
+    })
     expect(events[5]).toMatchObject({
       type: 'initiative.event',
       id: 'initiative-1',
@@ -257,6 +264,14 @@ describe('python bridge', () => {
         toolDurationMs: 40,
         cpuTimeMs: 10,
         peakRssBytes: 123456,
+        tokenUsage: {
+          promptTokens: 900,
+          completionTokens: 100,
+          totalTokens: 1000,
+          historyEstimatedTokens: 850,
+          tokenLimit: 50000,
+          compressionTriggered: false,
+        },
       },
     })
     expect(event).toMatchObject({
@@ -265,6 +280,7 @@ describe('python bridge', () => {
       ttftMs: 80,
       totalDurationMs: 200,
       peakRssBytes: 123456,
+      tokenUsage: { totalTokens: 1000, compressionTriggered: false },
     })
   })
 })

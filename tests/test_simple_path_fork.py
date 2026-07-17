@@ -86,10 +86,12 @@ class TestSimplePathFork:
             file_refs=[],
         ))
 
-        # simple path 不发 orchestrationEvent/planEvent/runtimeContextEvent
+        # simple path 不发 orchestrationEvent/planEvent，但仍上报真实模型 Trace。
         assert not [e for e in events if isinstance(e, dict) and e.get("type") == "orchestrationEvent"]
         assert not [e for e in events if isinstance(e, dict) and e.get("type") == "planEvent"]
-        assert not [e for e in events if isinstance(e, dict) and e.get("type") == "runtimeContextEvent"]
+        model_context = [e for e in events if isinstance(e, dict) and e.get("type") == "runtimeContextEvent"]
+        assert len(model_context) == 1
+        assert model_context[0]["runtimeContextEvent"]["phase"] == "model_stream"
         # simple path 发 statusEvent 且 simplePath=True
         status_events = [e for e in events if isinstance(e, dict) and e.get("type") == "statusEvent"]
         assert status_events, "应至少发一个 statusEvent"
