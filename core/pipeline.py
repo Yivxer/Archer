@@ -1,4 +1,4 @@
-"""Part 8.4 shadow-only creative candidate ranking."""
+"""Frozen Part 8.4 shadow-only creative-ranking experiment."""
 from __future__ import annotations
 
 from dataclasses import dataclass

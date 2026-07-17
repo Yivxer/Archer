@@ -1,0 +1,46 @@
+{
+  "version": 1,
+  "auditedAt": "2026-07-16",
+  "policy": "A Part 8 module must have a named production vertical slice or remain frozen.",
+  "activeVerticalSlices": {
+    "thread_resume": {
+      "state": "shadow",
+      "producer": "core.part8_threads.scan_thread_resume_candidates",
+      "productionCaller": "terminal.api.part8_runtime._yield_shadow_initiative_events",
+      "eventType": "initiativeEvent",
+      "delivered": false
+    }
+  },
+  "modules": {
+    "attention": {
+      "state": "frozen",
+      "files": ["core/attention.py"],
+      "entrypoints": ["build_attention_focus", "attention_boost"],
+      "reason": "No production caller; tests preserve the experiment only."
+    },
+    "threshold": {
+      "state": "frozen",
+      "files": ["core/threshold.py"],
+      "entrypoints": ["evaluate_threshold"],
+      "reason": "No production caller; the live shadow slice uses initiative_shadow gates instead."
+    },
+    "opportunity": {
+      "state": "frozen",
+      "files": ["core/opportunity.py"],
+      "entrypoints": ["detect_opportunities"],
+      "reason": "No production caller; OpportunityCandidate remains only a compatibility type for the frozen voice experiment."
+    },
+    "creative": {
+      "state": "frozen",
+      "files": ["core/pipeline.py", "core/scorer.py"],
+      "entrypoints": ["rank_creative_candidates", "score_creative_candidate"],
+      "reason": "No production caller; ranking and scoring remain test-only experiments."
+    },
+    "retention": {
+      "state": "frozen",
+      "files": ["core/part8_retention.py"],
+      "entrypoints": ["archive_part8_records"],
+      "reason": "No production scheduler or route calls the retention job."
+    }
+  }
+}

@@ -1,7 +1,7 @@
-"""Part 8.3 initiative threshold scoring.
+"""Frozen Part 8.3 initiative threshold scoring experiment.
 
 This module decides whether an initiative candidate is worth recording or
-considering. It does not deliver messages.
+considering. It does not deliver messages. See the Part 8 graduation registry.
 """
 from __future__ import annotations
 

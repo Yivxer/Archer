@@ -1,4 +1,4 @@
-"""Retention policies for Part 8 shadow stores."""
+"""Frozen retention experiment for Part 8 shadow stores."""
 from __future__ import annotations
 
 import sqlite3

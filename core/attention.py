@@ -1,4 +1,4 @@
-"""Part 8 attention-focus boundary for future memory reranking."""
+"""Frozen Part 8 attention-focus experiment; see the graduation registry."""
 from __future__ import annotations
 
 import re

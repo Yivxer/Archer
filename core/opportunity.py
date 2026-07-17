@@ -1,7 +1,7 @@
-"""Part 8.3 explainable opportunity detection.
+"""Frozen Part 8.3 explainable opportunity-detection experiment.
 
 The opportunity layer produces candidates for later threshold evaluation. It
-does not persist, inject, or deliver an initiative.
+does not persist, inject, or deliver an initiative. See the graduation registry.
 """
 from __future__ import annotations
 
