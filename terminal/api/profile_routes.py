@@ -139,6 +139,7 @@ def _available_modes(cfg: dict) -> dict:
     for mode_id in sorted(_VALID_MODES):
         if mode_id in seen:
             continue
+        seen.add(mode_id)
         items.append({
             "id": mode_id,
             "label": _MODE_LABELS.get(mode_id, mode_id),

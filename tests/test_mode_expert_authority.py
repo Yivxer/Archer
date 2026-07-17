@@ -27,6 +27,21 @@ def test_unknown_mode_and_expert_project_safe_server_fallbacks():
     assert experts["fallbackApplied"] is True
 
 
+def test_valid_builtin_mode_remains_server_authoritative_without_mode_directory():
+    modes = _available_modes({
+        "persona": {
+            "mode_auto": False,
+            "current_mode": "writer",
+            "default_mode": "listener",
+        },
+    })
+
+    assert modes["current"] == "writer"
+    assert modes["modeAuto"] is False
+    assert modes["fallbackApplied"] is False
+    assert next(item for item in modes["modes"] if item["id"] == "writer")["active"] is True
+
+
 def test_desktop_does_not_persist_mode_or_optimistically_own_expert():
     main = MAIN.read_text(encoding="utf-8")
     chat = CHAT.read_text(encoding="utf-8")
