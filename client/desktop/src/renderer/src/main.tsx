@@ -13,7 +13,7 @@ import {
   Wrench,
   X,
 } from 'lucide-react'
-import { fetchLocalExpertWorkbench, switchLocalExpert } from './adapters/localArcher'
+import { fetchLocalExpertWorkbench, switchLocalExpert, switchLocalMode } from './adapters/localArcher'
 import { connectionStatusLabel, expertShortLabel, modelProfileShortLabel } from './lib/conversationPersona'
 import { mergeInitiativeShadowEvent } from './lib/initiativeShadow'
 import { mergeSseInitiativeEvent } from './lib/initiativeStore'
@@ -40,7 +40,6 @@ import { TodayPage } from './pages/TodayPage'
 import type {
   ArcherAdapter,
   ApiConnectionState,
-  ConversationMode,
   MemoryContextMode,
   ObsidianContextMode,
   Route,
@@ -95,9 +94,6 @@ function App() {
   })
   const [theme, setTheme] = React.useState<Theme>(() => {
     return (localStorage.getItem('archer-desktop-theme') as Theme) || 'light'
-  })
-  const [conversationMode, setConversationMode] = React.useState<ConversationMode>(() => {
-    return (localStorage.getItem('archer-conversation-mode') as ConversationMode) || 'auto'
   })
   const [memoryMode, setMemoryMode] = React.useState<MemoryContextMode>(() => {
     return (localStorage.getItem('archer-memory-context') as MemoryContextMode) || 'conservative'
@@ -154,6 +150,18 @@ function App() {
           await patchExpertWorkbench()
         } catch {
           // Keep session readable even if expert restore fails.
+        }
+      }
+      if (
+        detail.modeId
+        && detail.modeId !== (data.modes.current || data.status.mode)
+        && data.status.adapter === 'local'
+      ) {
+        try {
+          await switchLocalMode(detail.modeId)
+          await connectLocalApi({ silent: true })
+        } catch {
+          // Keep session readable even if the saved mode no longer exists.
         }
       }
     } catch (error) {
@@ -213,10 +221,6 @@ function App() {
   }, [profileAvatarUrl])
 
   React.useEffect(() => {
-    localStorage.setItem('archer-conversation-mode', conversationMode)
-  }, [conversationMode])
-
-  React.useEffect(() => {
     localStorage.setItem('archer-sidebar-open', sidebarOpen ? '1' : '0')
   }, [sidebarOpen])
 
@@ -238,9 +242,6 @@ function App() {
         setData(result.adapter)
         // L3.9: 连接/重连时初始化 6 个领域 store；后续由领域 action 与事件维护。
         syncStoresFromAdapter(result.adapter)
-        if (result.state === 'connected') {
-          setConversationMode(result.adapter.modes.current || 'auto')
-        }
       } else if (!wasBrainEverLinked()) {
         setData(mockArcher)
       }
@@ -271,8 +272,12 @@ function App() {
     }
   }
 
+  const expertWorkbenchRequestRef = React.useRef(0)
+
   async function patchExpertWorkbench() {
+    const requestId = ++expertWorkbenchRequestRef.current
     const snapshot = await fetchLocalExpertWorkbench()
+    if (requestId !== expertWorkbenchRequestRef.current) return
     setData((current) => ({
       ...current,
       experts: snapshot.experts,
@@ -715,8 +720,6 @@ function App() {
               setMemoryMode={setMemoryMode}
               obsidianMode={obsidianMode}
               setObsidianMode={setObsidianMode}
-              conversationMode={conversationMode}
-              setConversationMode={setConversationMode}
               connectionState={connection.state}
               connectionDeadReason={connection.snapshot.deadReason}
               connectionActions={{

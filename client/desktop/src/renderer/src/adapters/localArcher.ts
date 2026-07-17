@@ -674,6 +674,8 @@ export async function sendLocalChat(messages: ChatRequestMessage[]): Promise<str
 export type SessionSaveMeta = {
   expertId?: string
   expertLabel?: string
+  modeId?: string
+  modeLabel?: string
 }
 
 export async function saveLocalSession(

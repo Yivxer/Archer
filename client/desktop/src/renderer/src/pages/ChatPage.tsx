@@ -129,7 +129,6 @@ export function ChatPage({
   const [captureSourcesState, setCaptureSourcesState] = React.useState<'idle' | 'loading' | 'error'>('idle')
   const activeModelProfile = data.settings.activeProfile || 'lite'
   const [switchingModel, setSwitchingModel] = React.useState<'lite' | 'pro' | 'max' | null>(null)
-  const [localExpertId, setLocalExpertId] = React.useState<string | null>(null)
   const [expertSwitching, setExpertSwitching] = React.useState(false)
   const workspaceJobs = useJobStore((state) => state.jobs)
   const workspaceJobsLoadState = useJobStore((state) => state.loadState)
@@ -140,7 +139,7 @@ export function ChatPage({
     window.localStorage.getItem('archer-workspace-context-open') === '1'
   ))
   const expertSwitchingRef = React.useRef(false)
-  const activeExpertId = localExpertId ?? data.experts?.current ?? data.status.expertId ?? 'default'
+  const activeExpertId = data.experts?.current ?? data.status.expertId ?? 'default'
   const expertOptions = data.experts?.experts ?? []
   const activeExpert = expertOptions.find((option) => option.id === activeExpertId)
   const homeStarters = (activeExpert?.starters?.length ? activeExpert.starters : DEFAULT_STARTERS).slice(0, 4)
@@ -153,9 +152,12 @@ export function ChatPage({
   ), [activeSession?.threadId, data.threads])
 
   function sessionSaveMeta() {
+    const modeId = data.modes.current || data.status.mode || 'auto'
     return {
       expertId: activeExpertId,
       expertLabel: activeExpert?.label || data.status.expertLabel,
+      modeId,
+      modeLabel: data.modes.modes.find((item) => item.id === modeId)?.label || modeId,
     }
   }
 
@@ -172,7 +174,6 @@ export function ChatPage({
   }, [data.status.adapter])
 
   React.useEffect(() => {
-    setLocalExpertId(null)
   }, [data.experts?.current, data.status.expertId])
 
   React.useEffect(() => {
@@ -1485,7 +1486,6 @@ export function ChatPage({
                         expertSwitchingRef.current = true
                         setExpertSwitching(true)
                         setActiveComposerMenu(null)
-                        setLocalExpertId(option.id)
                         setChatError('')
                         try {
                           if (data.status.adapter !== 'local') {
@@ -1504,7 +1504,6 @@ export function ChatPage({
                         } finally {
                           expertSwitchingRef.current = false
                           setExpertSwitching(false)
-                          setLocalExpertId(null)
                         }
                       })()
                     }}

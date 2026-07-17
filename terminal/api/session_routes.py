@@ -112,12 +112,18 @@ def session_meta_from_payload(payload: dict) -> dict[str, str]:
     expert_id = str(payload.get("expertId", "") or "").strip()
     expert_label = str(payload.get("expertLabel", "") or "").strip()
     thread_id = str(payload.get("threadId", "") or "").strip()
+    mode_id = str(payload.get("modeId", "") or "").strip()
+    mode_label = str(payload.get("modeLabel", "") or "").strip()
     if expert_id and re.fullmatch(r"[A-Za-z0-9_-]{1,64}", expert_id):
         meta["expertId"] = expert_id
     if expert_label:
         meta["expertLabel"] = expert_label[:64]
     if thread_id and re.fullmatch(r"[A-Za-z0-9_-]{1,96}", thread_id):
         meta["threadId"] = thread_id
+    if mode_id and re.fullmatch(r"[A-Za-z0-9_-]{1,64}", mode_id):
+        meta["modeId"] = mode_id
+    if mode_label:
+        meta["modeLabel"] = mode_label[:64]
     return meta
 
 
@@ -241,7 +247,7 @@ def add_thread_session(thread_id: str, payload: dict) -> dict:
 def _add_meta(item: dict, meta: object) -> None:
     if not isinstance(meta, dict):
         return
-    for key in ("threadId", "expertId", "expertLabel"):
+    for key in ("threadId", "expertId", "expertLabel", "modeId", "modeLabel"):
         value = str(meta.get(key, "") or "").strip()
         if value:
             item[key] = value

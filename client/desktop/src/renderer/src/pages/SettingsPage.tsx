@@ -1,6 +1,6 @@
 import React from 'react'
 import { ArrowLeft, CalendarClock, CalendarDays, Clipboard, Database, Eye, KeyRound, Layers, ListChecks, Moon, Palette, Settings2, SlidersHorizontal, Sun, Terminal, X, Activity } from 'lucide-react'
-import type { ArcherAdapter, ConversationMode, MemoryContextMode, ObsidianContextMode, Route, ScheduledTask, Theme } from '../types'
+import type { ArcherAdapter, MemoryContextMode, ObsidianContextMode, Route, ScheduledTask, Theme } from '../types'
 import { FormField } from '../components/common'
 import { addSchedule, clearDesktopApiToken, getDesktopApiToken, listSchedules, removeSchedule, resolveDesktopApiToken, restartLocalApi, runSchedule, saveDesktopApiToken, saveLocalProfileSettings, saveLocalSettings, setScheduleEnabled, switchLocalMode, testLocalModelProfile } from '../adapters/localArcher'
 import { expertShortLabel, modeLabelFromId, modelProfileShortLabel, personaPresetFromMode } from '../lib/conversationPersona'
@@ -17,8 +17,6 @@ export function SettingsPage({
   setMemoryMode,
   obsidianMode,
   setObsidianMode,
-  conversationMode,
-  setConversationMode,
   connectionState = 'disconnected',
   connectionDeadReason = '',
   connectionActions,
@@ -32,8 +30,6 @@ export function SettingsPage({
   setMemoryMode: (mode: MemoryContextMode) => void
   obsidianMode: ObsidianContextMode
   setObsidianMode: (mode: ObsidianContextMode) => void
-  conversationMode: ConversationMode
-  setConversationMode: (mode: ConversationMode) => void
   connectionState?: ConnectionState
   connectionDeadReason?: string
   connectionActions?: {
@@ -60,6 +56,7 @@ export function SettingsPage({
   const [testingModel, setTestingModel] = React.useState(false)
   const [restartingApi, setRestartingApi] = React.useState(false)
   const [modeSaving, setModeSaving] = React.useState('')
+  const modeRequestRef = React.useRef(0)
   const [commandCopied, setCommandCopied] = React.useState(false)
   const [scheduleTasks, setScheduleTasks] = React.useState<ScheduledTask[]>([])
   const [scheduleLoading, setScheduleLoading] = React.useState(false)
@@ -232,20 +229,21 @@ export function SettingsPage({
   async function chooseConversationMode(mode: string) {
     setNotice('')
     if (data.status.adapter !== 'local') {
-      setConversationMode(mode)
       setNotice('需要本地 API 连接才能写入模式配置。')
       return
     }
+    const requestId = ++modeRequestRef.current
     setModeSaving(mode)
     try {
       const result = await switchLocalMode(mode)
-      setConversationMode(result.current)
-      setNotice(`已切换到 ${result.label} 模式。`)
       await onRefresh()
+      if (requestId !== modeRequestRef.current) return
+      setNotice(`已切换到 ${result.label} 模式。`)
     } catch (error) {
+      if (requestId !== modeRequestRef.current) return
       setNotice(error instanceof Error ? error.message : '模式切换失败')
     } finally {
-      setModeSaving('')
+      if (requestId === modeRequestRef.current) setModeSaving('')
     }
   }
 
@@ -367,9 +365,7 @@ export function SettingsPage({
       { id: 'listener', label: '倾听者', source: 'file' as const, active: true },
       { id: 'questioner', label: '追问者', source: 'file' as const, active: false },
     ]
-  const activeConversationMode = data.status.adapter === 'local'
-    ? data.modes.current || data.status.mode
-    : conversationMode
+  const activeConversationMode = data.modes.current || data.status.mode || 'auto'
   const canSaveDraft = activeTab === 'model' || activeTab === 'local'
   const saveLabel = activeTab === 'local' ? '保存路径配置' : '保存模型配置'
   const modelProfiles = draft.modelProfiles?.length

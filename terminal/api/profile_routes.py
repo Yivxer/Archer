@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import time
@@ -22,6 +23,8 @@ from terminal.api._config import (
     mutate_config_text,
     write_config_text,
 )
+
+logger = logging.getLogger("archer_api")
 
 
 # Skill routes
@@ -143,7 +146,17 @@ def _available_modes(cfg: dict) -> dict:
             "active": (not mode_auto) and mode_id == locked,
         })
 
-    return {"current": current, "default": default, "modes": items, "modeAuto": mode_auto}
+    fallback_applied = not mode_auto and locked not in seen
+    if fallback_applied:
+        logger.warning("unknown configured mode %s; projecting auto fallback", locked)
+        current = "auto"
+    return {
+        "current": current,
+        "default": default,
+        "modes": items,
+        "modeAuto": mode_auto or fallback_applied,
+        "fallbackApplied": fallback_applied,
+    }
 
 
 def _persist_current_mode(mode: str) -> None:
@@ -236,8 +249,17 @@ def _expert_catalog_items(cfg: dict) -> list[dict]:
 
 def _available_experts(cfg: dict) -> dict:
     from core.experts import active_expert_id
-
-    return {"current": active_expert_id(cfg), "experts": _expert_catalog_items(cfg)}
+    persona = cfg.get("persona", {}) if isinstance(cfg.get("persona"), dict) else {}
+    configured = str(persona.get("current_expert", "default") or "default").strip()
+    current = active_expert_id(cfg)
+    fallback_applied = configured != current
+    if fallback_applied:
+        logger.warning("unknown configured expert %s; projecting default fallback", configured)
+    return {
+        "current": current,
+        "experts": _expert_catalog_items(cfg),
+        "fallbackApplied": fallback_applied,
+    }
 
 
 def _switch_current_expert(payload: dict, cfg: dict) -> dict:

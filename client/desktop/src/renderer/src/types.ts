@@ -138,6 +138,8 @@ export type SessionItem = {
   threadId?: string
   expertId?: string
   expertLabel?: string
+  modeId?: string
+  modeLabel?: string
 }
 
 export type SessionDetail = SessionItem & {
