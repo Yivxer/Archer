@@ -346,7 +346,7 @@ def _finalize_approval(event_id: str, decision: str, draft: dict, execution, fin
     )
 
 
-def _tool_approval(payload: dict) -> dict:
+def _tool_approval(payload: dict, runtime_context=None) -> dict:
     from terminal.api.tool_stage import build_denied_response, parse_approval_decision, reuse_cached_approval
     event_id, decision = parse_approval_decision(payload)
 
@@ -379,26 +379,78 @@ def _tool_approval(payload: dict) -> dict:
             record_tool_approval_audit(event_id=event_id, decision=decision, draft=draft, response=prepared.reused_response)
             set_tool_result(event_id, prepared.reused_response)
             return prepared.reused_response
+        outbox_item = _prepare_tool_outbox(
+            event_id, decision, draft, request_fingerprint, runtime_context,
+        )
         executed = False
         result_output = ""
         work_receipt = None
         if decision == "approved":
-            execution = _run_approved_draft(draft)
+            if outbox_item and outbox_item.get("status") == "sent":
+                cached = dict(outbox_item.get("result") or {})
+                cached["eventId"] = event_id
+                trace_id = str(draft.get("traceId") or "").strip()
+                if trace_id:
+                    cached["traceId"] = trace_id
+                cached["reused"] = True
+                cached["outbox"] = _outbox_receipt(outbox_item)
+                return cached
+            if outbox_item:
+                from infrastructure.outbox import claim_for_sending
+
+                outbox_item = claim_for_sending(
+                    runtime_context.db_path, outbox_item["id"], now=runtime_context.now(),
+                )
+                if outbox_item is None:
+                    return {
+                        "ok": True, "eventId": event_id, "decision": decision,
+                        "executed": False, "message": "该副作用正在发送或尚未到重试时间。",
+                    }
+            try:
+                execution = _run_approved_draft(draft)
+            except Exception as exc:
+                if outbox_item:
+                    from infrastructure.outbox import mark_failed
+
+                    mark_failed(
+                        runtime_context.db_path, outbox_item["id"], str(exc),
+                        now=runtime_context.now(),
+                    )
+                raise
             executed = execution.executed
             result_output = execution.output
             message = execution.message
             work_receipt = execution.work_receipt
         else:
-            response = build_denied_response(event_id)
+            response = build_denied_response(event_id, trace_id=str(draft.get("traceId") or "").strip())
+            if outbox_item:
+                response["outbox"] = _outbox_receipt(outbox_item)
             record_tool_approval_audit(event_id=event_id, decision=decision, draft=draft, response=response)
             set_tool_result(event_id, response)
             return response
         from terminal.api.tool_stage import ApprovalExecution
-        return _finalize_approval(
+        response = _finalize_approval(
             event_id, decision, draft,
             ApprovalExecution(executed, result_output, message, work_receipt),
             request_fingerprint,
         )
+        if outbox_item:
+            if executed:
+                from infrastructure.outbox import mark_sent
+
+                final_item = mark_sent(
+                    runtime_context.db_path, outbox_item["id"], response,
+                    now=runtime_context.now(),
+                )
+            else:
+                from infrastructure.outbox import mark_failed
+
+                final_item = mark_failed(
+                    runtime_context.db_path, outbox_item["id"], message,
+                    now=runtime_context.now(),
+                )
+            response["outbox"] = _outbox_receipt(final_item)
+        return response
 
     return {
         "ok": True, "eventId": event_id, "decision": decision,
@@ -408,6 +460,106 @@ def _tool_approval(payload: dict) -> dict:
             "请重新说「部署枫弋札记」，或直接点当前确认卡上的发布按钮。"
         ),
     }
+
+
+def _prepare_tool_outbox(event_id: str, decision: str, draft: dict, fingerprint: str, runtime_context):
+    if runtime_context is None or draft.get("kind") != "tool_request":
+        return None
+    from infrastructure.outbox import approve, cancel, enqueue
+
+    idempotency_key = (
+        f"tool:{fingerprint}"
+        if fingerprint
+        else f"tool-event:{event_id}"
+    )
+    stored_draft = dict(draft)
+    if fingerprint:
+        stored_draft.pop("eventId", None)
+        stored_draft.pop("traceId", None)
+    item = enqueue(
+        runtime_context.db_path,
+        kind="tool.execute",
+        payload={"draft": stored_draft},
+        idempotency_key=idempotency_key,
+        now=runtime_context.now(),
+    )
+    if item["status"] == "pending":
+        item = (
+            approve(runtime_context.db_path, item["id"], now=runtime_context.now())
+            if decision == "approved"
+            else cancel(runtime_context.db_path, item["id"], now=runtime_context.now())
+        )
+    return item
+
+
+def _outbox_receipt(item: dict | None) -> dict | None:
+    if not item:
+        return None
+    return {
+        key: item.get(key)
+        for key in (
+            "id", "kind", "status", "attempts", "maxAttempts", "nextAttemptAt",
+            "lastError", "createdAt", "updatedAt", "approvedAt", "sentAt",
+        )
+    }
+
+
+def _retry_tool_outbox(item_id: str, runtime_context) -> dict:
+    if runtime_context is None:
+        return {"ok": False, "error": "runtime_context_required"}
+    from infrastructure.outbox import claim_for_sending, get_item, mark_failed, mark_sent
+    from terminal.api.tool_stage import ApprovalExecution
+
+    item = get_item(runtime_context.db_path, item_id)
+    if item is None:
+        return {"ok": False, "error": "outbox_not_found", "id": item_id}
+    if item["kind"] != "tool.execute":
+        return {"ok": False, "error": "unsupported_outbox_kind", "kind": item["kind"]}
+    if item["status"] == "sent":
+        return {
+            **dict(item.get("result") or {}),
+            "reused": True,
+            "outbox": _outbox_receipt(item),
+        }
+    claimed = claim_for_sending(
+        runtime_context.db_path, item_id, now=runtime_context.now(), force=True,
+    )
+    if claimed is None:
+        return {"ok": False, "error": "outbox_not_retryable", "outbox": _outbox_receipt(item)}
+    payload = claimed.get("payload") or {}
+    draft = payload.get("draft") if isinstance(payload, dict) else None
+    if not isinstance(draft, dict):
+        failed = mark_failed(
+            runtime_context.db_path, item_id, "stored draft is missing",
+            now=runtime_context.now(),
+        )
+        return {"ok": False, "error": "stored_draft_missing", "outbox": _outbox_receipt(failed)}
+    event_id = str(draft.get("eventId") or item_id)
+    try:
+        execution = _run_approved_draft(draft)
+    except Exception as exc:
+        failed = mark_failed(
+            runtime_context.db_path, item_id, str(exc), now=runtime_context.now(),
+        )
+        return {"ok": False, "error": str(exc), "outbox": _outbox_receipt(failed)}
+    response = _finalize_approval(
+        event_id, "approved", draft,
+        ApprovalExecution(
+            execution.executed, execution.output, execution.message,
+            execution.work_receipt, execution.raw_result,
+        ),
+        "",
+    )
+    if execution.executed:
+        final_item = mark_sent(
+            runtime_context.db_path, item_id, response, now=runtime_context.now(),
+        )
+    else:
+        final_item = mark_failed(
+            runtime_context.db_path, item_id, execution.message, now=runtime_context.now(),
+        )
+    response["outbox"] = _outbox_receipt(final_item)
+    return response
 
 
 def _tool_draft_from_approval_fallback(event_id: str, fallback: object) -> dict | None:
@@ -586,6 +738,26 @@ def payload_get(path: str, runtime_context=None) -> tuple[int, dict | list]:
         limit_match = re.search(r"(?:\?|&)limit=([0-9]+)", path)
         limit = int(limit_match.group(1)) if limit_match else 20
         return 200, read_tool_approval_audit(limit)
+    if path == "/outbox" or path.startswith("/outbox?"):
+        from infrastructure.outbox import list_items
+        from memory.store import DB_PATH
+
+        db_path = getattr(runtime_context, "db_path", DB_PATH)
+        status_match = re.search(r"(?:\?|&)status=([^&]+)", path)
+        statuses = None
+        if status_match:
+            statuses = {
+                value for value in urllib.parse.unquote(status_match.group(1)).split(",") if value
+            }
+        limit_match = re.search(r"(?:\?|&)limit=([0-9]+)", path)
+        limit = int(limit_match.group(1)) if limit_match else 100
+        return 200, {
+            "ok": True,
+            "items": [
+                _outbox_receipt(item)
+                for item in list_items(db_path, statuses=statuses, limit=limit)
+            ],
+        }
     if path == "/jobs":
         return 200, _list_jobs()
     if path == "/schedules":
@@ -652,7 +824,11 @@ def payload_post(path: str, payload: dict, runtime_context=None) -> tuple[int, d
     if path == "/chat":
         return 200, _chat(payload)
     if path == "/tool-approvals":
-        return 200, _tool_approval(payload)
+        return 200, _tool_approval(payload, runtime_context)
+    outbox_retry = re.fullmatch(r"/outbox/([^/]+)/retry", path)
+    if outbox_retry:
+        result = _retry_tool_outbox(outbox_retry.group(1), runtime_context)
+        return (200 if result.get("ok") else 409), result
     if path == "/sessions":
         return 200, _save_session(payload)
     if path == "/threads":

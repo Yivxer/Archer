@@ -21,6 +21,7 @@ def test_reuse_cached_approval_marks_result_without_execution():
 
 def test_denied_response_is_always_zero_side_effect():
     assert build_denied_response("e1") == {"ok": True, "eventId": "e1", "decision": "denied", "executed": False, "output": "", "message": "已取消，未执行。"}
+    assert build_denied_response("e1", trace_id="trace-denied-1")["traceId"] == "trace-denied-1"
 
 
 def test_fingerprint_reuse_rebinds_event_without_execution():

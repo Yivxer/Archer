@@ -36,16 +36,18 @@ def test_empty_database_upgrades_to_latest_schema(tmp_path):
     )
 
     assert result.version == LATEST_SCHEMA_VERSION
-    assert result.applied == [LATEST_SCHEMA_VERSION]
+    assert result.applied == list(range(1, LATEST_SCHEMA_VERSION + 1))
     rows = _schema_rows(db_path)
-    assert rows[0][0] == LATEST_SCHEMA_VERSION
-    assert rows[0][1]
-    assert rows[0][2]
-    assert rows[0][3] == "2026-07-10T13:00:00"
+    assert [row[0] for row in rows] == list(range(1, LATEST_SCHEMA_VERSION + 1))
+    assert all(row[1] and row[2] for row in rows)
+    assert all(row[3] == "2026-07-10T13:00:00" for row in rows)
 
     conn = sqlite3.connect(db_path)
     assert conn.execute(
         "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='memories'"
+    ).fetchone()[0] == 1
+    assert conn.execute(
+        "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='durable_outbox'"
     ).fetchone()[0] == 1
     conn.close()
 
@@ -74,10 +76,10 @@ def test_repeated_start_does_not_reapply_migrations_or_create_backup(tmp_path):
     first = run_migrations(db_path)
     second = run_migrations(db_path)
 
-    assert first.applied == [LATEST_SCHEMA_VERSION]
+    assert first.applied == list(range(1, LATEST_SCHEMA_VERSION + 1))
     assert second.applied == []
     assert second.backup_path is None
-    assert len(_schema_rows(db_path)) == 1
+    assert len(_schema_rows(db_path)) == LATEST_SCHEMA_VERSION
 
 
 @pytest.mark.integration

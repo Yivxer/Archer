@@ -246,6 +246,12 @@ def create_app(
             clock=app.state.runtime_context.clock,
         )
         app.state.schema_version = migration_result.version
+        from infrastructure.outbox import recover_interrupted
+
+        app.state.outbox_recovered = recover_interrupted(
+            app.state.runtime_context.db_path,
+            now=app.state.runtime_context.now(),
+        )
 
         try:
             from memory.portable_export import create_rotating_backup

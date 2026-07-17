@@ -95,8 +95,11 @@ def reuse_fingerprint_approval(event_id: str, fingerprint: str, cached: dict | N
     return response
 
 
-def build_denied_response(event_id: str) -> dict:
-    return {"ok": True, "eventId": event_id, "decision": "denied", "executed": False, "output": "", "message": "已取消，未执行。"}
+def build_denied_response(event_id: str, *, trace_id: str = "") -> dict:
+    response = {"ok": True, "eventId": event_id, "decision": "denied", "executed": False, "output": "", "message": "已取消，未执行。"}
+    if trace_id:
+        response["traceId"] = trace_id
+    return response
 
 
 def execute_approved_draft(

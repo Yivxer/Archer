@@ -59,12 +59,24 @@ def _apply_baseline_schema(db_path: Path) -> None:
     initialize_schema(db_path)
 
 
+def _apply_durable_outbox_schema(db_path: Path) -> None:
+    from infrastructure.outbox import init_outbox_table
+
+    init_outbox_table(db_path)
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     Migration.create(
         1,
         "baseline current Archer schema",
         _apply_baseline_schema,
         checksum_material="archer-baseline-schema-v1",
+    ),
+    Migration.create(
+        2,
+        "durable outbox state machine",
+        _apply_durable_outbox_schema,
+        checksum_material="archer-durable-outbox-v2",
     ),
 )
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1].version
