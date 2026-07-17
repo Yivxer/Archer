@@ -4,8 +4,7 @@ import type { ArcherAdapter, HypothesisItem, ReviewPeriod, SoulFileName, SoulPro
 import { ConfirmDialog, MarkdownMessage } from '../components/common'
 import { EmptyState } from '../components/EmptyState'
 import { LoadingState } from '../components/LoadingState'
-import { importSoulAction, loadAllSoul, useSoulStore } from '../lib/soulStore'
-import { exportPortableData } from '../adapters/localArcher'
+import { exportPortableDataAction, importSoulAction, loadAllSoul, useSoulStore } from '../lib/soulStore'
 
 export function SoulPage({ data }: { data: ArcherAdapter }) {
   const [file, setFile] = React.useState<SoulFileName>('SOUL.md')
@@ -48,7 +47,7 @@ export function SoulPage({ data }: { data: ArcherAdapter }) {
     setExportMessage('')
     setFileError('')
     try {
-      const result = await exportPortableData()
+      const result = await exportPortableDataAction()
       setExportMessage(`已导出 JSON + Markdown：${result.jsonPath}`)
     } catch (err) {
       setFileError(err instanceof Error ? err.message : '导出失败')

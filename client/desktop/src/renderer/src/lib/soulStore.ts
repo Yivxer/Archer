@@ -11,6 +11,7 @@ import {
   fetchSoulFiles,
   fetchSoulProfile,
   fetchVaultReflections,
+  exportPortableData,
   importSoul,
   triggerVaultReflection,
 } from '../adapters/localArcher'
@@ -107,6 +108,10 @@ export async function importSoulAction(soulData: Record<string, unknown>): Promi
     }))
     throw err
   }
+}
+
+export async function exportPortableDataAction() {
+  return exportPortableData()
 }
 
 /**
