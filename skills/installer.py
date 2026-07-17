@@ -232,6 +232,12 @@ def remove_plugin_bundle(name: str) -> None:
     remove_plugin(name)
 
 
+def set_plugin_bundle_enabled(name: str, enabled: bool) -> dict:
+    from core.plugin import set_plugin_enabled
+
+    return set_plugin_enabled(name, enabled)
+
+
 def schema() -> dict:
     return {
         "type": "function",

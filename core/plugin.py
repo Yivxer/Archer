@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import tempfile
@@ -20,7 +21,10 @@ PLUGIN_MANIFEST = "plugin.json"
 PLUGIN_DIR_NAME = ".archer-plugin"
 INSTALLED_REGISTRY = "installed.json"
 PLUGIN_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$", re.I)
+PLUGIN_VERSION_RE = re.compile(r"^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$")
 SKILL_NAME_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_-]{0,63}$")
+PLUGIN_RISKS = frozenset({"low", "medium", "high", "critical"})
+JSON_SCHEMA_TYPES = frozenset({"object", "array", "string", "number", "integer", "boolean", "null"})
 
 
 def plugins_dir(default: Path | None = None) -> Path:
@@ -51,7 +55,17 @@ def _load_registry(base: Path | None = None) -> dict[str, Any]:
 
 def _save_registry(data: dict[str, Any], base: Path | None = None) -> None:
     path = _registry_path(base)
-    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    fd, raw_tmp = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+    tmp_path = Path(raw_tmp)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(data, handle, ensure_ascii=False, indent=2)
+            handle.flush()
+            os.fsync(handle.fileno())
+        tmp_path.replace(path)
+    except Exception:
+        tmp_path.unlink(missing_ok=True)
+        raise
 
 
 def _is_plugin_url(source: str) -> bool:
@@ -145,8 +159,21 @@ def validate_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
     version = str(manifest.get("version", "")).strip()
     if not name or not PLUGIN_NAME_RE.fullmatch(name):
         raise ValueError("plugin.json 缺少合法 name（字母数字_-）")
-    if not version:
-        raise ValueError("plugin.json 缺少 version")
+    if not PLUGIN_VERSION_RE.fullmatch(version):
+        raise ValueError("plugin.json version 必须是 semver")
+    risk = manifest.get("risk")
+    if not isinstance(risk, str) or risk not in PLUGIN_RISKS:
+        raise ValueError("plugin.json risk 必须是 low/medium/high/critical")
+    auto_trigger = manifest.get("auto_trigger")
+    if not isinstance(auto_trigger, bool):
+        raise ValueError("plugin.json auto_trigger 必须是 boolean")
+    permissions = manifest.get("permissions")
+    if not isinstance(permissions, list) or any(
+        not isinstance(item, str) or not item.strip() for item in permissions
+    ):
+        raise ValueError("plugin.json permissions 必须是非空字符串数组（可为空数组）")
+    inputs = _validate_io_schema("inputs", manifest.get("inputs"))
+    outputs = _validate_io_schema("outputs", manifest.get("outputs"))
     description = str(manifest.get("description", "")).strip()
     skills = manifest.get("skills")
     modes = manifest.get("modes")
@@ -161,10 +188,24 @@ def validate_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
         "name": name,
         "version": version,
         "description": description,
+        "risk": risk,
+        "auto_trigger": auto_trigger,
+        "permissions": list(dict.fromkeys(item.strip() for item in permissions)),
+        "inputs": inputs,
+        "outputs": outputs,
         "skills": [str(s) for s in skills] if skills else None,
         "modes": [str(m) for m in modes] if modes else None,
         "hooks": hooks if isinstance(hooks, dict) else None,
     }
+
+
+def _validate_io_schema(field: str, value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise ValueError(f"plugin.json {field} 必须是 JSON schema object")
+    schema_type = value.get("type")
+    if not isinstance(schema_type, str) or schema_type not in JSON_SCHEMA_TYPES:
+        raise ValueError(f"plugin.json {field}.type 非法")
+    return dict(value)
 
 
 def _discover_skill_files(plugin_root: Path, manifest: dict[str, Any]) -> list[Path]:
@@ -287,30 +328,61 @@ def _install_plugin_root(
         base=base,
         replacing=name if force else None,
     )
-    if conflicts and not force:
+    if conflicts:
         raise ValueError("安装冲突：\n- " + "\n- ".join(conflicts))
 
-    dest_root = plugins_dir(base) / name
-    if dest_root.exists():
-        if not force:
-            raise ValueError(f"插件目录已存在：{name}（使用 force 覆盖）")
-        shutil.rmtree(dest_root)
-    shutil.copytree(plugin_root, dest_root)
+    root = plugins_dir(base)
+    root.mkdir(parents=True, exist_ok=True)
+    dest_root = root / name
+    if dest_root.exists() and not force:
+        raise ValueError(f"插件目录已存在：{name}（使用 force 覆盖）")
 
-    skill_files = _discover_skill_files(dest_root, manifest)
-    mode_files = _discover_mode_files(dest_root, manifest)
+    staging_root = Path(tempfile.mkdtemp(prefix=f".{name}.installing-", dir=root))
+    backup_root: Path | None = None
+    previous_registry = _load_registry(base)
+    shutil.rmtree(staging_root)
+    try:
+        shutil.copytree(plugin_root, staging_root)
+        skill_files = _discover_skill_files(staging_root, manifest)
+        mode_files = _discover_mode_files(staging_root, manifest)
+    except Exception:
+        if staging_root.exists():
+            shutil.rmtree(staging_root)
+        raise
     record = {
         "name": name,
         "version": manifest["version"],
         "description": manifest.get("description", ""),
         "path": str(dest_root),
+        "enabled": True,
+        "risk": manifest["risk"],
+        "auto_trigger": manifest["auto_trigger"],
+        "permissions": manifest["permissions"],
         "installed_at": datetime.now(timezone.utc).isoformat(),
         "skill_count": len(skill_files),
         "mode_count": len(mode_files),
     }
-    registry = _load_registry(base)
+    registry = json.loads(json.dumps(previous_registry))
     registry.setdefault("plugins", {})[name] = record
-    _save_registry(registry, base)
+    try:
+        if dest_root.exists():
+            backup_root = root / f".{name}.backup"
+            if backup_root.exists():
+                shutil.rmtree(backup_root)
+            dest_root.replace(backup_root)
+        staging_root.replace(dest_root)
+        _save_registry(registry, base)
+    except Exception:
+        if dest_root.exists():
+            shutil.rmtree(dest_root)
+        if backup_root is not None and backup_root.exists():
+            backup_root.replace(dest_root)
+        if staging_root.exists():
+            shutil.rmtree(staging_root)
+        raise
+    finally:
+        if backup_root is not None and backup_root.exists():
+            shutil.rmtree(backup_root)
 
     from skills.loader import reset_skill_registry
 
@@ -332,18 +404,49 @@ def remove_plugin(name: str, *, base: Path | None = None) -> None:
     if name not in plugins:
         raise FileNotFoundError(f"插件未安装：{name}")
     dest = Path(plugins[name].get("path", plugins_dir(base) / name))
+    backup = dest.parent / f".{name}.removing"
+    if backup.exists():
+        shutil.rmtree(backup)
     if dest.exists():
-        shutil.rmtree(dest)
+        dest.replace(backup)
     del plugins[name]
-    _save_registry(registry, base)
+    try:
+        _save_registry(registry, base)
+    except Exception:
+        if backup.exists():
+            backup.replace(dest)
+        raise
+    if backup.exists():
+        shutil.rmtree(backup)
     from skills.loader import reset_skill_registry
 
     reset_skill_registry()
 
 
+def set_plugin_enabled(name: str, enabled: bool, *, base: Path | None = None) -> dict[str, Any]:
+    if not PLUGIN_NAME_RE.fullmatch(name):
+        raise ValueError("插件名非法")
+    registry = _load_registry(base)
+    plugins = registry.get("plugins", {})
+    if name not in plugins:
+        raise FileNotFoundError(f"插件未安装：{name}")
+    record = dict(plugins[name])
+    record["enabled"] = bool(enabled)
+    plugins[name] = record
+    _save_registry(registry, base)
+    from skills.loader import reset_skill_registry
+
+    reset_skill_registry()
+    return record
+
+
+def _enabled_plugins(base: Path | None = None) -> list[dict[str, Any]]:
+    return [entry for entry in list_installed(base) if entry.get("enabled", True) is True]
+
+
 def iter_installed_skill_paths(base: Path | None = None) -> dict[str, Path]:
     out: dict[str, Path] = {}
-    for entry in list_installed(base):
+    for entry in _enabled_plugins(base):
         root = Path(entry["path"])
         if not root.is_dir():
             continue
@@ -361,7 +464,7 @@ def iter_installed_skill_paths(base: Path | None = None) -> dict[str, Path]:
 
 
 def find_plugin_mode_file(mode_name: str, base: Path | None = None) -> Path | None:
-    for entry in list_installed(base):
+    for entry in _enabled_plugins(base):
         root = Path(entry["path"])
         candidate = root / "modes" / f"{mode_name}.md"
         if candidate.is_file():
@@ -378,7 +481,7 @@ def find_plugin_mode_file(mode_name: str, base: Path | None = None) -> Path | No
 
 def iter_plugin_mode_names(base: Path | None = None) -> set[str]:
     names: set[str] = set()
-    for entry in list_installed(base):
+    for entry in _enabled_plugins(base):
         root = Path(entry["path"])
         try:
             manifest = load_manifest(root)
@@ -391,7 +494,7 @@ def iter_plugin_mode_names(base: Path | None = None) -> set[str]:
 
 def load_plugin_hook_definitions(base: Path | None = None) -> list[HookDefinition]:
     hooks: list[HookDefinition] = []
-    for entry in list_installed(base):
+    for entry in _enabled_plugins(base):
         root = Path(entry["path"])
         raw_hooks: dict[str, Any] | None = None
         manifest = load_manifest(root)

@@ -18,6 +18,8 @@ from core.plugin import (
     materialize_plugin_source,
     remove_plugin,
     resolve_plugin_root,
+    set_plugin_enabled,
+    validate_manifest,
 )
 from core.stance import available_modes
 from skills.loader import register_all_skills, reset_skill_registry
@@ -31,6 +33,11 @@ def _write_demo_plugin(root, *, skill_name: str = "demo_hello") -> None:
                 "name": "demo-plugin",
                 "version": "1.0.0",
                 "description": "Demo bundle",
+                "risk": "low",
+                "auto_trigger": False,
+                "permissions": [],
+                "inputs": {"type": "object", "properties": {}},
+                "outputs": {"type": "object", "properties": {}},
                 "hooks": {
                     "SessionStart": [
                         {"type": "command", "command": "echo '{\"continue\": true}'"},
@@ -97,6 +104,7 @@ def test_install_list_remove_plugin(plugin_home, tmp_path):
     assert record["name"] == "demo-plugin"
     assert record["skill_count"] == 1
     assert record["mode_count"] == 1
+    assert record["enabled"] is True
 
     items = list_installed(plugin_home)
     assert len(items) == 1
@@ -107,6 +115,15 @@ def test_install_list_remove_plugin(plugin_home, tmp_path):
 
     modes = available_modes({"persona": {"modes": {}, "modes_dir": ""}})
     assert "demo_mode" in modes
+
+    set_plugin_enabled("demo-plugin", False, base=plugin_home)
+    assert list_installed(plugin_home)[0]["enabled"] is False
+    assert "demo_hello" not in register_all_skills(force=True)
+    assert "demo_mode" not in available_modes({"persona": {"modes": {}, "modes_dir": ""}})
+    assert load_plugin_hook_definitions(plugin_home) == []
+
+    set_plugin_enabled("demo-plugin", True, base=plugin_home)
+    assert "demo_hello" in register_all_skills(force=True)
 
     remove_plugin("demo-plugin", base=plugin_home)
     assert list_installed(plugin_home) == []
@@ -171,3 +188,53 @@ def test_materialize_local_directory(tmp_path):
     path, cleanup = materialize_plugin_source(source)
     assert resolve_plugin_root(path).name == "src"
     assert cleanup is None
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("version", "latest"),
+        ("risk", None),
+        ("auto_trigger", "false"),
+        ("permissions", "filesystem"),
+        ("inputs", []),
+        ("outputs", {"type": "unknown"}),
+    ],
+)
+def test_manifest_requires_extension_contract(field, value):
+    manifest = {
+        "name": "demo-plugin",
+        "version": "1.0.0",
+        "risk": "low",
+        "auto_trigger": False,
+        "permissions": [],
+        "inputs": {"type": "object"},
+        "outputs": {"type": "object"},
+    }
+    manifest[field] = value
+    with pytest.raises(ValueError, match=field):
+        validate_manifest(manifest)
+
+
+def test_install_rolls_back_when_registry_write_fails(plugin_home, tmp_path, monkeypatch):
+    source = tmp_path / "src"
+    _write_demo_plugin(source)
+    monkeypatch.setattr("core.plugin._save_registry", lambda *args, **kwargs: (_ for _ in ()).throw(OSError("disk full")))
+
+    with pytest.raises(OSError, match="disk full"):
+        install_plugin(source, base=plugin_home)
+
+    assert not (plugin_home / "demo-plugin").exists()
+    assert not any(plugin_home.glob(".demo-plugin.installing-*"))
+
+
+def test_remove_rolls_back_when_registry_write_fails(plugin_home, tmp_path, monkeypatch):
+    source = tmp_path / "src"
+    _write_demo_plugin(source)
+    install_plugin(source, base=plugin_home)
+    monkeypatch.setattr("core.plugin._save_registry", lambda *args, **kwargs: (_ for _ in ()).throw(OSError("disk full")))
+
+    with pytest.raises(OSError, match="disk full"):
+        remove_plugin("demo-plugin", base=plugin_home)
+
+    assert (plugin_home / "demo-plugin" / "plugin.json").is_file()
