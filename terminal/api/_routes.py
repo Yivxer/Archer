@@ -791,7 +791,7 @@ def payload_post(path: str, payload: dict, runtime_context=None) -> tuple[int, d
     if path == "/initiative-shadow/presence":
         return _initiative_presence(payload)
     if path == "/initiative-shadow/opt-in":
-        return _initiative_delivery_opt_in(payload)
+        return _initiative_delivery_opt_in(payload, runtime_context)
     if path == "/jobs":
         return 200, _create_job(payload)
     if path == "/schedules":

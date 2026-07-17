@@ -6,6 +6,8 @@ MAIN_TSX = ROOT / "client/desktop/src/renderer/src/main.tsx"
 TODAY_PAGE = ROOT / "client/desktop/src/renderer/src/pages/TodayPage.tsx"
 PAGES_CSS = ROOT / "client/desktop/src/renderer/src/styles/pages.css"
 TYPES_TS = ROOT / "client/desktop/src/renderer/src/types.ts"
+REVIEW_PANELS = ROOT / "client/desktop/src/renderer/src/components/ReviewPanels.tsx"
+REVIEW_PAGE = ROOT / "client/desktop/src/renderer/src/pages/ReviewPage.tsx"
 
 
 def test_today_route_and_page_are_wired_into_desktop_navigation():
@@ -21,8 +23,9 @@ def test_today_page_shows_shadow_candidates_without_delivery_controls():
     source = TODAY_PAGE.read_text()
 
     assert "data.initiativeShadow.items" in source
-    assert "主动影子候选" in source
-    assert "不进入聊天，也不触发通知" in source
+    assert "话题拾起候选" in source
+    assert "不进入聊天，也不触发系统通知" in source
+    assert "item.kind === 'thread_resume'" in source
     assert 'aria-label="今日主动候选"' in source
     assert "暂无可展示的主动候选" in source
     assert "onDeliver" not in source
@@ -93,3 +96,16 @@ def test_today_page_surfaces_delivery_gate_without_opt_in_control():
     assert "remainingObservationDays" in source
     assert "earliestReviewAt" in source
     assert "onOptInDelivery" not in source
+
+
+def test_today_and_review_offer_explicit_reversible_thread_resume_opt_in():
+    today = TODAY_PAGE.read_text()
+    review_panels = REVIEW_PANELS.read_text()
+    review_page = REVIEW_PAGE.read_text()
+
+    assert "授权话题拾起" in today
+    assert "关闭话题拾起" in today
+    assert "setInitiativeDeliveryOptIn" in review_panels
+    assert "授权话题拾起" in review_panels
+    assert "关闭话题拾起" in review_panels
+    assert "onRefresh={onRefresh}" in review_page

@@ -170,6 +170,55 @@ def list_shadow_logs(db_path: Path = DB_PATH, *, limit: int = 20) -> list[dict[s
     return [_format_log(dict(row)) for row in rows]
 
 
+def get_shadow_log(db_path: Path, log_id: int) -> dict[str, Any] | None:
+    init_table(db_path)
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    row = conn.execute("SELECT * FROM initiative_sent_log WHERE id=?", (int(log_id),)).fetchone()
+    conn.close()
+    return _format_log(dict(row)) if row else None
+
+
+def mark_initiative_delivered(
+    db_path: Path,
+    log_id: int,
+    *,
+    delivery_trace: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Idempotently expose one initiative in Archer's in-app review surfaces."""
+    current = get_shadow_log(db_path, log_id)
+    if current is None:
+        return None
+    trace = dict(current.get("decision_trace") or {})
+    trace["delivery"] = dict(delivery_trace)
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        "UPDATE initiative_sent_log SET delivered=1, decision_trace_json=? WHERE id=?",
+        (json.dumps(trace, ensure_ascii=False, sort_keys=True), int(log_id)),
+    )
+    conn.commit()
+    conn.close()
+    return get_shadow_log(db_path, log_id)
+
+
+def count_delivered_today(
+    db_path: Path,
+    *,
+    kind: str,
+    now: datetime | None = None,
+) -> int:
+    init_table(db_path)
+    date_prefix = (now or datetime.now()).date().isoformat()
+    conn = sqlite3.connect(db_path)
+    row = conn.execute(
+        "SELECT COUNT(*) FROM initiative_sent_log "
+        "WHERE delivered=1 AND kind=? AND created_at >= ? AND created_at < ?",
+        (kind, f"{date_prefix}T00:00:00", f"{date_prefix}T23:59:59"),
+    ).fetchone()
+    conn.close()
+    return int(row[0] if row else 0)
+
+
 def _format_log(row: dict[str, Any]) -> dict[str, Any]:
     try:
         trace = json.loads(row.get("decision_trace_json") or "{}")

@@ -681,7 +681,7 @@ type JobStoreState = {
 
 **注意**：runtimeStore 的 `state.jobs` 是 `JobEvent`（SSE 事件），jobStore 的 `state.jobs` 是 `BackgroundJob`（API 拉取）。两者并存，jobStore 是页面消费的真值；runtimeStore 的 JobEvent 用于 trace log。
 
-### initiativeStore（L3.6，只读）
+### initiativeStore（L3.6，受控 Part 8 投影）
 
 **真值来源**：`/initiative-shadow` + 4 个子端点（report/long-term-report/delivery-gate/review-packet）+ SSE 增量
 
@@ -700,12 +700,12 @@ type InitiativeStoreState = {
 | `loadAll()` | GET /initiative-shadow?limit=5 + 4 子端点（并发） | 替换 review |
 | `submitFeedback(id, feedback)` | POST /initiative-shadow/{id}/feedback | refresh review.items |
 | `setPresence(state)` | POST /initiative-shadow/presence | refresh review.presenceState |
-| `setDeliveryOptIn(enabled)` | POST /initiative-shadow/opt-in | refresh review.optIn + deliveryGate |
+| `setDeliveryOptIn(enabled)` | POST /initiative-shadow/opt-in | refresh review.optIn + deliveryGate；关闭时取消未发送的 `initiative.thread_resume` Outbox 项 |
 | `mergeSseEvent(event)` | （无 API，由 SSE initiative.event 注入） | 合并到 review.items |
 
-**订阅者**：TodayPage、main.tsx（SSE 合并）
+**订阅者**：TodayPage、ReviewPage、main.tsx（SSE 合并）
 
-**Part 8 边界**：initiativeStore 只读消费 shadow 事件，不写入聊天（与 L2.5 一致）。
+**Part 8 边界**：唯一 live slice 是 `thread_resume`。只有观察门槛、人工复核就绪和显式 opt-in 同时通过，且 presence 为 idle、当日尚未投递时，后端才通过 `initiative.thread_resume` Durable Outbox 标记为 Archer 应用内已投递。它不写入聊天，不触发系统通知或外部渠道；其他 Part 8 模块继续冻结。
 
 ### 跨 store 联动（L3.7，事件总线）
 

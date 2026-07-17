@@ -32,6 +32,14 @@ def _yield_shadow_initiative_events(runtime_context: RuntimeContext | None = Non
 
         db_path, now = _runtime_values(runtime_context)
         for log in scan_thread_resume_candidates(db_path=db_path, now=now):
+            try:
+                from core.initiative_delivery import queue_thread_resume
+                from core.initiative_shadow import get_shadow_log
+
+                queue_thread_resume(db_path, int(log["id"]), now=now)
+                log = get_shadow_log(db_path, int(log["id"])) or log
+            except Exception:
+                pass
             yield {
                 "type": "initiativeEvent",
                 "initiativeEvent": _initiative_event_from_log(log),

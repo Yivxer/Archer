@@ -10,7 +10,9 @@ export function TodayPage({
   data: ArcherAdapter
   onRefresh: () => Promise<void>
 }) {
-  const candidates = data.initiativeShadow.items.slice(0, 3)
+  const candidates = data.initiativeShadow.items
+    .filter((item) => item.kind === 'thread_resume')
+    .slice(0, 3)
   const throttleLabel = data.initiativeShadow.globalThrottleActive ? '降频中' : 'Shadow 观察中'
   const presenceLabel = data.initiativeShadow.presenceState === 'muted'
     ? '已静音'
@@ -82,8 +84,8 @@ export function TodayPage({
       <header className="today-page-head">
         <div>
           <div className="today-kicker"><Eye size={15} /> Today</div>
-          <h1>主动候选</h1>
-          <p>不进入聊天，也不触发通知。</p>
+          <h1>话题拾起候选</h1>
+          <p>唯一 live slice；只在 Archer 内展示，不进入聊天，也不触发系统通知。</p>
         </div>
         <div className="today-head-actions">
           <span className="today-state"><ShieldCheck size={14} /> {throttleLabel}</span>
@@ -170,7 +172,7 @@ export function TodayPage({
 
       <section className="today-validation" aria-label="Shadow 切真发送保险丝">
         <div className="today-section-head">
-          <h2>切真发送保险丝</h2>
+          <h2>话题拾起投递保险丝</h2>
           <span>{deliveryGate.shadowOnly ? 'Shadow 锁定' : '可人工开启'}</span>
         </div>
         <div className="today-validation-grid">
@@ -202,7 +204,7 @@ export function TodayPage({
             disabled={Boolean(busy)}
           >
             {busy === 'opt-in' ? <LoaderCircle size={15} className="spin" /> : <ShieldCheck size={15} />}
-            {optIn.enabled ? '撤回授权' : '显式授权'}
+            {optIn.enabled ? '关闭话题拾起' : '授权话题拾起'}
           </button>
         )}
         <div className="today-validation-reasons">
@@ -214,7 +216,7 @@ export function TodayPage({
 
       <section className="today-candidates" aria-label="今日主动候选">
         <div className="today-section-head">
-          <h2>主动影子候选</h2>
+          <h2>话题拾起候选</h2>
           <span>{candidates.length}</span>
         </div>
         {candidates.length ? (

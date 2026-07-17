@@ -252,6 +252,12 @@ def create_app(
             app.state.runtime_context.db_path,
             now=app.state.runtime_context.now(),
         )
+        from core.initiative_delivery import process_thread_resume_outbox
+
+        app.state.initiative_outbox_sent = process_thread_resume_outbox(
+            app.state.runtime_context.db_path,
+            now=app.state.runtime_context.now(),
+        )
 
         try:
             from memory.portable_export import create_rotating_backup

@@ -167,25 +167,46 @@ def _initiative_presence(payload: dict) -> tuple[int, dict]:
     return 200, {"ok": True, "state": result.state, "reason": result.reason}
 
 
-def _initiative_delivery_opt_in(payload: dict) -> tuple[int, dict]:
+def _initiative_delivery_opt_in(payload: dict, runtime_context=None) -> tuple[int, dict]:
     import memory.store as store
+    from core.initiative_delivery import (
+        cancel_pending_thread_resume,
+        newest_undelivered_thread_resume,
+        queue_thread_resume,
+    )
     from core.delivery_opt_in import set_delivery_opt_in
     from core.initiative_shadow import list_shadow_logs
     from core.shadow_validation import evaluate_delivery_gate, evaluate_long_term_validation, evaluate_shadow_validation
 
     if "enabled" not in payload or not isinstance(payload.get("enabled"), bool):
         return 400, {"ok": False, "error": "enabled must be a boolean"}
+    db_path = getattr(runtime_context, "db_path", store.DB_PATH)
+    now = runtime_context.now() if runtime_context is not None else None
+    enabled = bool(payload.get("enabled"))
     opt_in = set_delivery_opt_in(
-        store.DB_PATH,
-        enabled=bool(payload.get("enabled")),
+        db_path,
+        enabled=enabled,
         reason=str(payload.get("reason") or ""),
+        now=now,
     )
-    logs = list_shadow_logs(store.DB_PATH, limit=500)
-    manual_report = evaluate_shadow_validation(logs)
-    long_term_report = evaluate_long_term_validation(logs)
+    cancelled = cancel_pending_thread_resume(db_path, now=now) if not enabled else 0
+    logs = list_shadow_logs(db_path, limit=500)
+    manual_report = evaluate_shadow_validation(logs, now=now)
+    long_term_report = evaluate_long_term_validation(logs, now=now)
     gate = evaluate_delivery_gate(manual_report, long_term_report, explicit_opt_in=opt_in.enabled)
-    return 200, {"ok": True, "shadow": True, "optIn": opt_in.to_dict(), "gate": gate.to_dict()}
+    delivery = None
+    if enabled and gate.can_enable_delivery:
+        candidate = newest_undelivered_thread_resume(db_path)
+        if candidate is not None:
+            delivery = queue_thread_resume(db_path, candidate["id"], now=now)
+    return 200, {
+        "ok": True,
+        "shadow": not bool(delivery and delivery.get("delivered")),
+        "optIn": opt_in.to_dict(),
+        "gate": gate.to_dict(),
+        "delivery": delivery,
+        "cancelled": cancelled,
+    }
 
 
 # ---------------------------------------------------------------------------
-
