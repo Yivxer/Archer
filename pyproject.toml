@@ -50,3 +50,70 @@ ignore = [
 [tool.ruff.lint.isort]
 known-first-party = ["core", "memory", "skills", "workflows", "terminal", "integrations", "knowledge", "infrastructure"]
 combine-as-imports = true
+
+
+# ── mypy 配置 ──────────────────────────────────────────────────────────────────
+# P5 阶段 1：基础设施 + 非阻塞 CI 展示
+# 目标：建立 mypy 基线，让 PR CI 展示错误趋势但不阻塞（continue-on-error: true）
+# 后续阶段：按模块逐步收口，从 278 errors 降到 0 后改为阻塞门禁
+#
+# 本地用法：
+#   mypy                            # 跑全量（按下面配置）
+#   mypy memory/store.py            # 跑单文件
+#
+# 基线（2026-07-18）：278 errors / 64 files / 203 source files
+# Top 错误文件：terminal/commands/memory.py (55)、terminal/api/_routes.py (20)、
+#              terminal/commands/skill.py (18)、skills/docx_editor.py (17)
+[tool.mypy]
+python_version = "3.11"
+explicit_package_bases = true
+ignore_missing_imports = true
+# 不强制 strict，先有基线再说
+# 后续渐进开：warn_return_any, warn_unused_ignores, disallow_untyped_defs 等
+warn_redundant_casts = false
+warn_unused_ignores = false
+warn_return_any = false
+warn_unreachable = false
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+check_untyped_defs = false
+disallow_untyped_decorators = false
+no_implicit_optional = false
+strict_equality = false
+# 排除非源码目录
+exclude = [
+    '\.venv',
+    'client/',
+    'web/',
+    'out/',
+    'release/',
+    'docs/refactor',
+    'docs/superpowers',
+    'tests/',
+]
+
+# terminal/commands/* 用了 deferred/lazy import 模式（函数体内 import），
+# mypy 静态分析会误报 name-defined（77 个，占基线 28%），先整体豁免
+[[tool.mypy.overrides]]
+module = "terminal.commands.*"
+ignore_errors = true
+
+# skills/* 同样大量 lazy import + 动态注册模式，先豁免
+# 待逐个 skill 重构后单独打开
+[[tool.mypy.overrides]]
+module = "skills.*"
+ignore_errors = true
+
+# 历史代码大文件（_routes.py / _tools.py / job_routes.py）错误集中但都是
+# facade re-export / 动态注册模式，后续单独治理
+[[tool.mypy.overrides]]
+module = "terminal.api._routes"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "terminal.api._tools"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "terminal.api.job_routes"
+ignore_errors = true

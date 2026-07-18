@@ -72,6 +72,31 @@ jobs:
       - name: Run ruff check
         run: ruff check . --statistics
 
+  mypy-check:
+    name: Mypy 类型检查（非阻塞，展示错误趋势）
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install mypy
+        run: pip install mypy
+
+      - name: Run mypy
+        # P5 阶段 1：建立基线，CI 展示趋势但不阻塞
+        # 基线（2026-07-18）：128 errors / 50 files / 172 source files
+        # 后续逐模块收口，错误数稳定下降即视为进展
+        run: |
+          mypy core memory workflows terminal knowledge infrastructure \
+            archer.py archer_api.py 2>&1 | tail -30
+
   ts-tests:
     name: TypeScript 单元测试
     runs-on: ubuntu-latest

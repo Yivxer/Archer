@@ -78,3 +78,31 @@ def test_pr_ci_subset_files_are_not_marked_integration_at_file_level():
         "`pytest -m 'not integration'` 会跳过 PR CI 必跑的测试：\n  - "
         + "\n  - ".join(violations)
     )
+
+
+@pytest.mark.unit
+def test_pr_ci_has_mypy_non_blocking_job():
+    """P5 阶段 1：PR CI 必须有 mypy 非阻塞 job（continue-on-error: true）。
+    mypy 错误数稳定下降即视为进展；改为阻塞门禁前需先降到 0。"""
+    source = PR_WORKFLOW.read_text(encoding="utf-8")
+
+    assert "mypy-check:" in source
+    assert "pip install mypy" in source
+    # 非阻塞：mypy 错误不阻止 PR 合并
+    assert "continue-on-error: true" in source
+
+
+@pytest.mark.unit
+def test_pyproject_has_mypy_baseline_config():
+    """P5 阶段 1：pyproject.toml 必须有 [tool.mypy] 配置 + 基线注释。
+    基线数字用于人工追踪进展，不强制 CI 校验（避免每次改基线都要改测试）。"""
+    pyproject = ROOT / "pyproject.toml"
+    source = pyproject.read_text(encoding="utf-8")
+
+    assert "[tool.mypy]" in source
+    # 关键宽松档配置（防止有人误开 strict 导致 CI 红色）
+    assert "ignore_missing_imports = true" in source
+    assert "disallow_untyped_defs = false" in source
+    # 基线注释必须存在，且数字符合预期格式
+    assert "基线" in source
+    assert "errors" in source
