@@ -1,47 +1,4 @@
-export type HugoIntent =
-  | 'execute_publish'
-  | 'ask_capability'
-  | 'content_review'
-  | 'historical_mention'
-  | 'delete_or_unpublish'
-  | 'none'
-
-const QUICK_QUESTION_PREFIXES = [
-  '为什么',
-  '怎么理解',
-  '什么是',
-  '能不能解释',
-  '你觉得',
-]
-
-function isQuickQuestion(text: string): boolean {
-  const compact = text.trim()
-  return compact.length < 180 && QUICK_QUESTION_PREFIXES.some((prefix) => compact.startsWith(prefix))
-}
-
-/** 枫弋札记发布/部署必须走前台流式聊天，才能带上 fileRefs 并执行 hugo_blog。 */
-export function classifyHugoIntent(text: string): HugoIntent {
-  if (isQuickQuestion(text)) {
-    return 'none'
-  }
-  const lowered = text.toLowerCase()
-  const blogTarget = /博客|博文|枫弋|札记|yivxer-blog|iver\.yivxer|枫弋博客|hugo|网站|站点|posts\/|content\/posts/.test(lowered)
-  const publishAction = /部署|发布|上线|上传|推送|同步到服务器|发到|投稿|deploy|publish|upload|rsync/.test(lowered)
-  const questionMarker = /吗|么|？|\?|可以|可不可以|能不能|能否|有没有办法|支持|怎么|如何/.test(text)
-  const assetTarget = /图片|图像|封面|配图|静态资源|static\/images|image|images|cover/i.test(text)
-  const reviewIntent = /帮我分析|分析一下|帮我看看|看一下|看看这|读后感如何|读后感怎么样|读后感|如何|怎么样|评价|建议|优化|调整/.test(text)
-  const pastPublish = /(?:部署|发布|上传|上线)了/.test(text)
-  const activePublishCommand = /(?:帮我|请|麻烦|直接|现在|立刻|马上|给我).{0,16}(?:部署|发布|上传|上线|发到|写到|推送)(?!了)/.test(text)
-
-  if (questionMarker && blogTarget && publishAction && assetTarget) return 'ask_capability'
-  if (reviewIntent && (/\/users\/.+\.md/.test(lowered) || pastPublish) && !activePublishCommand) return 'content_review'
-  if (blogTarget && /删除|下架|移除|撤回|删掉/.test(text)) return 'delete_or_unpublish'
-  if (blogTarget && publishAction) return 'execute_publish'
-  const localMarkdownPublish = /\/users\/.+\.md/.test(lowered) && /文章|笔记/.test(lowered) && publishAction
-  if (localMarkdownPublish) return 'execute_publish'
-  if (pastPublish) return 'historical_mention'
-  return 'none'
-}
+import type { PlanEvent } from './contracts'
 
 export function isHugoBlogPublishPlan(plan: PlanEvent, contextText = ''): boolean {
   const planText = [
@@ -77,5 +34,3 @@ export function isForegroundOnlyWritingFeedbackPlan(plan: PlanEvent): boolean {
     hasMarkdownPath && readonlyIntent && writingFeedback && writeStep
   )
 }
-
-import type { PlanEvent } from './contracts'

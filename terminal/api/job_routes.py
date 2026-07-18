@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import json
-import re
 import threading
 from datetime import datetime
 
+from infrastructure.observability import (
+    bind_trace_context,
+    clear_trace_context,
+    get_logger,
+)
 from terminal.api._config import ROOT, _load_config
 from terminal.api._tools import _failure_hint_event
 
@@ -16,6 +20,8 @@ BACKGROUND_JOBS_LOADED = False
 BACKGROUND_JOBS_PATH = ROOT / "memory" / "background_jobs.json"
 DEFAULT_BACKGROUND_JOB_TIMEOUT_SECONDS = 300
 BACKGROUND_JOB_STALE_SECONDS = 15 * 60
+
+_log = get_logger("archer.job")
 
 
 # Background job routes
@@ -344,38 +350,26 @@ def _run_isolated_child_job_chat(prompt: str, job: dict) -> dict:
         build_subagent_system_prompt,
         select_subagent_enrichment_skills,
     )
+    from terminal.api.job_enrichment import enrich_with_web_fetch, enrich_with_web_search
 
     config = _load_config()
     title = str(job.get("title", "")).replace("[子] ", "").strip()
     system = build_subagent_system_prompt(config, title, prompt)
+    job_id = str(job.get("id", ""))
 
     tool_parts: list[str] = []
     system_parts = [system]
 
+    # 子任务隔离模式按 subagent skill selector 选择性执行 web 类只读工具
     for skill_name in select_subagent_enrichment_skills(prompt):
         if skill_name == "web_search":
-            try:
-                from skills.web_search import run as web_search_run
-
-                result = web_search_run({"query": prompt[:200], "max_results": 5})
-                if result and not str(result).startswith("未找到"):
-                    system_parts.append(f"互联网搜索结果（{prompt[:80]}）：\n{result}")
-                    tool_parts.append("[web_search] 搜索完成")
-            except Exception as exc:
-                tool_parts.append(f"[web_search] 失败: {exc}")
+            ws_sys, ws_tools = enrich_with_web_search(prompt, job_id=job_id)
+            system_parts.extend(ws_sys)
+            tool_parts.extend(ws_tools)
         elif skill_name == "web_fetch":
-            url_match = re.search(r'https?://[^\s）)>"\'<\]]+', prompt)
-            if url_match:
-                target_url = url_match.group(0).rstrip(".。，,;；")
-                try:
-                    from skills.web_fetch import run as web_fetch_run
-
-                    fetch = web_fetch_run({"url": target_url, "max_chars": 4000})
-                    if fetch:
-                        system_parts.append(f"网页内容（{target_url}）：\n{fetch}")
-                        tool_parts.append(f"[web_fetch] {target_url}")
-                except Exception as exc:
-                    tool_parts.append(f"[web_fetch] 失败: {exc}")
+            wf_sys, wf_tools = enrich_with_web_fetch(prompt, job_id=job_id)
+            system_parts.extend(wf_sys)
+            tool_parts.extend(wf_tools)
 
     messages = [
         {"role": "system", "content": "\n\n".join(system_parts)},
@@ -404,225 +398,205 @@ def _run_job_chat_with_tools(prompt: str, job_id: str) -> dict:
     are skipped — they require user approval which isn't available in background.
     """
     from core.subagent_context import is_isolated_job
+    from terminal.api.job_enrichment import enrich_context_for_chat
 
-    with BACKGROUND_JOB_LOCK:
-        job = dict(BACKGROUND_JOBS.get(job_id) or {})
-    if is_isolated_job(job):
-        return _run_isolated_child_job_chat(prompt, job)
-
-    from core.context import classify_query_intent
-    from core.llm import stream_chat
-    from terminal.api._tools import _select_api_skills, _filter_api_skills_for_intent
-
-    config = _load_config()
-    intent_info = classify_query_intent(prompt)
-
-    tool_parts: list[str] = []
-    enriched_messages: list[dict] = [{"role": "user", "content": prompt}]
-    system_context: list[str] = []
-
-    # ── 1. Memory retrieval (conservative mode, limit 5) ──
+    # structlog contextvars 不跨线程继承，进入工作线程后必须重新 bind
+    trace_id = f"trace-{job_id}"
+    bind_trace_context(trace_id=trace_id, job_id=job_id, stage="job_chat")
+    _log.info("job_chat_start", job_id=job_id, prompt_len=len(prompt))
     try:
-        from core.experts import active_expert, expert_memory_tags, format_expert_block
-        from memory.retrieve import for_context, format_for_prompt
+        with BACKGROUND_JOB_LOCK:
+            job = dict(BACKGROUND_JOBS.get(job_id) or {})
+        if is_isolated_job(job):
+            _log.info("job_chat_isolated", job_id=job_id)
+            return _run_isolated_child_job_chat(prompt, job)
 
-        expert = active_expert(config)
-        expert_block = format_expert_block(expert)
-        if expert_block:
-            system_context.append(expert_block)
+        from core.context import classify_query_intent
+        from core.llm import stream_chat
+        from terminal.api._tools import _select_api_skills, _filter_api_skills_for_intent
 
-        retrieval_kwargs = {
-            "limit": 5,
-            "intent": intent_info.get("intent", ""),
-            "tag_hints": expert_memory_tags(expert) or None,
-        }
-        try:
-            core, related = for_context(prompt, **retrieval_kwargs)
-        except TypeError as exc:
-            if "tag_hints" not in str(exc):
-                raise
-            retrieval_kwargs.pop("tag_hints", None)
-            core, related = for_context(prompt, **retrieval_kwargs)
-        mem_ctx = format_for_prompt(core, related)
-        if mem_ctx:
-            system_context.append(
-                "以下是 Archer 本地记忆检索结果。只在明显相关时使用。\n\n" + mem_ctx
-            )
-            tool_parts.append(f"[memory] 检索到 {len(core)}+{len(related)} 条相关记忆")
+        config = _load_config()
+        intent_info = classify_query_intent(prompt)
+        selected_skills = _filter_api_skills_for_intent(prompt, _select_api_skills(prompt))
+
+        system_context, tool_parts = enrich_context_for_chat(
+            prompt, config, intent_info, selected_skills, job_id=job_id,
+        )
+
+        enriched_messages: list[dict] = [{"role": "user", "content": prompt}]
+        if system_context:
+            enriched_messages = [
+                {"role": "system", "content": "\n\n".join(system_context)},
+                *enriched_messages,
+            ]
+
+        chunks: list[str] = []
+        for chunk in stream_chat(enriched_messages):
+            chunks.append(chunk)
+        text = "".join(chunks)
+
+        if tool_parts:
+            text += "\n\n---\n*后台任务自动执行了以下工具：*\n" + "\n".join(f"- {p}" for p in tool_parts)
+
+        _log.info(
+            "job_chat_complete", job_id=job_id,
+            reply_len=len(text), tool_count=len(tool_parts),
+        )
+        return {"role": "assistant", "text": text}
     except Exception as exc:
-        tool_parts.append(f"[memory] 检索失败: {exc}")
-
-    # ── 2. Web search (if skill router detects search intent) ──
-    selected_skills = _filter_api_skills_for_intent(prompt, _select_api_skills(prompt))
-    if "web_search" in selected_skills:
-        try:
-            from skills.web_search import run as web_search_run
-            result = web_search_run({"query": prompt[:200], "max_results": 5})
-            if result and not str(result).startswith("未找到"):
-                system_context.append(f"互联网搜索结果（{prompt[:80]}）：\n{result}")
-                tool_parts.append("[web_search] 搜索完成")
-        except Exception as exc:
-            tool_parts.append(f"[web_search] 失败: {exc}")
-
-    if "web_fetch" in selected_skills:
-        url_match = __import__("re").search(r'https?://[^\s）)>"\'<\]]+', prompt)
-        if url_match:
-            target_url = url_match.group(0).rstrip('.。，,;；')
-            try:
-                from skills.web_fetch import run as web_fetch_run
-                fetch = web_fetch_run({"url": target_url, "max_chars": 4000})
-                if fetch:
-                    system_context.append(f"网页内容（{target_url}）：\n{fetch}")
-                    tool_parts.append(f"[web_fetch] {target_url}")
-            except Exception as exc:
-                tool_parts.append(f"[web_fetch] 失败: {exc}")
-
-    # ── 3. Assemble enriched messages ──
-    if system_context:
-        enriched_messages = [
-            {"role": "system", "content": "\n\n".join(system_context)},
-            *enriched_messages,
-        ]
-
-    # ── 4. LLM call ──
-    chunks: list[str] = []
-    for chunk in stream_chat(enriched_messages):
-        chunks.append(chunk)
-    text = "".join(chunks)
-
-    # ── 5. Append tool summary to response ──
-    if tool_parts:
-        text += "\n\n---\n*后台任务自动执行了以下工具：*\n" + "\n".join(f"- {p}" for p in tool_parts)
-
-    return {"role": "assistant", "text": text}
+        _log.error("job_chat_failed", job_id=job_id, error=str(exc))
+        raise
+    finally:
+        clear_trace_context("trace_id", "job_id", "stage")
 
 
 def _run_job(job_id: str) -> None:
-    with BACKGROUND_JOB_LOCK:
-        job = dict(BACKGROUND_JOBS.get(job_id) or {})
-    if not job:
-        return
-    _update_job(job_id, status="running")
-    result_holder: dict[str, object] = {}
-    cancel_flag = {"cancelled": False}  # 共享标志，超时后置 True，_execute_chat 内部检查
-
-    def _execute_chat() -> None:
-        try:
-            if cancel_flag["cancelled"]:
-                return  # 超时后不再发起 LLM 调用，避免泄漏 API 配额
-            prompt = str(job.get("prompt", ""))
-            response = _run_job_chat_with_tools(prompt, job_id)
-            if cancel_flag["cancelled"]:
-                return  # LLM 返回后再次检查，避免向已超时任务写入结果
-            result_holder["ok"] = True
-            result_holder["text"] = str(response.get("text", "")).strip()
-        except Exception as exc:
-            if not cancel_flag["cancelled"]:
-                result_holder["ok"] = False
-                result_holder["error"] = str(exc)
-
-    def _execute_vault_reflection() -> None:
-        """后台执行 vault_reflection，不走 LLM 对话链路。"""
-        try:
-            if cancel_flag["cancelled"]:
-                return
-            from workflows.vault_reflection import reflect_on_recent, reflect_on_note
-            args = job.get("vaultArgs") or {}
-            progress_log: list[dict] = []
-            def _on_progress(p: dict) -> None:
-                progress_log.append(p)
-                # 实时更新 job 的 progress 字段，供前端轮询
-                try:
-                    with BACKGROUND_JOB_LOCK:
-                        j = BACKGROUND_JOBS.get(job_id)
-                        if j and j.get("status") == "running":
-                            j["progress"] = progress_log.copy()
-                            j["updatedAt"] = datetime.now().isoformat()
-                            _persist_jobs_locked()
-                except Exception:
-                    pass
-            if args.get("note_path"):
-                result = reflect_on_note(
-                    str(args["note_path"]),
-                    force=bool(args.get("force", False)),
-                )
-            else:
-                result = reflect_on_recent(
-                    days=int(args.get("days", 7)),
-                    max_notes=int(args.get("maxNotes", 5)),
-                    force=bool(args.get("force", False)),
-                    progress_callback=_on_progress,
-                )
-            if cancel_flag["cancelled"]:
-                return
-            result_holder["ok"] = bool(result.get("ok"))
-            result_holder["text"] = json.dumps(result, ensure_ascii=False)
-        except Exception as exc:
-            if not cancel_flag["cancelled"]:
-                result_holder["ok"] = False
-                result_holder["error"] = str(exc)
-
-    # 按 kind 分派
-    job_kind = str(job.get("kind", ""))
-    if job_kind == "vault_reflection":
-        execute_fn = _execute_vault_reflection
-    else:
-        execute_fn = _execute_chat
-
-    timeout_seconds = _clean_job_timeout(job.get("timeoutSeconds"))
-    chat_thread = threading.Thread(target=execute_fn, daemon=True)
-    chat_thread.start()
-    chat_thread.join(timeout=timeout_seconds)
-
-    if chat_thread.is_alive():
-        # 超时：设置取消标志，通知 _execute_chat 不再写入结果
-        cancel_flag["cancelled"] = True
-        with BACKGROUND_JOB_LOCK:
-            current_status = str(BACKGROUND_JOBS.get(job_id, {}).get("status", ""))
-        if current_status == "cancelled":
-            return
-        _update_job(
-            job_id,
-            status="failed",
-            result="",
-            error=f"job timed out after {timeout_seconds}s",
-            failureKeyword="command_timeout",
-        )
-        return
-
+    trace_id = f"trace-{job_id}"
+    bind_trace_context(trace_id=trace_id, job_id=job_id, stage="job_run")
+    _log.info("job_run_start", job_id=job_id)
     try:
         with BACKGROUND_JOB_LOCK:
-            current_status = str(BACKGROUND_JOBS.get(job_id, {}).get("status", ""))
-        if current_status == "cancelled":
+            job = dict(BACKGROUND_JOBS.get(job_id) or {})
+        if not job:
+            _log.warning("job_run_missing", job_id=job_id)
             return
-        if result_holder.get("ok") is True:
-            _update_job(job_id, status="complete", result=str(result_holder.get("text", "")))
+        _update_job(job_id, status="running")
+        result_holder: dict[str, object] = {}
+        cancel_flag = {"cancelled": False}  # 共享标志，超时后置 True，_execute_chat 内部检查
+
+        def _execute_chat() -> None:
+            # structlog contextvars 不跨线程继承，子线程内重新 bind
+            bind_trace_context(trace_id=trace_id, job_id=job_id, stage="job_chat")
+            try:
+                if cancel_flag["cancelled"]:
+                    return  # 超时后不再发起 LLM 调用，避免泄漏 API 配额
+                prompt = str(job.get("prompt", ""))
+                response = _run_job_chat_with_tools(prompt, job_id)
+                if cancel_flag["cancelled"]:
+                    return  # LLM 返回后再次检查，避免向已超时任务写入结果
+                result_holder["ok"] = True
+                result_holder["text"] = str(response.get("text", "")).strip()
+            except Exception as exc:
+                if not cancel_flag["cancelled"]:
+                    result_holder["ok"] = False
+                    result_holder["error"] = str(exc)
+            finally:
+                clear_trace_context("trace_id", "job_id", "stage")
+
+        def _execute_vault_reflection() -> None:
+            """后台执行 vault_reflection，不走 LLM 对话链路。"""
+            bind_trace_context(trace_id=trace_id, job_id=job_id, stage="vault_reflection")
+            try:
+                if cancel_flag["cancelled"]:
+                    return
+                from workflows.vault_reflection import reflect_on_recent, reflect_on_note
+                args = job.get("vaultArgs") or {}
+                progress_log: list[dict] = []
+                def _on_progress(p: dict) -> None:
+                    progress_log.append(p)
+                    # 实时更新 job 的 progress 字段，供前端轮询
+                    try:
+                        with BACKGROUND_JOB_LOCK:
+                            j = BACKGROUND_JOBS.get(job_id)
+                            if j and j.get("status") == "running":
+                                j["progress"] = progress_log.copy()
+                                j["updatedAt"] = datetime.now().isoformat()
+                                _persist_jobs_locked()
+                    except Exception:
+                        pass
+                if args.get("note_path"):
+                    result = reflect_on_note(
+                        str(args["note_path"]),
+                        force=bool(args.get("force", False)),
+                    )
+                else:
+                    result = reflect_on_recent(
+                        days=int(args.get("days", 7)),
+                        max_notes=int(args.get("maxNotes", 5)),
+                        force=bool(args.get("force", False)),
+                        progress_callback=_on_progress,
+                    )
+                if cancel_flag["cancelled"]:
+                    return
+                result_holder["ok"] = bool(result.get("ok"))
+                result_holder["text"] = json.dumps(result, ensure_ascii=False)
+            except Exception as exc:
+                if not cancel_flag["cancelled"]:
+                    result_holder["ok"] = False
+                    result_holder["error"] = str(exc)
+            finally:
+                clear_trace_context("trace_id", "job_id", "stage")
+
+        # 按 kind 分派
+        job_kind = str(job.get("kind", ""))
+        if job_kind == "vault_reflection":
+            execute_fn = _execute_vault_reflection
         else:
-            error = str(result_holder.get("error", "unknown error"))
+            execute_fn = _execute_chat
+
+        timeout_seconds = _clean_job_timeout(job.get("timeoutSeconds"))
+        chat_thread = threading.Thread(target=execute_fn, daemon=True)
+        chat_thread.start()
+        chat_thread.join(timeout=timeout_seconds)
+
+        if chat_thread.is_alive():
+            # 超时：设置取消标志，通知 _execute_chat 不再写入结果
+            cancel_flag["cancelled"] = True
+            with BACKGROUND_JOB_LOCK:
+                current_status = str(BACKGROUND_JOBS.get(job_id, {}).get("status", ""))
+            if current_status == "cancelled":
+                return
+            _log.warning("job_run_timeout", job_id=job_id, timeout_seconds=timeout_seconds)
             _update_job(
                 job_id,
                 status="failed",
                 result="",
-                error=error,
-                failureKeyword=_job_failure_keyword(error, stage="background_job"),
+                error=f"job timed out after {timeout_seconds}s",
+                failureKeyword="command_timeout",
             )
-    except Exception as exc:
-        with BACKGROUND_JOB_LOCK:
-            current_status = str(BACKGROUND_JOBS.get(job_id, {}).get("status", ""))
-        if current_status == "cancelled":
             return
-        _update_job(
-            job_id,
-            status="failed",
-            result="",
-            error=str(exc),
-            failureKeyword=_job_failure_keyword(exc, stage="background_job"),
-        )
 
-    parent_id = job.get("parentJobId")
-    if parent_id:
-        _kick_queued_children(str(parent_id))
-        _try_rollup_parent_result(str(parent_id))
+        try:
+            with BACKGROUND_JOB_LOCK:
+                current_status = str(BACKGROUND_JOBS.get(job_id, {}).get("status", ""))
+            if current_status == "cancelled":
+                return
+            if result_holder.get("ok") is True:
+                _log.info(
+                    "job_run_complete", job_id=job_id,
+                    result_len=len(str(result_holder.get("text", ""))),
+                )
+                _update_job(job_id, status="complete", result=str(result_holder.get("text", "")))
+            else:
+                error = str(result_holder.get("error", "unknown error"))
+                _log.warning("job_run_failed", job_id=job_id, error=error)
+                _update_job(
+                    job_id,
+                    status="failed",
+                    result="",
+                    error=error,
+                    failureKeyword=_job_failure_keyword(error, stage="background_job"),
+                )
+        except Exception as exc:
+            with BACKGROUND_JOB_LOCK:
+                current_status = str(BACKGROUND_JOBS.get(job_id, {}).get("status", ""))
+            if current_status == "cancelled":
+                return
+            _log.error("job_run_persist_failed", job_id=job_id, error=str(exc))
+            _update_job(
+                job_id,
+                status="failed",
+                result="",
+                error=str(exc),
+                failureKeyword=_job_failure_keyword(exc, stage="background_job"),
+            )
+
+        parent_id = job.get("parentJobId")
+        if parent_id:
+            _kick_queued_children(str(parent_id))
+            _try_rollup_parent_result(str(parent_id))
+    finally:
+        clear_trace_context("trace_id", "job_id", "stage")
 
 
 def _start_job(job_id: str) -> None:

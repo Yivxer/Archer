@@ -3,10 +3,27 @@
 from __future__ import annotations
 
 import re
+import threading
+from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
 
 from terminal.api._config import _clean_session_messages, _valid_session_id
+
+
+# Per-session-id lock guarding read-modify-write of session files.
+# defaultdict lazily creates a Lock per session_id; the outer guard ensures
+# the dict itself is not mutated concurrently. Locks are intentionally not
+# removed——session ids are bounded by filesystem entries and reused across
+# appends to the same session.
+_SESSION_FILE_LOCKS_GUARD = threading.Lock()
+_SESSION_FILE_LOCKS: dict[str, threading.Lock] = defaultdict(threading.Lock)
+
+
+def _session_file_lock(session_id: str) -> threading.Lock:
+    """Return the per-session-id lock, creating it on first use."""
+    with _SESSION_FILE_LOCKS_GUARD:
+        return _SESSION_FILE_LOCKS[session_id]
 
 
 def sessions(limit: int = 20) -> list[dict]:
@@ -136,25 +153,29 @@ def save_session(payload: dict) -> dict:
     messages = _clean_session_messages(payload.get("messages"))
     sessions_dir = Path(SESSIONS_DIR)
     sessions_dir.mkdir(parents=True, exist_ok=True)
+    # Use the timestamp-derived id as the lock key: callers within the same
+    # second would otherwise race on the counter suffix. The lock is reused
+    # for the matching append_session path of the same id.
     session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
-    path = sessions_dir / f"{session_id}.json"
-    counter = 1
-    while path.exists():
-        path = sessions_dir / f"{session_id}_{counter}.json"
-        counter += 1
-    meta = session_meta_from_payload(payload)
-    thread_id = str(meta.get("threadId", "") or "")
-    if thread_id and not get_thread(thread_id):
-        thread_id = ""
-        meta.pop("threadId", None)
-    if not thread_id:
-        thread = create_thread(messages, path.stem)
-        thread_id = thread["id"]
-        meta["threadId"] = thread_id
-    else:
-        add_session_to_thread(thread_id, path.stem, messages)
-    path.write_text(dump_session_file(messages, token_usage=session_usage_for_file(), meta=meta or None), encoding="utf-8")
-    return {"id": path.stem, "path": str(path), "messages": len(messages), "threadId": thread_id}
+    with _session_file_lock(session_id):
+        path = sessions_dir / f"{session_id}.json"
+        counter = 1
+        while path.exists():
+            path = sessions_dir / f"{session_id}_{counter}.json"
+            counter += 1
+        meta = session_meta_from_payload(payload)
+        thread_id = str(meta.get("threadId", "") or "")
+        if thread_id and not get_thread(thread_id):
+            thread_id = ""
+            meta.pop("threadId", None)
+        if not thread_id:
+            thread = create_thread(messages, path.stem)
+            thread_id = thread["id"]
+            meta["threadId"] = thread_id
+        else:
+            add_session_to_thread(thread_id, path.stem, messages)
+        path.write_text(dump_session_file(messages, token_usage=session_usage_for_file(), meta=meta or None), encoding="utf-8")
+        return {"id": path.stem, "path": str(path), "messages": len(messages), "threadId": thread_id}
 
 
 def _clean_append_messages(raw: object) -> list[dict]:
@@ -195,19 +216,25 @@ def append_session(session_id: str, payload: dict) -> dict:
     path = Path(SESSIONS_DIR) / f"{session_id}.json"
     if not path.exists() or not path.is_file():
         raise FileNotFoundError(f"session not found: {session_id}")
-    existing, token_usage, meta = read_session_file(path)
-    existing = existing if isinstance(existing, list) else []
-    existing.extend(new_messages)
-    meta = meta if isinstance(meta, dict) else {}
-    thread_id = str(meta.get("threadId", "") or "")
-    if thread_id:
-        add_session_to_thread(thread_id, session_id, existing)
-    else:
-        thread = create_thread(existing, session_id)
-        thread_id = thread["id"]
-        meta["threadId"] = thread_id
-    path.write_text(dump_session_file(existing, token_usage=token_usage, meta=meta), encoding="utf-8")
-    return {"id": session_id, "path": str(path), "messages": len(existing), "appended": len(new_messages), "threadId": thread_id}
+    # Per-session-id lock: serialize concurrent appends to the same file so
+    # that read-modify-write cannot drop messages. Different sessions remain
+    # independent. The single chat-stream semaphore (DEFAULT_MAX_CHAT_STREAMS=1)
+    # already serializes most user-driven appends, but background jobs and
+    # future multi-client scenarios need this guard.
+    with _session_file_lock(session_id):
+        existing, token_usage, meta = read_session_file(path)
+        existing = existing if isinstance(existing, list) else []
+        existing.extend(new_messages)
+        meta = meta if isinstance(meta, dict) else {}
+        thread_id = str(meta.get("threadId", "") or "")
+        if thread_id:
+            add_session_to_thread(thread_id, session_id, existing)
+        else:
+            thread = create_thread(existing, session_id)
+            thread_id = thread["id"]
+            meta["threadId"] = thread_id
+        path.write_text(dump_session_file(existing, token_usage=token_usage, meta=meta), encoding="utf-8")
+        return {"id": session_id, "path": str(path), "messages": len(existing), "appended": len(new_messages), "threadId": thread_id}
 
 
 def threads() -> list[dict]:

@@ -2,33 +2,13 @@ import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import type { PlanEvent } from '../contracts'
-import { classifyHugoIntent, isForegroundOnlyWritingFeedbackPlan, isHugoBlogPublishPlan } from '../taskRouter'
+import { isForegroundOnlyWritingFeedbackPlan, isHugoBlogPublishPlan } from '../taskRouter'
 
 describe('task router', () => {
   it('does not route messages in Desktop before the Python stream', () => {
     const chatPage = readFileSync(resolve('src/renderer/src/pages/ChatPage.tsx'), 'utf8')
 
     expect(chatPage).not.toContain('routeTaskForRuntime')
-  })
-
-  it('classifies Hugo publish requests for UI presentation', () => {
-    expect(classifyHugoIntent('部署这篇文章到枫弋札记上')).toBe('execute_publish')
-  })
-
-  it('classifies local markdown publish requests for UI presentation', () => {
-    expect(classifyHugoIntent('/Users/Yivxer/Library/Mobile Documents/iCloud~md~obsidian/Documents/文章.md部署这一篇文章')).toBe('execute_publish')
-  })
-
-  it('classifies Hugo asset capability questions without publishing', () => {
-    const text = '枫弋札记里好像没有办法部署图片你这边可以部署图片么？'
-
-    expect(classifyHugoIntent(text)).toBe('ask_capability')
-  })
-
-  it('classifies read-only review requests with past publish mentions without publishing', () => {
-    const text = '我让 Codex 帮我部署了，/Users/Yivxer/Library/Mobile Documents/iCloud~md~obsidian/Documents/读书笔记/不存在另一半的灵魂.md，你可以看看这一篇读后感如何'
-
-    expect(classifyHugoIntent(text)).toBe('content_review')
   })
 
   it('detects attachment blog publish plans from surrounding conversation context', () => {

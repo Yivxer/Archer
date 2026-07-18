@@ -1960,7 +1960,7 @@ class TestToolApproval:
             "skillName": "safe_tool", "args": {"value": "x"},
         }
         monkeypatch.setattr(
-            routes, "_run_approved_draft",
+            "terminal.api.tool_approval_routes._run_approved_draft",
             lambda draft: __import__("terminal.api.tool_stage", fromlist=["ApprovalExecution"]).ApprovalExecution(
                 True, "done", "safe_tool 完成",
             ),
@@ -2018,7 +2018,7 @@ class TestToolApproval:
         claim_for_sending(db_path, item["id"])
         mark_failed(db_path, item["id"], "network")
         monkeypatch.setattr(
-            routes, "_run_approved_draft",
+            "terminal.api.tool_approval_routes._run_approved_draft",
             lambda stored: ApprovalExecution(True, "done", "retry complete"),
         )
 
@@ -2044,7 +2044,7 @@ class TestToolApproval:
         context = create_runtime_context(db_path=db_path)
         calls = []
         monkeypatch.setattr(
-            routes, "_run_approved_draft",
+            "terminal.api.tool_approval_routes._run_approved_draft",
             lambda draft: calls.append(draft) or ApprovalExecution(True, "done", "write complete"),
         )
         first_id = "obsidian-idempotent-first"

@@ -12,8 +12,11 @@ from core.policy import Decision, check
 
 ROOT = Path(__file__).resolve().parents[1]
 GOD_FILE_LINE_BASELINE = {
-    "terminal/api/_tools.py": 3368,
-    "terminal/api/_routes.py": 3075,
+    # Part 10 Wave 4 收尾后收紧（2026-07-17）：基线从拆分前高位降到当前实际行数 +10% buffer，
+    # 让后续回归被更早发现。新增 job_routes.py 守门（enrichment 已抽到 job_enrichment.py）。
+    "terminal/api/_tools.py": 840,        # 实际 756
+    "terminal/api/_routes.py": 660,        # 实际 593
+    "terminal/api/job_routes.py": 880,     # 实际 824
     "memory/store.py": 1609,
     "client/desktop/src/renderer/src/pages/ChatPage.tsx": 2361,
     "client/desktop/src/renderer/src/adapters/localArcher.ts": 1132,
@@ -87,6 +90,41 @@ def test_background_jobs_live_in_domain_module_behind_routes_facade():
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
     }
     assert not job_symbols & route_definitions
+
+
+@pytest.mark.contract
+def test_sessions_live_behind_routes_facade():
+    from terminal.api import _routes, session_routes
+
+    # _routes.py re-exports session_routes symbols under private aliases.
+    # Map the _routes alias to the real name defined in session_routes.
+    session_symbol_map = {
+        "_add_thread_session": "add_thread_session",
+        "_append_session": "append_session",
+        "_create_thread": "create_thread",
+        "_delete_session": "delete_session",
+        "_session_detail": "session_detail",
+        "_session_meta_from_payload": "session_meta_from_payload",
+        "_sessions": "sessions",
+        "_sessions_search": "sessions_search",
+        "_save_session": "save_session",
+        "_thread_detail": "thread_detail",
+        "_threads": "threads",
+        "_update_thread": "update_thread",
+    }
+
+    for alias, real_name in session_symbol_map.items():
+        assert getattr(_routes, alias) is getattr(session_routes, real_name)
+
+    routes_tree = ast.parse(
+        (ROOT / "terminal/api/_routes.py").read_text(encoding="utf-8")
+    )
+    route_definitions = {
+        node.name
+        for node in routes_tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+    }
+    assert not set(session_symbol_map.keys()) & route_definitions
 
 
 @pytest.mark.contract
