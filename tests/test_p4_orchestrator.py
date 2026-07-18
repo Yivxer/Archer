@@ -541,7 +541,7 @@ class TestMemoryCandidateReason(unittest.TestCase):
         self.assertEqual(pending[0]["id"], pid)
         self.assertEqual(pending[0]["suggest_reason"], "项目进展 · 来自：Archer 下一阶段")
 
-    def test_desktop_project_update_high_confidence_auto_saves(self):
+    def test_desktop_project_update_high_confidence_stays_pending(self):
         import tempfile
         import memory.store as store_mod
         from terminal.api._tools import _do_extract_api
@@ -575,9 +575,9 @@ class TestMemoryCandidateReason(unittest.TestCase):
         mock_extract.assert_called_once()
         _, kwargs = mock_extract.call_args
         self.assertIn("project_update", kwargs.get("candidate_types", []))
-        self.assertEqual(len(pending), 0)
-        self.assertEqual(len(confirmed), 1)
-        self.assertEqual(confirmed[0]["type"], "project")
+        self.assertEqual(len(pending), 1)
+        self.assertEqual(pending[0]["type"], "project")
+        self.assertEqual(len(confirmed), 0)
 
     def test_desktop_sensitive_memory_stays_pending(self):
         import tempfile

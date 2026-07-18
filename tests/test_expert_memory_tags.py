@@ -20,8 +20,7 @@ def test_for_context_prefers_tagged_memories(monkeypatch):
     ]
 
     monkeypatch.setattr("memory.retrieve._should_skip_memory", lambda _text: False)
-    monkeypatch.setattr("memory.retrieve.high_importance", lambda **kwargs: [])
-    monkeypatch.setattr("memory.retrieve._hybrid_search", lambda _q, limit=5: memories[:limit])
+    monkeypatch.setattr("memory.retrieve._hybrid_search", lambda _q, limit=5, **kwargs: memories[:limit])
     monkeypatch.setattr("memory.retrieve.select_context_memories", lambda items, **kwargs: items[: kwargs.get("limit", 5)])
     monkeypatch.setattr("memory.retrieve.update_last_used", lambda _mid: None)
 

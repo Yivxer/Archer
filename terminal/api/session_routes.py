@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import threading
+import tempfile
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
@@ -144,6 +145,16 @@ def session_meta_from_payload(payload: dict) -> dict[str, str]:
     return meta
 
 
+def _isolated_journey_paths(payload: dict) -> tuple[Path | None, Path | None]:
+    if payload.get("environment") != "test":
+        return None, None
+    run_id = str(payload.get("runId", "") or "").strip()
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", run_id):
+        raise ValueError("test runId is required")
+    root = Path(tempfile.gettempdir()) / f"archer-journey-{run_id}"
+    return root / "sessions", root / "conversation_threads.json"
+
+
 def save_session(payload: dict) -> dict:
     from core.session import SESSIONS_DIR
     from core.session_store import dump_session_file
@@ -151,7 +162,8 @@ def save_session(payload: dict) -> dict:
     from core.token_usage import session_usage_for_file
 
     messages = _clean_session_messages(payload.get("messages"))
-    sessions_dir = Path(SESSIONS_DIR)
+    isolated_sessions, isolated_threads = _isolated_journey_paths(payload)
+    sessions_dir = isolated_sessions or Path(SESSIONS_DIR)
     sessions_dir.mkdir(parents=True, exist_ok=True)
     # Use the timestamp-derived id as the lock key: callers within the same
     # second would otherwise race on the counter suffix. The lock is reused
@@ -165,15 +177,15 @@ def save_session(payload: dict) -> dict:
             counter += 1
         meta = session_meta_from_payload(payload)
         thread_id = str(meta.get("threadId", "") or "")
-        if thread_id and not get_thread(thread_id):
+        if thread_id and not get_thread(thread_id, isolated_threads):
             thread_id = ""
             meta.pop("threadId", None)
         if not thread_id:
-            thread = create_thread(messages, path.stem)
+            thread = create_thread(messages, path.stem, isolated_threads)
             thread_id = thread["id"]
             meta["threadId"] = thread_id
         else:
-            add_session_to_thread(thread_id, path.stem, messages)
+            add_session_to_thread(thread_id, path.stem, messages, isolated_threads)
         path.write_text(dump_session_file(messages, token_usage=session_usage_for_file(), meta=meta or None), encoding="utf-8")
         return {"id": path.stem, "path": str(path), "messages": len(messages), "threadId": thread_id}
 
@@ -249,9 +261,10 @@ def thread_detail(thread_id: str) -> dict | None:
 
 def create_thread(payload: dict) -> dict:
     from core.thread_store import create_thread as create, update_thread
-    thread = create(_clean_session_messages(payload.get("messages")))
+    _sessions_path, threads_path = _isolated_journey_paths(payload)
+    thread = create(_clean_session_messages(payload.get("messages")), path=threads_path)
     if isinstance(payload.get("title"), str) and payload["title"].strip():
-        return update_thread(thread["id"], {"title": payload["title"]}) or thread
+        return update_thread(thread["id"], {"title": payload["title"]}, threads_path) or thread
     return thread
 
 

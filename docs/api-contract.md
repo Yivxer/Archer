@@ -683,7 +683,7 @@ type JobStoreState = {
 
 ### initiativeStore（L3.6，受控 Part 8 投影）
 
-**真值来源**：`/initiative-shadow` + 4 个子端点（report/long-term-report/delivery-gate/review-packet）+ SSE 增量
+**真值来源**：`/initiative-shadow` + report/long-term-report/delivery-gate/review-packet/exposure-report 子端点 + SSE 增量
 
 **State shape**：
 ```ts
@@ -697,15 +697,19 @@ type InitiativeStoreState = {
 **Actions**（只读 + mutation，不暴露写 shadow 的 action）：
 | Action | 调用 API | 副作用 |
 |--------|---------|--------|
-| `loadAll()` | GET /initiative-shadow?limit=5 + 4 子端点（并发） | 替换 review |
-| `submitFeedback(id, feedback)` | POST /initiative-shadow/{id}/feedback | refresh review.items |
-| `setPresence(state)` | POST /initiative-shadow/presence | refresh review.presenceState |
+| `loadAll()` | GET /initiative-shadow?limit=5 + 5 子端点（并发） | 替换 review |
+| `claimReviewCandidate()` | POST /initiative-shadow/review-candidate `{surface:"chat_workspace"}` | 原子认领当天唯一 Workspace shadow 候选；不投递 |
+| `submitFeedback(id, feedback, surface?)` | POST /initiative-shadow/{id}/feedback | refresh review.items；可选记录界面来源 |
+| `setPresence(state, surface?)` | POST /initiative-shadow/presence | refresh review.presenceState；记录 mute/unmute 计数 |
+| `exposureReport` | GET /initiative-shadow/exposure-report?surface=chat_workspace&days=14 | 曝光、反馈转化、认可、太频繁、静音的脱敏聚合 |
 | `setDeliveryOptIn(enabled)` | POST /initiative-shadow/opt-in | refresh review.optIn + deliveryGate；关闭时取消未发送的 `initiative.thread_resume` Outbox 项 |
 | `mergeSseEvent(event)` | （无 API，由 SSE initiative.event 注入） | 合并到 review.items |
 
 **订阅者**：TodayPage、ReviewPage、main.tsx（SSE 合并）
 
 **Part 8 边界**：唯一 live slice 是 `thread_resume`。只有观察门槛、人工复核就绪和显式 opt-in 同时通过，且 presence 为 idle、当日尚未投递时，后端才通过 `initiative.thread_resume` Durable Outbox 标记为 Archer 应用内已投递。它不写入聊天，不触发系统通知或外部渠道；其他 Part 8 模块继续冻结。
+
+Workspace 的 shadow review card 与 live slice 分离：schema v4 的 `initiative_shadow_interactions` 只保存候选 ID、surface、事件、日期和时间，不保存聊天正文。`surface + exposure_date` 的唯一约束保证每日最多一条；曝光始终保持 `delivered=false`，反馈后当天不轮播下一条。
 
 ### 跨 store 联动（L3.7，事件总线）
 

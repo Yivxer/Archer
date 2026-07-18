@@ -185,10 +185,13 @@ def trim_model_messages(
         system_prefix.append(rest.pop(0))
     if len(rest) <= keep_recent:
         return [*system_prefix, *rest]
-    omitted = len(rest) - keep_recent
+    omitted_messages = rest[:-keep_recent]
+    from memory.thread_context import build_context_capsule, format_context_capsule
+
+    capsule = format_context_capsule(build_context_capsule(omitted_messages))
     summary = {
         "role": "system",
-        "content": f"[长上下文保护] 旧对话已省略 {omitted} 条，仅保留最近 {keep_recent} 条消息。",
+        "content": f"[长上下文保护]\n{capsule}",
     }
     return [*system_prefix, summary, *rest[-keep_recent:]]
 

@@ -317,7 +317,7 @@ def _clean_chat_messages(raw: object) -> list[dict]:
     if not isinstance(raw, list):
         raise ValueError("messages must be a list")
     messages: list[dict] = []
-    for item in raw[-20:]:
+    for item in raw[-100:]:
         if not isinstance(item, dict):
             continue
         role = item.get("role")

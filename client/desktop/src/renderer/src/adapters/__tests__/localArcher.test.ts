@@ -16,6 +16,7 @@ vi.stubGlobal('window', {
 import {
   clearDesktopApiToken,
   ChatBusyError,
+  claimInitiativeReviewCandidate,
   ensureLocalConnection,
   exportPortableData,
   fetchMemoryItems,
@@ -95,7 +96,7 @@ describe('localArcher token management', () => {
       confidence: '0.9',
       source: 'test',
     }]
-    const fetchSpy = vi.fn(async () => new Response(JSON.stringify({
+    const fetchSpy = vi.fn(async (_url: string, _init?: RequestInit) => new Response(JSON.stringify({
       contractVersion: 1,
       data: memory,
     }), { status: 200 }))
@@ -181,17 +182,49 @@ describe('localArcher token management', () => {
     const fetchSpy = vi.fn(async (_url: string, _init?: RequestInit) => new Response(JSON.stringify({ ok: true }), { status: 200 }))
     vi.stubGlobal('fetch', fetchSpy)
 
-    await submitInitiativeFeedback(7, 'too_frequent')
-    await setInitiativePresence('muted')
+    await submitInitiativeFeedback(7, 'too_frequent', 'chat_workspace')
+    await setInitiativePresence('muted', 'chat_workspace')
     await setInitiativeDeliveryOptIn(true)
 
     expect(String(fetchSpy.mock.calls[0][0])).toContain('/initiative-shadow/7/feedback')
-    expect(JSON.parse(String(fetchSpy.mock.calls[0][1]?.body))).toEqual({ feedback: 'too_frequent' })
+    expect(JSON.parse(String(fetchSpy.mock.calls[0][1]?.body))).toEqual({ feedback: 'too_frequent', surface: 'chat_workspace' })
     expect(String(fetchSpy.mock.calls[1][0])).toContain('/initiative-shadow/presence')
-    expect(JSON.parse(String(fetchSpy.mock.calls[1][1]?.body))).toEqual({ state: 'muted' })
+    expect(JSON.parse(String(fetchSpy.mock.calls[1][1]?.body))).toEqual({ state: 'muted', surface: 'chat_workspace' })
     expect(String(fetchSpy.mock.calls[2][0])).toContain('/initiative-shadow/opt-in')
     expect(JSON.parse(String(fetchSpy.mock.calls[2][1]?.body))).toMatchObject({ enabled: true })
   })
+
+  it('claims and normalizes the daily workspace review candidate', async () => {
+    const fetchSpy = vi.fn(async (_url: string, _init?: RequestInit) => new Response(JSON.stringify({
+      ok: true,
+      shadow: true,
+      delivered: false,
+      surface: 'chat_workspace',
+      exposure_date: '2026-07-18',
+      reason: 'candidate',
+      item: {
+        id: 9,
+        event_type: 'initiative_due',
+        kind: 'thread_resume',
+        title: '继续上次话题',
+        message: '上次停在 J8。',
+        delivered: false,
+        decision_trace: { source: 'episodic' },
+        created_at: '2026-07-18T12:00:00',
+        feedback: '',
+        archived_at: null,
+      },
+    }), { status: 200 }))
+    vi.stubGlobal('fetch', fetchSpy)
+
+    const result = await claimInitiativeReviewCandidate()
+
+    expect(result).toMatchObject({ reason: 'candidate', delivered: false, exposureDate: '2026-07-18' })
+    expect(result.item).toMatchObject({ id: 9, kind: 'thread_resume', delivered: false })
+    expect(String(fetchSpy.mock.calls[0][0])).toContain('/initiative-shadow/review-candidate')
+    expect(JSON.parse(String(fetchSpy.mock.calls[0][1]?.body))).toEqual({ surface: 'chat_workspace' })
+  })
+
 
   it('uses the provided runtime session id for stream agent events', async () => {
     const encoder = new TextEncoder()
@@ -586,6 +619,22 @@ describe('localArcher token management', () => {
             },
           },
         },
+        '/initiative-shadow/exposure-report?surface=chat_workspace&days=14': {
+          ok: true,
+          shadow: true,
+          report: {
+            surface: 'chat_workspace',
+            days: 14,
+            exposure_count: 8,
+            feedback_count: 5,
+            conversion_rate: 0.625,
+            acknowledged_count: 4,
+            recognition_rate: 0.8,
+            too_frequent_count: 1,
+            too_frequent_rate: 0.2,
+            mute_count: 1,
+          },
+        },
       }
       if (path.startsWith('/reviews?period=')) {
         return new Response(JSON.stringify({
@@ -674,6 +723,13 @@ describe('localArcher token management', () => {
       longTermReport: { observedDays: 14 },
       deliveryGate: { shadowOnly: true },
     })
+    expect(data.initiativeShadow.exposureReport).toMatchObject({
+      exposureCount: 8,
+      feedbackCount: 5,
+      conversionRate: 0.625,
+      recognitionRate: 0.8,
+      muteCount: 1,
+    })
     expect(data.configDoctor).toMatchObject({
       ok: false,
       summary: { error: 1, warn: 1, info: 0 },
@@ -710,6 +766,10 @@ describe('localArcher token management', () => {
     )
     expect(fetchSpy).toHaveBeenCalledWith(
       expect.stringContaining('/initiative-shadow/review-packet'),
+      expect.any(Object),
+    )
+    expect(fetchSpy).toHaveBeenCalledWith(
+      expect.stringContaining('/initiative-shadow/exposure-report?surface=chat_workspace&days=14'),
       expect.any(Object),
     )
   })

@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta
 from memory.a4 import select_context_memories, should_create_reflection_anchor
-from memory.store import search, recent, high_importance, update_last_used, get_by_ids
+from memory.store import search, recent, update_last_used, get_by_ids
 from infrastructure.observability import trace_span
 
 _LIGHT_INPUTS = {
@@ -58,17 +58,19 @@ def for_context(user_input: str = "", limit: int = 5, intent: str | None = None,
         trigger = _infer_trigger(user_input, intent)
         total_limit = max(1, limit)
 
-        core_raw = [m for m in high_importance(min_importance=4, limit=2) if _is_valid_memory(m)]
-
         if user_input and len(user_input.strip()) >= 2:
-            related_raw = _hybrid_search(user_input.strip(), limit=total_limit)
+            from memory.embedder import is_warmed
+
+            related_raw = _hybrid_search(
+                user_input.strip(), limit=total_limit, use_vector=is_warmed(),
+            )
         else:
             related_raw = recent(total_limit)
 
         # 去重 + 过滤
         seen: set[int] = set()
         combined: list[dict] = []
-        for m in core_raw + related_raw:
+        for m in related_raw:
             mid = m["id"]
             if mid in seen or not _is_valid_memory(m):
                 continue
@@ -89,8 +91,7 @@ def for_context(user_input: str = "", limit: int = 5, intent: str | None = None,
             tagged = [m for m in selected if _matches_tag_hints(m.get("tags"), tag_hints)]
             if tagged:
                 selected = tagged
-        selected_ids = {m["id"] for m in selected}
-        core_ids = {m["id"] for m in core_raw}
+        core_ids = {m["id"] for m in selected if int(m.get("importance", 3) or 3) >= 4}
         core = [m for m in selected if m["id"] in core_ids]
         related = [m for m in selected if m["id"] not in core_ids]
 
@@ -118,7 +119,7 @@ def _recency_tier(created_at: str | None) -> int:
     return 2
 
 
-def _hybrid_search(query: str, limit: int) -> list[dict]:
+def _hybrid_search(query: str, limit: int, *, use_vector: bool = True) -> list[dict]:
     """
     混合检索：向量 KNN + FTS5，结果合并去重。
 
@@ -130,12 +131,18 @@ def _hybrid_search(query: str, limit: int) -> list[dict]:
     """
     fts_mems = search(query, limit=limit)
 
+    if not use_vector:
+        return fts_mems
+
     try:
         from memory.embedder import encode
         from memory.vector_store import search_similar
 
         q_vec = encode(query)
-        vec_hits = search_similar(q_vec, limit=limit * 2)  # [(id, distance)]
+        vec_hits = [
+            hit for hit in search_similar(q_vec, limit=limit * 2)
+            if float(hit[1]) <= 0.55
+        ]
         if not vec_hits:
             return fts_mems
 

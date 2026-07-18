@@ -2,6 +2,7 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import {
   Brain,
+  CalendarDays,
   ChevronRight,
   Folder,
   FolderPlus,
@@ -308,6 +309,7 @@ function App() {
 
   const sidebarNavItems: Array<{ route: Route; icon: React.ElementType; label: string; touchCount?: number }> = [
     { route: 'Chat', icon: MessageSquare, label: '对话' },
+    { route: 'Today', icon: CalendarDays, label: '今天' },
     { route: 'Memory', icon: Brain, label: '记忆', touchCount: pendingMemoryCount || undefined },
     { route: 'Skills', icon: Wrench, label: '技能' },
     { route: 'Projects', icon: Folder, label: '项目' },
@@ -685,7 +687,7 @@ function App() {
               }}
             />
           )}
-          {route === 'Sessions' && (
+          {route === 'Review' && (
             <ReviewPage
               data={data}
               onRefresh={connectLocalApi}
@@ -693,7 +695,13 @@ function App() {
               onNavigate={setRoute}
             />
           )}
-          {route === 'Today' && <TodayPage data={data} onRefresh={connectLocalApi} />}
+          {route === 'Today' && (
+            <TodayPage
+              canControl={data.status.adapter === 'local'}
+              onRefresh={connectLocalApi}
+              onNavigate={setRoute}
+            />
+          )}
           {route === 'Tasks' && <TasksPage data={data} />}
           {route === 'Memory' && <MemoryPage
             data={data}

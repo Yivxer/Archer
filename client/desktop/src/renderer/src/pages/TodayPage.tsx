@@ -1,75 +1,53 @@
 import React from 'react'
 import { BellOff, BellRing, Check, Eye, LoaderCircle, RefreshCw, ShieldCheck, VolumeX } from 'lucide-react'
-import { setInitiativeDeliveryOptIn, setInitiativePresence, submitInitiativeFeedback } from '../adapters/localArcher'
-import type { ArcherAdapter } from '../types'
+import { setInitiativeDeliveryOptInAction } from '../lib/initiativeStore'
+import { useShadowFeedback } from '../lib/useShadowFeedback'
+import type { Route } from '../types'
 
 export function TodayPage({
-  data,
+  canControl,
   onRefresh,
+  onNavigate,
 }: {
-  data: ArcherAdapter
+  canControl: boolean
   onRefresh: () => Promise<void>
+  onNavigate: (route: Route) => void
 }) {
-  const candidates = data.initiativeShadow.items
+  const feedback = useShadowFeedback({ canControl, surface: 'today', onRefresh })
+  const shadow = feedback.review
+  const candidates = (shadow?.items ?? [])
     .filter((item) => item.kind === 'thread_resume')
     .slice(0, 3)
-  const throttleLabel = data.initiativeShadow.globalThrottleActive ? '降频中' : 'Shadow 观察中'
-  const presenceLabel = data.initiativeShadow.presenceState === 'muted'
+  const throttleLabel = shadow?.globalThrottleActive ? '降频中' : 'Shadow 观察中'
+  const presenceLabel = shadow?.presenceState === 'muted'
     ? '已静音'
-    : data.initiativeShadow.presenceState === 'engaged'
+    : shadow?.presenceState === 'engaged'
       ? '活跃'
       : '休眠'
-  const report = data.initiativeShadow.report
-  const longTermReport = data.initiativeShadow.longTermReport
-  const deliveryGate = data.initiativeShadow.deliveryGate
-  const optIn = data.initiativeShadow.optIn
-  const reviewPacket = data.initiativeShadow.reviewPacket
+  const report = shadow?.report
+  const longTermReport = shadow?.longTermReport
+  const deliveryGate = shadow?.deliveryGate
+  const optIn = shadow?.optIn
+  const reviewPacket = shadow?.reviewPacket
+  const exposureReport = shadow?.exposureReport
+  if (!shadow || !report || !longTermReport || !deliveryGate || !optIn || !reviewPacket || !exposureReport) {
+    return <div className="today-page"><p className="today-empty">正在读取观察数据…</p></div>
+  }
   const reviewLabel = report.readyForManualReview ? '可人工复核' : '继续观察'
   const recognitionPercent = Math.round(report.recognitionRate * 100)
   const longTermRecognitionPercent = Math.round(longTermReport.metrics.relevance.recognitionRate * 100)
   const tooFrequentPercent = Math.round(longTermReport.metrics.relevance.tooFrequentRate * 100)
   const [busy, setBusy] = React.useState('')
   const [notice, setNotice] = React.useState('')
-  const canControl = data.status.adapter === 'local'
-
-  async function sendFeedback(id: number, feedback: 'acknowledged' | 'too_frequent') {
-    if (!canControl || busy) return
-    setBusy(`${id}:${feedback}`)
-    setNotice('')
-    try {
-      await submitInitiativeFeedback(id, feedback)
-      await onRefresh()
-      setNotice(feedback === 'acknowledged' ? '已记录认可' : '已降低主动频率')
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : '反馈保存失败')
-    } finally {
-      setBusy('')
-    }
-  }
-
-  async function togglePresence() {
-    if (!canControl || busy) return
-    const state = data.initiativeShadow.presenceState === 'muted' ? 'idle' : 'muted'
-    setBusy('presence')
-    setNotice('')
-    try {
-      await setInitiativePresence(state)
-      await onRefresh()
-      setNotice(state === 'muted' ? '已静音主动候选' : '已恢复主动候选')
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : '在场状态更新失败')
-    } finally {
-      setBusy('')
-    }
-  }
+  const optInEnabled = optIn.enabled
 
   async function toggleOptIn() {
     if (!canControl || busy) return
-    const enabled = !optIn.enabled
+    const enabled = !optInEnabled
     setBusy('opt-in')
     setNotice('')
     try {
-      await setInitiativeDeliveryOptIn(enabled)
+      await setInitiativeDeliveryOptInAction(enabled)
       await onRefresh()
       setNotice(enabled ? '已记录显式授权' : '已撤回显式授权')
     } catch (error) {
@@ -94,19 +72,35 @@ export function TodayPage({
             <button
               className="quiet-button icon-button"
               type="button"
-              onClick={() => void togglePresence()}
-              disabled={Boolean(busy)}
-              aria-label={data.initiativeShadow.presenceState === 'muted' ? '恢复主动候选' : '静音主动候选'}
-              title={data.initiativeShadow.presenceState === 'muted' ? '恢复主动候选' : '静音主动候选'}
+              onClick={() => void feedback.togglePresence()}
+              disabled={Boolean(busy || feedback.busy)}
+              aria-label={shadow.presenceState === 'muted' ? '恢复主动候选' : '静音主动候选'}
+              title={shadow.presenceState === 'muted' ? '恢复主动候选' : '静音主动候选'}
             >
-              {busy === 'presence' ? <LoaderCircle size={15} className="spin" /> : data.initiativeShadow.presenceState === 'muted' ? <BellRing size={15} /> : <BellOff size={15} />}
+              {feedback.busy === 'presence' ? <LoaderCircle size={15} className="spin" /> : shadow.presenceState === 'muted' ? <BellRing size={15} /> : <BellOff size={15} />}
             </button>
           )}
           <button className="quiet-button" type="button" onClick={() => void onRefresh()}>
             <RefreshCw size={15} /> 刷新
           </button>
+          <button className="quiet-button" type="button" onClick={() => onNavigate('Review')}>
+            完整复核
+          </button>
         </div>
       </header>
+
+      <section className="today-validation" aria-label="最近 14 天反馈入口指标">
+        <div className="today-section-head">
+          <h2>14 天反馈入口</h2>
+          <span>只统计真实界面曝光</span>
+        </div>
+        <div className="today-validation-grid">
+          <div><strong>{exposureReport.exposureCount}</strong><span>曝光</span></div>
+          <div><strong>{exposureReport.feedbackCount}</strong><span>反馈</span></div>
+          <div><strong>{Math.round(exposureReport.conversionRate * 100)}%</strong><span>曝光→反馈</span></div>
+          <div><strong>{exposureReport.muteCount}</strong><span>静音</span></div>
+        </div>
+      </section>
 
       <section className="today-validation" aria-label="Shadow 人工复核状态">
         <div className="today-section-head">
@@ -233,22 +227,22 @@ export function TodayPage({
                     <button
                       className="quiet-button icon-button"
                       type="button"
-                      onClick={() => void sendFeedback(item.id, 'acknowledged')}
-                      disabled={Boolean(busy)}
+                      onClick={() => void feedback.sendFeedback(item.id, 'acknowledged')}
+                      disabled={Boolean(busy || feedback.busy)}
                       aria-label="认可这条候选"
                       title="认可这条候选"
                     >
-                      {busy === `${item.id}:acknowledged` ? <LoaderCircle size={15} className="spin" /> : <Check size={15} />}
+                      {feedback.busy === `${item.id}:acknowledged` ? <LoaderCircle size={15} className="spin" /> : <Check size={15} />}
                     </button>
                     <button
                       className="quiet-button icon-button"
                       type="button"
-                      onClick={() => void sendFeedback(item.id, 'too_frequent')}
-                      disabled={Boolean(busy)}
+                      onClick={() => void feedback.sendFeedback(item.id, 'too_frequent')}
+                      disabled={Boolean(busy || feedback.busy)}
                       aria-label="标记为太频繁"
                       title="标记为太频繁"
                     >
-                      {busy === `${item.id}:too_frequent` ? <LoaderCircle size={15} className="spin" /> : <VolumeX size={15} />}
+                      {feedback.busy === `${item.id}:too_frequent` ? <LoaderCircle size={15} className="spin" /> : <VolumeX size={15} />}
                     </button>
                   </div>
                 )}
@@ -260,7 +254,7 @@ export function TodayPage({
           <div className="today-empty" role="status">暂无可展示的主动候选</div>
         )}
       </section>
-      {notice && <p className="today-notice" role="status">{notice}</p>}
+      {(notice || feedback.notice) && <p className="today-notice" role="status">{notice || feedback.notice}</p>}
     </div>
   )
 }

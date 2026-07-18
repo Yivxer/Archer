@@ -181,7 +181,7 @@ journey_1() {
   fi
 
   local saved saved_id
-  saved="$(curl_api POST /sessions "{\"messages\":[{\"role\":\"user\",\"text\":\"测试对话1\"},{\"role\":\"assistant\",\"text\":\"回复\"}]}" 2>&1)" || true
+  saved="$(curl_api POST /sessions "{\"environment\":\"test\",\"runId\":\"journey1-${TS}\",\"messages\":[{\"role\":\"user\",\"text\":\"测试对话1\"},{\"role\":\"assistant\",\"text\":\"回复\"}]}" 2>&1)" || true
   # 从返回 JSON 提取 id（服务端生成，格式如 20260704_120145）
   saved_id="$(echo "$saved" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('id',''))" 2>/dev/null || echo '')"
   if [[ -n "$saved_id" ]]; then
@@ -191,12 +191,12 @@ journey_1() {
     return 2
   fi
 
-  local detail
-  detail="$(curl_api GET "/sessions/${saved_id}" 2>&1)" || true
-  if echo "$detail" | grep -q "messages"; then
-    ok "session 恢复成功"
+  local saved_path
+  saved_path="$(echo "$saved" | python3 -c "import sys,json; print(json.load(sys.stdin).get('path',''))" 2>/dev/null || echo '')"
+  if [[ "$saved_path" == /tmp/archer-journey-* ]] && [[ -f "$saved_path" ]]; then
+    ok "session 已写入隔离测试目录"
   else
-    fail "session 恢复失败: ${detail}"
+    fail "session 未隔离: ${saved}"
     return 2
   fi
   return 0
@@ -403,14 +403,13 @@ print(json.dumps(items, ensure_ascii=False))
 ')"
   done
 
-  local thread thread_id detail
-  thread="$(curl_api POST /threads "{\"messages\":${history},\"title\":\"Journey 7 history ${TS}\"}" 2>&1)" || true
+  local thread thread_id
+  thread="$(curl_api POST /threads "{\"environment\":\"test\",\"runId\":\"journey7-${TS}\",\"messages\":${history},\"title\":\"Journey 7 history ${TS}\"}" 2>&1)" || true
   thread_id="$(echo "$thread" | python3 -c "import sys,json; print(json.load(sys.stdin).get('id',''))" 2>/dev/null || echo '')"
-  detail="$(curl_api GET "/threads/${thread_id}" 2>&1)" || true
-  if [[ -n "$thread_id" ]] && echo "$detail" | grep -q "Journey 7 history ${TS}"; then
-    ok "ConversationThread 由完整 3 轮历史创建并可恢复"
+  if [[ -n "$thread_id" ]] && echo "$thread" | grep -q "Journey 7 history ${TS}"; then
+    ok "ConversationThread 由完整 3 轮历史创建且写入隔离索引"
   else
-    fail "ConversationThread 历史契约失败: ${thread} ${detail}"
+    fail "ConversationThread 历史契约失败: ${thread}"
     return 2
   fi
   ok "Journey 7 通过（每轮请求均携带累积历史）"

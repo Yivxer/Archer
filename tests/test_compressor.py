@@ -72,10 +72,12 @@ def test_trim_preserves_recent_50_rounds():
 
     assert trimmed[0] == {"role": "system", "content": "system prompt"}
     assert "[长上下文保护]" in trimmed[1]["content"]
-    assert "旧对话已省略" in trimmed[1]["content"]
+    assert "[线程情境胶囊]" in trimmed[1]["content"]
+    assert "旧对话已省略" not in trimmed[1]["content"]
+    assert "压力测试用户第 0 轮" in trimmed[1]["content"]
     assert trimmed[-1]["content"] == "最终任务：请总结以上对话"
     assert len(trimmed) <= 13
-    assert all("压力测试用户第 0 轮" not in str(m.get("content", "")) for m in trimmed)
+    assert all("压力测试用户第 0 轮" not in str(m.get("content", "")) for m in trimmed[2:])
 
 
 def test_trim_preserves_multiple_system_prefixes_under_50_rounds():
@@ -98,7 +100,8 @@ def test_trim_preserves_multiple_system_prefixes_under_50_rounds():
     assert "安全规则" in joined
     assert "用户偏好" in joined
     assert "[长上下文保护]" in joined
-    assert "长对话用户消息 0" not in joined
+    assert "[线程情境胶囊]" in joined
+    assert "目标：长对话用户消息 0" in joined
     assert "长对话回复 54" in joined
 
 

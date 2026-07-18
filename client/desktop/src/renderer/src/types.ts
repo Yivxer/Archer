@@ -1,6 +1,6 @@
 import type { PermissionLevel } from '../../agent/contracts'
 
-export type Route = 'Chat' | 'Today' | 'Sessions' | 'Tasks' | 'Memory' | 'Soul' | 'Skills' | 'Projects' | 'Settings'
+export type Route = 'Chat' | 'Today' | 'Review' | 'Tasks' | 'Memory' | 'Soul' | 'Skills' | 'Projects' | 'Settings'
 export type Theme = 'light' | 'dark'
 export type MemoryContextMode = 'off' | 'conservative' | 'full'
 export type ObsidianContextMode = 'off' | 'summary' | 'full'
@@ -53,6 +53,11 @@ export type ArcherStatus = {
   isLoggedIn?: boolean
   archerId?: string
   tokenUsage?: TokenUsageStatus
+  persona?: {
+    ready: boolean
+    injected: boolean
+    missing: string[]
+  }
 }
 
 export type ChatMessage = {
@@ -68,6 +73,15 @@ export type ChatMessage = {
 export type ChatRequestMessage = {
   role: 'assistant' | 'user' | 'system'
   content: string
+}
+
+export type CompanionMessage = {
+  id: number
+  message: string
+  threadId: string
+  sessionId: string
+  source: 'episodic'
+  confidence: number
 }
 
 export type FileRef = {
@@ -434,6 +448,30 @@ export type InitiativeShadowReview = {
   deliveryGate: InitiativeShadowDeliveryGate
   optIn: InitiativeShadowOptIn
   reviewPacket: InitiativeShadowReviewPacket
+  exposureReport: InitiativeShadowExposureReport
+}
+
+export type InitiativeShadowExposureReport = {
+  surface: 'chat_workspace' | 'today' | 'legacy'
+  days: number
+  exposureCount: number
+  feedbackCount: number
+  conversionRate: number
+  acknowledgedCount: number
+  recognitionRate: number
+  tooFrequentCount: number
+  tooFrequentRate: number
+  muteCount: number
+}
+
+export type InitiativeShadowReviewCandidate = {
+  ok: boolean
+  shadow: boolean
+  delivered: false
+  surface: 'chat_workspace'
+  exposureDate: string
+  reason: 'candidate' | 'already_reviewed_today' | 'muted' | 'no_candidate'
+  item: InitiativeShadowItem | null
 }
 
 export type InitiativeShadowReport = {

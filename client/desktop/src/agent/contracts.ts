@@ -152,6 +152,24 @@ export type RuntimeContextEvent = AgentEventBase & {
   lastResult: string
   expectedNext: string
   matchedSkills?: string[]
+  contextReceipt?: {
+    sources: {
+      persona: boolean
+      working: boolean
+      episodic: boolean
+      semantic: boolean
+    }
+    workingMessageCount: number
+    summaryVersion: number
+    degraded: boolean
+    retrieval: {
+      triggered: boolean
+      reason: string
+      hitCount: number
+      injectedCount: number
+      degraded?: boolean
+    }
+  }
   provider?: string
   model?: string
   baseUrlSummary?: string

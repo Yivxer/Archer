@@ -24,6 +24,7 @@ import { PermissionPrompt } from '../components/PermissionPrompt'
 import { TracePanel } from '../components/TracePanel'
 import { WorkReceipt as WorkReceiptComponent } from '../components/WorkReceipt'
 import { buildThinkingMutter } from '../lib/thinkingMutter'
+import { useMemoryGroundedCompanion } from '../lib/useMemoryGroundedCompanion'
 import { loadJobList, mergeJobEvent, useJobStore } from '../lib/jobStore'
 import { buildTraceDiagnostics, createInitialRuntimeState, createPersistentEventLog, reduceRuntimeEvent, restoreRuntimeStateFromEvents, isForegroundOnlyWritingFeedbackPlan, isHugoBlogPublishPlan, jobSnapshotToAgentEvent, buildPlanChildJobSpecs, buildPlanCoordinatorPrompt, buildPlanExecutionPrompt, planWithStatus } from '../../../agent'
 import type { AgentEvent, ApprovalResultEvent, EventLog, JobEvent, OrchestrationEvent, PlanEvent, TraceDiagnostics } from '../../../agent'
@@ -123,6 +124,12 @@ export function ChatPage({
   const [saveState, setSaveState] = React.useState('')
   const [toolEvents, setToolEvents] = React.useState<ToolEvent[]>(data.chat.toolEvents)
   const [toolNotice, setToolNotice] = React.useState('')
+  const { recordDirectReply } = useMemoryGroundedCompanion({
+    enabled: data.status.adapter === 'local' && (connectionState === 'ready' || connectionState === 'degraded'),
+    scopeId: activeSession?.id || 'desktop-session',
+    setMessages,
+    onControlFailure: () => setToolNotice('这次陪伴偏好没有保存成功，但不影响继续聊天。'),
+  })
   const [fileRefs, setFileRefs] = React.useState<FileRef[]>([])
   const [activeComposerMenu, setActiveComposerMenu] = React.useState<'attach' | 'screenshot' | 'model' | 'persona' | null>(null)
   const [captureSources, setCaptureSources] = React.useState<Array<{ id: string; name: string; kind: 'screen' | 'window'; thumbnailEmpty?: boolean; screenStatus?: string }>>([])
@@ -164,6 +171,8 @@ export function ChatPage({
   function threadContextPayload() {
     if (!activeThread?.title && !activeThread?.summary) return null
     return {
+      id: activeThread?.id,
+      sessionId: activeSession?.id,
       title: activeThread?.title,
       summary: activeThread?.summary,
     }
@@ -443,6 +452,7 @@ export function ChatPage({
       if (ensured && !ensured.ok && ensured.reason !== 'reused' && ensured.reason !== 'owned' && ensured.reason !== 'started') {
         throw new Error('[network] 本地大脑进程未运行，请点侧栏「重试」')
       }
+      await recordDirectReply(text)
       const assistantId = nextId + 1
       const requestMessages = nextMessages.map((message) => ({ role: message.role, content: message.text }))
       const thinkingMutter = buildThinkingMutter(text, sentFileRefs.length)
@@ -1678,6 +1688,8 @@ export function ChatPage({
           homeStarters={homeStarters}
           onUseStarter={useStarter}
           onNavigate={onNavigate}
+          canControlInitiative={data.status.adapter === 'local'}
+          onRefresh={onRefresh}
           onClose={() => setWorkspaceContextOpen(false)}
         />
       )}

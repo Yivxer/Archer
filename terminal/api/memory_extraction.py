@@ -109,24 +109,8 @@ def build_runtime_memory_extraction_ports(
 
 
 def should_auto_save_memory(memory: dict, sensitive: bool) -> bool:
-    if sensitive:
-        return False
-    memory_type = str(memory.get("type", "insight") or "insight")
-    if memory_type in {
-        "emotion_pattern", "value", "value_conflict", "life_theme",
-        "self_narrative", "relationship_pattern", "project_mythology",
-        "reflection_anchor",
-    }:
-        return False
-    try:
-        confidence = float(memory.get("confidence", 0.7) or 0.7)
-    except Exception:
-        confidence = 0.0
-    try:
-        depth = int(memory.get("depth", 3) or 3)
-    except Exception:
-        depth = 3
-    return confidence >= 0.75 and depth <= 3
+    """Implicit extraction never bypasses the user's review queue."""
+    return False
 
 
 def _latest_user_text(history: list[dict]) -> str:

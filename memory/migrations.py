@@ -65,6 +65,18 @@ def _apply_durable_outbox_schema(db_path: Path) -> None:
     init_outbox_table(db_path)
 
 
+def _apply_thread_context_schema(db_path: Path) -> None:
+    from memory.thread_context import init_thread_context_schema
+
+    init_thread_context_schema(db_path)
+
+
+def _apply_initiative_feedback_schema(db_path: Path) -> None:
+    from memory.part8_schema import init_initiative_shadow_interactions_table
+
+    init_initiative_shadow_interactions_table(db_path)
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     Migration.create(
         1,
@@ -77,6 +89,18 @@ MIGRATIONS: tuple[Migration, ...] = (
         "durable outbox state machine",
         _apply_durable_outbox_schema,
         checksum_material="archer-durable-outbox-v2",
+    ),
+    Migration.create(
+        3,
+        "conversation thread context state",
+        _apply_thread_context_schema,
+        checksum_material="archer-thread-context-v3",
+    ),
+    Migration.create(
+        4,
+        "initiative shadow feedback interactions",
+        _apply_initiative_feedback_schema,
+        checksum_material="archer-initiative-shadow-interactions-v4",
     ),
 )
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1].version

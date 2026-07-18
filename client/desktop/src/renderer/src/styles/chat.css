@@ -204,6 +204,59 @@
   font-size: 11px;
 }
 
+.workspace-shadow-card {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--panel-border));
+  border-radius: var(--radius-panel);
+  background: color-mix(in srgb, var(--accent) 5%, var(--panel));
+}
+
+.workspace-shadow-card > strong {
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.workspace-shadow-card p,
+.workspace-shadow-card small,
+.workspace-shadow-card > em {
+  margin: 0;
+  color: var(--text);
+  font-size: 12px;
+  font-style: normal;
+  line-height: 1.55;
+}
+
+.workspace-shadow-card small {
+  color: var(--muted);
+}
+
+.workspace-shadow-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.workspace-shadow-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 8px;
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius);
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.workspace-shadow-actions button:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
 .workspace-job-list {
   display: grid;
   gap: 7px;

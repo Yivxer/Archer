@@ -53,7 +53,12 @@ def get_presence_state(db_path: Path = DB_PATH) -> str:
     return normalize_presence_state(row[0] if row else "idle")
 
 
-def set_presence_state(db_path: Path = DB_PATH, state: str = "idle") -> PresenceTransition:
+def set_presence_state(
+    db_path: Path = DB_PATH,
+    state: str = "idle",
+    *,
+    now: datetime | None = None,
+) -> PresenceTransition:
     current = get_presence_state(db_path)
     requested = normalize_presence_state(state)
     if requested == "muted":
@@ -66,7 +71,7 @@ def set_presence_state(db_path: Path = DB_PATH, state: str = "idle") -> Presence
     conn.execute(
         "INSERT INTO part8_presence_state (id, state, updated_at) VALUES (1, ?, ?) "
         "ON CONFLICT(id) DO UPDATE SET state=excluded.state, updated_at=excluded.updated_at",
-        (result.state, datetime.now().isoformat(timespec="seconds")),
+        (result.state, (now or datetime.now()).isoformat(timespec="seconds")),
     )
     conn.commit()
     conn.close()

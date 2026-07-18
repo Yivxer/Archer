@@ -110,6 +110,8 @@ def scan_thread_resume_candidates(
             now=now,
             decision_trace={
                 "reason": "stale_open_thread",
+                "source": "episodic",
+                "confidence": 0.9,
                 "threadId": item["id"],
                 "sessionId": item.get("session_id") or "",
                 "lastSeenAt": item["last_seen_at"],

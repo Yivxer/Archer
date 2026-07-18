@@ -9,10 +9,11 @@ from typing import Any
 
 from core.paths import ROOT
 
-THREADS_PATH = ROOT / "memory" / "conversation_threads.json"
+DEFAULT_THREADS_PATH = ROOT / "memory" / "conversation_threads.json"
+THREADS_PATH = DEFAULT_THREADS_PATH
 
 
-def read_threads(path: Path | None = None) -> list[dict[str, Any]]:
+def read_threads(path: Path | None = None, db_path: Path | None = None) -> list[dict[str, Any]]:
     path = thread_store_path(path)
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
@@ -20,7 +21,10 @@ def read_threads(path: Path | None = None) -> list[dict[str, Any]]:
         return []
     if not isinstance(raw, list):
         return []
-    return [thread for item in raw if (thread := normalize_thread(item))]
+    threads = [thread for item in raw if (thread := normalize_thread(item))]
+    if not _uses_context_db(path, db_path):
+        return threads
+    return [_with_context_state(thread, db_path=db_path) for thread in threads]
 
 
 def write_threads(threads: list[dict[str, Any]], path: Path | None = None) -> list[dict[str, Any]]:
@@ -51,6 +55,13 @@ def create_thread(messages: list[dict], session_id: str | None = None, path: Pat
     }
     threads.insert(0, thread)
     write_threads(threads, path)
+    if _uses_context_db(path):
+        from memory.thread_context import register_thread_session, update_thread_context
+
+        update_thread_context(thread["id"], messages)
+        if session_id:
+            register_thread_session(thread["id"], session_id)
+        return _with_context_state(thread)
     return thread
 
 
@@ -78,6 +89,8 @@ def update_thread(thread_id: str, patch: dict[str, Any], path: Path | None = Non
     if updated is None:
         return None
     write_threads(threads, path)
+    if _uses_context_db(path):
+        updated = _with_context_state(updated)
     return updated
 
 
@@ -110,6 +123,13 @@ def add_session_to_thread(
     if updated is None:
         return None
     write_threads(threads, path)
+    if _uses_context_db(path):
+        from memory.thread_context import register_thread_session, update_thread_context
+
+        register_thread_session(thread_id, session_id)
+        if messages:
+            update_thread_context(thread_id, messages)
+        updated = _with_context_state(updated)
     return updated
 
 
@@ -150,6 +170,10 @@ def remove_session_from_thread(
         # 没有任何 thread 包含此 session_id
         return None
     write_threads(next_threads, path)
+    if _uses_context_db(path):
+        from memory.thread_context import unregister_thread_session
+
+        unregister_thread_session(session_id)
     return removed_thread
 
 
@@ -219,3 +243,14 @@ def now_iso() -> str:
 
 def thread_store_path(path: Path | None = None) -> Path:
     return path or THREADS_PATH
+
+
+def _uses_context_db(path: Path | None, db_path: Path | None = None) -> bool:
+    return db_path is not None or (path is None and THREADS_PATH == DEFAULT_THREADS_PATH)
+
+
+def _with_context_state(thread: dict[str, Any], *, db_path: Path | None = None) -> dict[str, Any]:
+    from memory.thread_context import get_thread_context
+
+    state = get_thread_context(thread["id"], db_path=db_path)
+    return {**thread, **(state or {})}

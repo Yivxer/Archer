@@ -32,6 +32,18 @@ def is_available() -> bool:
         return False
 
 
+def is_warmed() -> bool:
+    return _model is not None
+
+
+def warmup() -> bool:
+    """Load the local model outside the first user turn."""
+    if not is_available():
+        return False
+    _get_model()
+    return True
+
+
 def _get_model():
     global _model
     if _model is None:

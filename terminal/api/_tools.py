@@ -25,6 +25,7 @@ from terminal.api.context_assembly import (
     assemble_vault_focus,
     assemble_web_context,
     file_reference_context,
+    build_memory_context_event,
 )
 from terminal.api.chat_turn_context import FullTurnDependencies, prepare_full_turn
 from terminal.api.hugo_turn import HugoTurnDependencies, iter_hugo_turn_events
@@ -443,6 +444,30 @@ def _iter_simple_chat_path(
     )
     enriched_messages = vault_result.messages
     yield from vault_result.events
+
+    prior_history = messages[:-1] if messages and messages[-1].get("role") == "user" else messages
+    memory_result = assemble_memory_context(
+        enriched_messages,
+        query=query,
+        prior_history=prior_history,
+        intent="chat",
+        needs_memory=bool(intent_info.get("needs_memory")),
+        memory_mode=memory_mode,
+        retrieve_limit=6,
+        expert=_expert,
+        event_factory=_tool_event,
+    )
+    enriched_messages = memory_result.messages
+    yield from memory_result.events
+    from core.persona_sources import persona_source_status
+    yield _with_trace_id(build_memory_context_event(
+        trace_id=trace_id,
+        intent="chat",
+        persona_injected=persona_source_status(_cfg)["injected"],
+        prior_history=prior_history,
+        messages=messages,
+        retrieval_receipt=memory_result.receipt,
+    ), trace_id)
 
     # 构建 system prompt（简化版：core_persona + stance + expert_block，无 task_plan）
     try:

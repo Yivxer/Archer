@@ -89,8 +89,9 @@ def test_memory_extraction_auto_saves_high_confidence_memory():
         _policy(),
     )
 
-    assert result.saved == 1
-    assert saved[0]["content"] == "stable preference"
+    assert result.saved == 0
+    assert result.staged == 1
+    assert saved == []
 
 
 def test_memory_extraction_stages_sensitive_memory_with_session_summary():

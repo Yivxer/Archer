@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 import re
 from typing import Callable
@@ -16,6 +16,50 @@ MAX_FILE_REF_BYTES = 1_000_000
 class ContextAssemblyResult:
     messages: list[dict]
     events: list[dict]
+    receipt: dict = field(default_factory=dict)
+
+
+def build_memory_context_event(
+    *,
+    trace_id: str,
+    intent: str,
+    persona_injected: bool,
+    prior_history: list[dict],
+    messages: list[dict],
+    retrieval_receipt: dict,
+) -> dict:
+    capsule_text = next((
+        str(item.get("content", ""))
+        for item in messages
+        if item.get("role") == "system" and "[线程情境胶囊]" in str(item.get("content", ""))
+    ), "")
+    episodic = bool(capsule_text)
+    version_match = re.search(r"\[线程情境胶囊\]\s+version=([0-9]+)", capsule_text)
+    return {
+        "type": "runtimeContextEvent",
+        "runtimeContextEvent": {
+            "id": f"memory-context-{uuid4().hex[:8]}",
+            "traceId": trace_id,
+            "task": "memory_context",
+            "phase": "memory",
+            "userIntent": intent,
+            "lastResult": "context_assembled",
+            "expectedNext": "model_stream",
+            "matchedSkills": [],
+            "contextReceipt": {
+                "sources": {
+                    "persona": persona_injected,
+                    "working": bool(prior_history),
+                    "episodic": episodic,
+                    "semantic": bool(retrieval_receipt.get("injectedCount", 0)),
+                },
+                "workingMessageCount": min(len(prior_history), 20),
+                "summaryVersion": int(version_match.group(1)) if version_match else 0,
+                "degraded": bool(retrieval_receipt.get("degraded", False)),
+                "retrieval": retrieval_receipt,
+            },
+        },
+    }
 
 
 def assemble_vault_focus(
@@ -265,6 +309,7 @@ def assemble_memory_context(
                 "memory-retrieve", "memory.retrieve", "complete", "low",
                 "记忆上下文已关闭", "mode: off, injected: False",
             )],
+            {"triggered": False, "reason": "mode_off", "hitCount": 0, "injectedCount": 0},
         )
     if memory_mode == "conservative" and not needs_memory:
         return ContextAssemblyResult(
@@ -274,6 +319,7 @@ def assemble_memory_context(
                 "保守模式：本轮未触发记忆检索",
                 f"mode: {memory_mode}, intent: {intent}, needs_memory: False",
             )],
+            {"triggered": False, "reason": "conservative_policy", "hitCount": 0, "injectedCount": 0},
         )
 
     events = [event_factory(
@@ -324,13 +370,24 @@ def assemble_memory_context(
             "已完成本地记忆检索",
             f"mode: {memory_mode}, core: {len(core)}, related: {len(related)}, injected: {bool(memory_context)}",
         ))
-        return ContextAssemblyResult(enriched, events)
+        return ContextAssemblyResult(enriched, events, {
+            "triggered": True,
+            "reason": "relevant_query",
+            "hitCount": len(core) + len(related),
+            "injectedCount": len(core) + len(related) if memory_context else 0,
+        })
     except Exception as exc:
         events.append(event_factory(
             "memory-retrieve", "memory.retrieve", "blocked", "low",
             "本地记忆检索失败，已跳过", str(exc)[:240],
         ))
-        return ContextAssemblyResult(messages, events)
+        return ContextAssemblyResult(messages, events, {
+            "triggered": True,
+            "reason": "retrieval_failed",
+            "hitCount": 0,
+            "injectedCount": 0,
+            "degraded": True,
+        })
 
 
 def assemble_obsidian_context(

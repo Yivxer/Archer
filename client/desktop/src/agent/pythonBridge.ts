@@ -1,4 +1,4 @@
-import type { AgentEvent, ApprovalDecision, PermissionLevel, PlanStatus, RiskLevel, ToolStatus, WorkReceipt } from './contracts'
+import type { AgentEvent, ApprovalDecision, PermissionLevel, PlanStatus, RiskLevel, RuntimeContextEvent, ToolStatus, WorkReceipt } from './contracts'
 
 export const SUPPORTED_CONTRACT_VERSION = 1
 
@@ -210,6 +210,7 @@ type PythonRuntimeContextEvent = {
   lastResult?: string
   expectedNext: string
   matchedSkills?: string[]
+  contextReceipt?: RuntimeContextEvent['contextReceipt']
   provider?: string
   model?: string
   baseUrlSummary?: string
@@ -308,6 +309,7 @@ export function pythonRuntimeContextToAgentEvent(
     lastResult: snapshot.lastResult || '',
     expectedNext: snapshot.expectedNext,
     matchedSkills: snapshot.matchedSkills ?? [],
+    contextReceipt: snapshot.contextReceipt,
     provider: snapshot.provider,
     model: snapshot.model,
     baseUrlSummary: snapshot.baseUrlSummary,

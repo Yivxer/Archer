@@ -684,7 +684,7 @@ def test_status_migrates_old_memory_schema_before_reading(tmp_path, monkeypatch)
     assert payload["memoryCount"] == 1
 
 
-def test_health_and_ready_do_not_load_config(monkeypatch):
+def test_health_does_not_load_config_and_ready_reports_persona(monkeypatch):
     from terminal.api import _routes as routes
 
     def fail_load_config():
@@ -693,6 +693,7 @@ def test_health_and_ready_do_not_load_config(monkeypatch):
     monkeypatch.setattr(routes, "_load_config", fail_load_config)
 
     health_status, health_payload = routes.payload_get("/health")
+    monkeypatch.setattr(routes, "_load_config", lambda: {})
     ready_status, ready_payload = routes.payload_get("/ready")
 
     assert health_status == 200
@@ -700,6 +701,7 @@ def test_health_and_ready_do_not_load_config(monkeypatch):
     assert ready_status == 200
     assert ready_payload["ok"] is True
     assert ready_payload["ready"] is True
+    assert ready_payload["persona"]["ready"] is False
 
 
 class TestIsDangerousShell:
@@ -3325,13 +3327,21 @@ def test_chat_stream_emits_runtime_context_event(monkeypatch):
     ))
 
     context_events = [e for e in events if e.get("type") == "runtimeContextEvent"]
-    assert len(context_events) == 1
-    context = context_events[0]["runtimeContextEvent"]
+    assert len(context_events) == 2
+    context = next(
+        event["runtimeContextEvent"] for event in context_events
+        if event["runtimeContextEvent"]["phase"] == "route"
+    )
     assert context["task"] == "blog_publish"
     assert context["phase"] == "route"
     assert context["userIntent"] == "writing_assist"
     assert context["expectedNext"] == "select_workflow_or_model"
     assert "hugo_blog" in context["matchedSkills"]
+    memory_context = next(
+        event["runtimeContextEvent"] for event in context_events
+        if event["runtimeContextEvent"]["phase"] == "memory"
+    )
+    assert memory_context["contextReceipt"]["retrieval"]["reason"] == "mode_off"
     trace_ids = {
         event[payload_key]["traceId"]
         for event in events
@@ -3398,7 +3408,8 @@ def test_model_messages_are_trimmed_for_long_context():
 
     assert trimmed[0] == {"role": "system", "content": "system prompt"}
     assert trimmed[1]["role"] == "system"
-    assert "旧对话已省略" in trimmed[1]["content"]
+    assert "线程情境胶囊" in trimmed[1]["content"]
+    assert "目标：user 0" in trimmed[1]["content"]
     assert len(trimmed) == 12
     assert trimmed[-1]["content"] == "assistant 29"
     assert trimmed[-2]["content"] == "user 29"
@@ -3427,8 +3438,9 @@ def test_model_messages_long_context_preserves_system_safety_and_recent_task():
     assert "user preference: preserve Obsidian boundaries" in joined
     assert "recent task: publish the selected blog post safely" in joined
     assert "recent status: waiting for explicit confirmation" in joined
-    assert "[长上下文保护]" in joined
-    assert "old user turn 0" not in joined
+    assert "[线程情境胶囊]" in joined
+    assert "目标：old user turn 0" in joined
+    assert "old assistant turn 0" not in joined
 
 
 def test_chat_stream_emits_failure_hint_on_stream_error(monkeypatch):
@@ -3834,17 +3846,65 @@ def test_initiative_shadow_feedback_and_presence_api(tmp_path, monkeypatch):
     assert shadow["presenceState"] == "muted"
 
 
+def test_initiative_review_candidate_and_report_use_runtime_context(tmp_path):
+    from datetime import datetime
+
+    from core.initiative_shadow import record_shadow_initiative
+    from core.runtime_context import create_runtime_context
+    from terminal.api import _routes as routes
+
+    db = tmp_path / "isolated" / "archer.db"
+    db.parent.mkdir(parents=True)
+    context = create_runtime_context(
+        db_path=db,
+        clock=lambda: datetime(2026, 7, 18, 12, 0, 0),
+    )
+    log_id = record_shadow_initiative(
+        db_path=db,
+        event_type="initiative_due",
+        kind="thread_resume",
+        title="候选",
+        message="shadow only",
+        now=context.now(),
+    )
+
+    claim_status, claim = routes.payload_post(
+        "/initiative-shadow/review-candidate",
+        {"surface": "chat_workspace"},
+        context,
+    )
+    feedback_status, _feedback = routes.payload_post(
+        f"/initiative-shadow/{log_id}/feedback",
+        {"feedback": "acknowledged", "surface": "chat_workspace"},
+        context,
+    )
+    report_status, report = routes.payload_get(
+        "/initiative-shadow/exposure-report?surface=chat_workspace&days=14",
+        context,
+    )
+
+    assert claim_status == 200
+    assert claim["item"]["id"] == log_id
+    assert claim["item"]["delivered"] is False
+    assert feedback_status == 200
+    assert report_status == 200
+    assert report["report"]["exposure_count"] == 1
+    assert report["report"]["recognition_rate"] == 1.0
+    assert db.exists()
+
+
 def test_initiative_shadow_report_failure_is_isolated(tmp_path, monkeypatch):
     from terminal.api import _routes as routes
+    import core.initiative_shadow as initiative_shadow
     import memory.store as store
 
     db = tmp_path / "archer.db"
     monkeypatch.setattr(store, "DB_PATH", db)
 
-    def fail_init_db():
+    def fail_list_shadow_logs(*_args, **_kwargs):
         raise RuntimeError("shadow db unavailable")
 
-    monkeypatch.setattr(store, "init_db", fail_init_db)
+    monkeypatch.setattr(initiative_shadow, "list_shadow_logs", fail_list_shadow_logs)
 
     status, payload = routes.payload_get("/initiative-shadow/report")
 

@@ -52,6 +52,7 @@ def test_prepare_full_turn_preserves_context_event_order_and_trace_id():
         memory=lambda messages, **kwargs: SimpleNamespace(
             messages=[{"role": "system", "content": "memory"}, *messages],
             events=[_event("memory")],
+            receipt={"triggered": True, "reason": "test", "hitCount": 1, "injectedCount": 1},
         ),
         obsidian=lambda messages, **kwargs: SimpleNamespace(
             messages=[{"role": "system", "content": "obsidian"}, *messages],
@@ -79,7 +80,7 @@ def test_prepare_full_turn_preserves_context_event_order_and_trace_id():
 
     assert [event.get("toolEvent", {}).get("name", event["type"]) for event in prepared.events] == [
         "shadow", "file", "vault", "orchestrationEvent", "planEvent",
-        "runtimeContextEvent", "statusEvent", "memory", "obsidian", "web",
+        "runtimeContextEvent", "statusEvent", "memory", "runtimeContextEvent", "obsidian", "web",
     ]
     assert prepared.events[2]["traceId"] == "trace-1"
     assert prepared.events[3]["traceId"] == "trace-1"

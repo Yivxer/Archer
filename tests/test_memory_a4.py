@@ -146,15 +146,13 @@ def test_retrieve_uses_a4_policy_for_reflection_anchor(monkeypatch):
         {"id": 3, "content": "价值判断", "type": "value", "importance": 5, "depth": 4},
     ]
 
-    monkeypatch.setattr(retrieve, "high_importance", lambda min_importance=4, limit=2: [])
-    monkeypatch.setattr(retrieve, "_hybrid_search", lambda query, limit: list(mems))
+    monkeypatch.setattr(retrieve, "_hybrid_search", lambda query, limit, **kwargs: list(mems))
     touched = []
     monkeypatch.setattr(retrieve, "update_last_used", lambda mid: touched.append(mid))
 
     core, related = retrieve.for_context("Archer 不是工具，是灵魂伴侣", limit=7, intent="reflection")
 
-    assert core == []
-    assert related[0]["type"] == "reflection_anchor"
+    assert core[0]["type"] == "reflection_anchor"
     assert len(core + related) <= 7
     assert touched[0] == 2
 
@@ -162,17 +160,12 @@ def test_retrieve_uses_a4_policy_for_reflection_anchor(monkeypatch):
 def test_retrieve_caps_combined_context_to_seven(monkeypatch):
     import memory.retrieve as retrieve
 
-    core_mems = [
-        {"id": 100, "content": "核心价值", "type": "value", "importance": 5, "depth": 5},
-        {"id": 101, "content": "核心主题", "type": "life_theme", "importance": 5, "depth": 5},
-    ]
     related_mems = [
-        {"id": i, "content": f"候选{i}", "type": "fact", "importance": 3, "depth": 1}
+        {"id": i, "content": f"候选{i}", "type": "fact", "importance": 5 if i < 3 else 3, "depth": 1}
         for i in range(1, 10)
     ]
 
-    monkeypatch.setattr(retrieve, "high_importance", lambda min_importance=4, limit=2: list(core_mems))
-    monkeypatch.setattr(retrieve, "_hybrid_search", lambda query, limit: list(related_mems))
+    monkeypatch.setattr(retrieve, "_hybrid_search", lambda query, limit, **kwargs: list(related_mems))
     monkeypatch.setattr(retrieve, "update_last_used", lambda mid: None)
 
     core, related = retrieve.for_context("复盘 Archer 的变化", limit=7, intent="reflection")
@@ -191,10 +184,9 @@ def test_retrieve_emotional_intent_prioritizes_emotion_pattern(monkeypatch):
         {"id": 3, "content": "事实", "type": "fact", "importance": 3, "depth": 1},
     ]
 
-    monkeypatch.setattr(retrieve, "high_importance", lambda min_importance=4, limit=2: [])
-    monkeypatch.setattr(retrieve, "_hybrid_search", lambda query, limit: list(mems))
+    monkeypatch.setattr(retrieve, "_hybrid_search", lambda query, limit, **kwargs: list(mems))
     monkeypatch.setattr(retrieve, "update_last_used", lambda mid: None)
 
     core, related = retrieve.for_context("我最近很焦虑", limit=7, intent="emotional")
 
-    assert related[0]["type"] == "emotion_pattern"
+    assert (core + related)[0]["type"] == "emotion_pattern"

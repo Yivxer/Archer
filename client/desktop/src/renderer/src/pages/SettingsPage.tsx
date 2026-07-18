@@ -418,6 +418,11 @@ export function SettingsPage({
             <X size={15} />
           </button>
         </header>
+        {data.status.persona && !data.status.persona.ready && (
+          <div className="settings-notice warning">
+            人格真源未完整接入：{data.status.persona.missing.join('、')}。Archer 当前回复可能缺少长期上下文。
+          </div>
+        )}
 
         {activeTab === 'model' && (
           <SettingsGroup icon={Settings2} title="模型配置" note="写入 archer.toml；密钥不回显。">

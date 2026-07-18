@@ -33,12 +33,13 @@ def test_health_is_public(client):
 def test_ready_is_public(client):
     response = client.get("/ready")
     assert response.status_code == 200
-    assert response.json() == {
-        "contractVersion": 1,
-        "ok": True,
-        "ready": True,
-        "runtime": "fastapi",
-    }
+    payload = response.json()
+    assert payload["contractVersion"] == 1
+    assert payload["ok"] is True
+    assert payload["ready"] is True
+    assert payload["runtime"] == "fastapi"
+    assert payload["persona"]["ready"] is True
+    assert payload["persona"]["missing"] == []
 
 
 def test_active_context_startup_does_not_override_sigterm_handler(tmp_path, monkeypatch):

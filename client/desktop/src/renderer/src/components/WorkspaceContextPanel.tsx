@@ -1,5 +1,7 @@
 import React from 'react'
+import { useShadowFeedback } from '../lib/useShadowFeedback'
 import type { BackgroundJob, ExpertStarter, MemoryContextMode, ObsidianContextMode, Route } from '../types'
+import { ShadowCandidateCard } from './ShadowCandidateCard'
 
 export type WorkspaceJobSummary = {
   id: string
@@ -22,6 +24,8 @@ export function WorkspaceContextPanel({
   homeStarters,
   onUseStarter,
   onNavigate,
+  canControlInitiative,
+  onRefresh,
   onClose,
 }: {
   activeExpertTitle: string
@@ -35,8 +39,19 @@ export function WorkspaceContextPanel({
   homeStarters: ExpertStarter[]
   onUseStarter: (starter: ExpertStarter) => void
   onNavigate?: (route: Route) => void
+  canControlInitiative: boolean
+  onRefresh?: () => Promise<void>
   onClose?: () => void
 }) {
+  const shadowFeedback = useShadowFeedback({
+    canControl: canControlInitiative,
+    claimDailyCandidate: true,
+    surface: 'chat_workspace',
+    onRefresh,
+  })
+  const candidate = shadowFeedback.reviewCandidate?.reason === 'candidate'
+    ? shadowFeedback.reviewCandidate.item
+    : null
   return (
     <aside className="workspace-context-panel" aria-label="工作台上下文">
       <div className="workspace-context-head">
@@ -63,6 +78,17 @@ export function WorkspaceContextPanel({
           <strong>{sidebarJobs.length}</strong>
         </div>
       </div>
+      {candidate && (
+        <ShadowCandidateCard
+          item={candidate}
+          busy={shadowFeedback.busy}
+          notice={shadowFeedback.notice}
+          onAcknowledge={() => void shadowFeedback.sendFeedback(candidate.id, 'acknowledged')}
+          onTooFrequent={() => void shadowFeedback.sendFeedback(candidate.id, 'too_frequent')}
+          onMute={() => void shadowFeedback.togglePresence()}
+          onViewAll={() => onNavigate?.('Today')}
+        />
+      )}
       <div className="workspace-jobs-panel">
         <div className="workspace-panel-head">
           <span>后台任务</span>

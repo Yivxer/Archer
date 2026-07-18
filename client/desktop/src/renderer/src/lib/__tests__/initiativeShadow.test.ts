@@ -10,6 +10,18 @@ const shadow = {
   globalThrottleActive: false,
   presenceState: 'idle' as const,
   items: [],
+  exposureReport: {
+    surface: 'chat_workspace' as const,
+    days: 14,
+    exposureCount: 0,
+    feedbackCount: 0,
+    conversionRate: 0,
+    acknowledgedCount: 0,
+    recognitionRate: 0,
+    tooFrequentCount: 0,
+    tooFrequentRate: 0,
+    muteCount: 0,
+  },
   report: {
     observationDays: 0,
     totalCandidates: 0,

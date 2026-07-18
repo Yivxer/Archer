@@ -8,6 +8,28 @@ from pathlib import Path
 from terminal.api._config import _clean_chat_messages, _inject_thread_context
 
 
+def clean_context_id(value: object, field: str) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    if not all(char.isalnum() or char in "_-" for char in text) or len(text) > 96:
+        raise ValueError(f"{field} is invalid")
+    return text
+
+
+def _inject_stored_thread_context(messages: list[dict], thread_id: str) -> list[dict]:
+    from memory.thread_context import format_context_capsule, get_thread_context, latest_thread_context
+
+    latest_user = next((str(item.get("content", "")) for item in reversed(messages) if item.get("role") == "user"), "")
+    resume_query = any(marker in latest_user for marker in ("上次聊到", "之前聊到", "继续之前", "接着上次"))
+    state = get_thread_context(thread_id) if thread_id else None
+    if state is None and resume_query:
+        state = latest_thread_context()
+    if state is None:
+        return messages
+    return [{"role": "system", "content": format_context_capsule(state)}, *messages]
+
+
 def clean_memory_mode(value: object) -> str:
     if value in ("off", "conservative", "full"):
         return str(value)
@@ -54,13 +76,20 @@ class TurnContext:
     memory_mode: str
     obsidian_mode: str
     file_refs: list[dict]
+    thread_id: str = ""
+    session_id: str = ""
 
     @classmethod
     def from_payload(cls, payload: dict) -> "TurnContext":
         messages = _clean_chat_messages(payload.get("messages"))
+        thread_id = clean_context_id(payload.get("threadId"), "threadId")
+        session_id = clean_context_id(payload.get("sessionId"), "sessionId")
+        messages = _inject_thread_context(messages, payload.get("threadContext"))
         return cls(
-            messages=_inject_thread_context(messages, payload.get("threadContext")),
+            messages=_inject_stored_thread_context(messages, thread_id),
             memory_mode=clean_memory_mode(payload.get("memoryMode")),
             obsidian_mode=clean_obsidian_mode(payload.get("obsidianMode")),
             file_refs=clean_file_refs(payload.get("fileRefs")),
+            thread_id=thread_id,
+            session_id=session_id,
         )

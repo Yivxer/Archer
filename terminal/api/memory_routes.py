@@ -54,6 +54,39 @@ def _resolve_pending_memory(memory_id: str, accepted: bool) -> dict:
     return {"ok": bool(deleted), "id": int(memory_id), "accepted": False, "deleted": deleted}
 
 
+def _remember_memory(payload: dict) -> dict:
+    """Stage an explicit remember request; user review remains mandatory."""
+    from memory.store import add_pending, init_db
+
+    content = str(payload.get("content", "") or "").strip()
+    if len(content) < 2:
+        raise ValueError("content is required")
+    init_db()
+    pending_id = add_pending(
+        content=content,
+        type=str(payload.get("type", "fact") or "fact"),
+        importance=payload.get("importance", 3),
+        source="explicit_user_request",
+        confidence=1.0,
+        suggest_reason="用户明确要求记住；等待审阅确认",
+        session_summary=str(payload.get("sessionId", "") or "")[:96],
+    )
+    return {"ok": True, "status": "pending", "id": pending_id, "requiresReview": True}
+
+
+def _archive_memory(payload: dict) -> dict:
+    from memory.store import archive
+
+    try:
+        memory_id = int(payload.get("id", 0))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("id must be numeric") from exc
+    if memory_id <= 0:
+        raise ValueError("id is required")
+    archived = archive(memory_id)
+    return {"ok": archived, "id": memory_id, "status": "archived" if archived else "not_found"}
+
+
 def _hypotheses(limit: int = 50, status: str = "active") -> dict:
     from memory.hypothesis_tracker import list_hypotheses
     from memory.store import init_db
@@ -232,4 +265,3 @@ def _batch_resolve_pending(accepted: bool) -> dict:
 
 
 # ---------------------------------------------------------------------------
-

@@ -49,6 +49,9 @@ def test_empty_database_upgrades_to_latest_schema(tmp_path):
     assert conn.execute(
         "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='durable_outbox'"
     ).fetchone()[0] == 1
+    assert conn.execute(
+        "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='initiative_shadow_interactions'"
+    ).fetchone()[0] == 1
     conn.close()
 
 

@@ -12,11 +12,12 @@
 
 import type { InitiativeEvent } from '../../../agent/contracts'
 import {
+  claimInitiativeReviewCandidate,
   setInitiativeDeliveryOptIn,
   setInitiativePresence,
   submitInitiativeFeedback,
 } from '../adapters/localArcher'
-import type { InitiativeShadowReview } from '../types'
+import type { InitiativeShadowReview, InitiativeShadowReviewCandidate } from '../types'
 import { createExternalStore, useExternalStore, type LoadState } from './externalStore'
 import { mergeInitiativeShadowEvent } from './initiativeShadow'
 
@@ -24,12 +25,16 @@ import { mergeInitiativeShadowEvent } from './initiativeShadow'
 
 export type InitiativeStoreState = {
   review: InitiativeShadowReview | null
+  reviewCandidate: InitiativeShadowReviewCandidate | null
+  candidateState: LoadState
   loadState: LoadState
   error: string
 }
 
 const initialState: InitiativeStoreState = {
   review: null,
+  reviewCandidate: null,
+  candidateState: 'idle',
   loadState: 'idle',
   error: '',
 }
@@ -84,15 +89,20 @@ export function mergeInitiativeReview(review: InitiativeShadowReview): void {
 export async function submitInitiativeFeedbackAction(
   id: number,
   feedback: 'acknowledged' | 'too_frequent',
+  surface?: 'chat_workspace' | 'today',
 ): Promise<void> {
   try {
-    await submitInitiativeFeedback(id, feedback)
+    await submitInitiativeFeedback(id, feedback, surface)
     store.setState((s) => {
       if (!s.review) return s
       const items = s.review.items.map((item) =>
         item.id === id ? { ...item, feedback } : item,
       )
-      return { ...s, review: { ...s.review, items } }
+      return {
+        ...s,
+        review: { ...s.review, items },
+        reviewCandidate: s.reviewCandidate?.item?.id === id ? null : s.reviewCandidate,
+      }
     })
   } catch (err) {
     store.setState((s) => ({
@@ -109,12 +119,17 @@ export async function submitInitiativeFeedbackAction(
  */
 export async function setInitiativePresenceAction(
   state: 'idle' | 'muted',
+  surface?: 'chat_workspace' | 'today',
 ): Promise<void> {
   try {
-    const result = await setInitiativePresence(state)
+    const result = await setInitiativePresence(state, surface)
     store.setState((s) => {
       if (!s.review) return s
-      return { ...s, review: { ...s.review, presenceState: result.state } }
+      return {
+        ...s,
+        review: { ...s.review, presenceState: result.state },
+        reviewCandidate: result.state === 'muted' ? null : s.reviewCandidate,
+      }
     })
   } catch (err) {
     store.setState((s) => ({
@@ -122,6 +137,26 @@ export async function setInitiativePresenceAction(
       error: err instanceof Error ? err.message : String(err),
     }))
     throw err
+  }
+}
+
+export async function claimInitiativeReviewCandidateAction(): Promise<void> {
+  store.setState((s) => ({ ...s, candidateState: 'loading', error: '' }))
+  try {
+    const result = await claimInitiativeReviewCandidate()
+    store.setState((s) => ({
+      ...s,
+      reviewCandidate: result,
+      candidateState: 'ready',
+      error: '',
+    }))
+  } catch (err) {
+    store.setState((s) => ({
+      ...s,
+      reviewCandidate: null,
+      candidateState: 'error',
+      error: err instanceof Error ? err.message : String(err),
+    }))
   }
 }
 

@@ -29,6 +29,33 @@ def init_initiative_shadow_table(db_path: Path) -> None:
     conn.close()
 
 
+def init_initiative_shadow_interactions_table(db_path: Path) -> None:
+    """Create the privacy-minimal audit trail for shadow review surfaces."""
+    conn = sqlite3.connect(db_path)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS initiative_shadow_interactions (
+            id                INTEGER PRIMARY KEY AUTOINCREMENT,
+            event_type        TEXT    NOT NULL,
+            initiative_log_id INTEGER,
+            surface           TEXT    NOT NULL,
+            value             TEXT    DEFAULT '',
+            exposure_date     TEXT,
+            created_at        TEXT    NOT NULL
+        )
+    """)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_initiative_shadow_interactions_created "
+        "ON initiative_shadow_interactions(created_at)"
+    )
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_initiative_shadow_daily_exposure "
+        "ON initiative_shadow_interactions(surface, exposure_date) "
+        "WHERE event_type='exposure'"
+    )
+    conn.commit()
+    conn.close()
+
+
 def init_part8_threads_table(db_path: Path) -> None:
     conn = sqlite3.connect(db_path)
     conn.execute("""

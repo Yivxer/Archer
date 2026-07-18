@@ -44,6 +44,12 @@ import {
   normalizeInitiativeShadowItem,
   normalizeInitiativeShadowOptIn,
 } from './initiativeAdapter'
+import {
+  defaultInitiativeShadowExposureReport,
+  defaultInitiativeShadowReport,
+  normalizeInitiativeShadowExposureReport,
+  normalizeInitiativeShadowReport,
+} from './initiativeReports'
 const BASE_URL = 'http://127.0.0.1:8765'
 const TOKEN_STORAGE_KEY = 'archer-desktop-api-token'
 const API_TIMEOUT_MS = 15_000
@@ -178,7 +184,7 @@ function unwrapRestPayload<T>(payload: unknown): T {
   return payload as T
 }
 
-async function getJson<T>(path: string): Promise<T> {
+export async function getJson<T>(path: string): Promise<T> {
   const response = await apiFetch(path)
   if (!response.ok) {
     const body = await response.json().catch(() => ({}))
@@ -188,7 +194,7 @@ async function getJson<T>(path: string): Promise<T> {
   return unwrapRestPayload<T>(await response.json())
 }
 
-async function postJson<T>(path: string, payload: unknown): Promise<T> {
+export async function postJson<T>(path: string, payload: unknown): Promise<T> {
   const response = await apiFetch(path, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -250,6 +256,7 @@ export async function loadLocalArcher(): Promise<ArcherAdapter> {
     initiativeShadowLongTermReportRaw,
     initiativeShadowDeliveryGateRaw,
     initiativeShadowReviewPacketRaw,
+    initiativeShadowExposureReportRaw,
     soulProfile,
     soulFiles,
     periodReviewsList,
@@ -276,6 +283,7 @@ export async function loadLocalArcher(): Promise<ArcherAdapter> {
       deliveryGate: defaultInitiativeShadowDeliveryGate(),
       optIn: defaultInitiativeShadowOptIn(),
       reviewPacket: defaultInitiativeShadowReviewPacket(),
+      exposureReport: defaultInitiativeShadowExposureReport(),
     } as ArcherAdapter['initiativeShadow']),
     safeJson('/initiative-shadow/report', {
       ok: true,
@@ -301,6 +309,11 @@ export async function loadLocalArcher(): Promise<ArcherAdapter> {
       manualReport: defaultInitiativeShadowReport(),
       longTermReport: defaultInitiativeShadowLongTermReport(),
       deliveryGate: defaultInitiativeShadowDeliveryGate(),
+    }),
+    safeJson('/initiative-shadow/exposure-report?surface=chat_workspace&days=14', {
+      ok: true,
+      shadow: true,
+      report: defaultInitiativeShadowExposureReport(),
     }),
     safeJson('/soul-profile', { empty: true, sections: [] } as ArcherAdapter['soulProfile']),
     safeJson('/soul-files', {} as ArcherAdapter['soulFiles']),
@@ -375,6 +388,7 @@ export async function loadLocalArcher(): Promise<ArcherAdapter> {
       initiativeShadowLongTermReportRaw,
       initiativeShadowDeliveryGateRaw,
       initiativeShadowReviewPacketRaw,
+      initiativeShadowExposureReportRaw,
     ),
     soulProfile,
     soulFiles,
@@ -402,6 +416,7 @@ function normalizeInitiativeShadow(
   longTermReportRaw?: RawInitiativeShadowReportResponse,
   deliveryGateRaw?: RawInitiativeShadowReportResponse,
   reviewPacketRaw?: RawInitiativeShadowReportResponse,
+  exposureReportRaw?: RawInitiativeShadowReportResponse,
 ): ArcherAdapter['initiativeShadow'] {
   return {
     ok: Boolean(raw.ok),
@@ -418,47 +433,7 @@ function normalizeInitiativeShadow(
     deliveryGate: normalizeInitiativeShadowDeliveryGate(deliveryGateRaw?.gate),
     optIn: normalizeInitiativeShadowOptIn(deliveryGateRaw?.optIn ?? reviewPacketRaw?.optIn),
     reviewPacket: normalizeInitiativeShadowReviewPacket(reviewPacketRaw),
-  }
-}
-
-function defaultInitiativeShadowReport(): ArcherAdapter['initiativeShadow']['report'] {
-  return {
-    observationDays: 0,
-    totalCandidates: 0,
-    dailyAverage: 0,
-    feedbackCount: 0,
-    recognitionRate: 0,
-    readyForManualReview: false,
-    reasons: ['insufficient_observation_days'],
-    thresholds: {
-      requiredDays: 7,
-      maxDailyAverage: 3,
-      minFeedback: 3,
-      minRecognitionRate: 0.7,
-    },
-  }
-}
-
-function normalizeInitiativeShadowReport(report?: Record<string, unknown>): ArcherAdapter['initiativeShadow']['report'] {
-  const fallback = defaultInitiativeShadowReport()
-  if (!report) return fallback
-  const thresholds = report.thresholds && typeof report.thresholds === 'object' && !Array.isArray(report.thresholds)
-    ? report.thresholds as Record<string, unknown>
-    : {}
-  return {
-    observationDays: Number(report.observation_days ?? report.observationDays ?? fallback.observationDays),
-    totalCandidates: Number(report.total_candidates ?? report.totalCandidates ?? fallback.totalCandidates),
-    dailyAverage: Number(report.daily_average ?? report.dailyAverage ?? fallback.dailyAverage),
-    feedbackCount: Number(report.feedback_count ?? report.feedbackCount ?? fallback.feedbackCount),
-    recognitionRate: Number(report.recognition_rate ?? report.recognitionRate ?? fallback.recognitionRate),
-    readyForManualReview: Boolean(report.ready_for_manual_review ?? report.readyForManualReview),
-    reasons: Array.isArray(report.reasons) ? report.reasons.map(String) : fallback.reasons,
-    thresholds: {
-      requiredDays: Number(thresholds.required_days ?? thresholds.requiredDays ?? fallback.thresholds.requiredDays),
-      maxDailyAverage: Number(thresholds.max_daily_average ?? thresholds.maxDailyAverage ?? fallback.thresholds.maxDailyAverage),
-      minFeedback: Number(thresholds.min_feedback ?? thresholds.minFeedback ?? fallback.thresholds.minFeedback),
-      minRecognitionRate: Number(thresholds.min_recognition_rate ?? thresholds.minRecognitionRate ?? fallback.thresholds.minRecognitionRate),
-    },
+    exposureReport: normalizeInitiativeShadowExposureReport(exposureReportRaw?.report),
   }
 }
 
@@ -655,7 +630,6 @@ export async function saveLocalSession(
 export async function appendLocalSession(sessionId: string, messages: ChatRequestMessage[]): Promise<SavedSession> {
   return postJson<SavedSession>(`/sessions/${encodeURIComponent(sessionId)}/append`, { messages })
 }
-
 export type SessionDeleteResult = {
   ok: boolean
   id: string
@@ -693,14 +667,37 @@ export async function resolvePendingMemory(id: number, accepted: boolean): Promi
 export async function submitInitiativeFeedback(
   id: number,
   feedback: 'acknowledged' | 'too_frequent',
+  surface?: 'chat_workspace' | 'today',
 ): Promise<{ ok: boolean; id: number; feedback: string }> {
-  return postJson(`/initiative-shadow/${id}/feedback`, { feedback })
+  return postJson(`/initiative-shadow/${id}/feedback`, { feedback, ...(surface ? { surface } : {}) })
 }
 
 export async function setInitiativePresence(
   state: 'idle' | 'muted',
+  surface?: 'chat_workspace' | 'today',
 ): Promise<{ ok: boolean; state: 'engaged' | 'idle' | 'muted'; reason: string }> {
-  return postJson('/initiative-shadow/presence', { state })
+  return postJson('/initiative-shadow/presence', { state, ...(surface ? { surface } : {}) })
+}
+
+export async function claimInitiativeReviewCandidate(): Promise<import('../types').InitiativeShadowReviewCandidate> {
+  const raw = await postJson<Record<string, unknown>>('/initiative-shadow/review-candidate', {
+    surface: 'chat_workspace',
+  })
+  const item = raw.item && typeof raw.item === 'object' && !Array.isArray(raw.item)
+    ? normalizeInitiativeShadowItem(raw.item as Record<string, unknown>)
+    : null
+  const reason = String(raw.reason || 'no_candidate')
+  return {
+    ok: Boolean(raw.ok),
+    shadow: raw.shadow !== false,
+    delivered: false,
+    surface: 'chat_workspace',
+    exposureDate: String(raw.exposure_date || raw.exposureDate || ''),
+    reason: reason === 'candidate' || reason === 'already_reviewed_today' || reason === 'muted'
+      ? reason
+      : 'no_candidate',
+    item,
+  }
 }
 
 export async function setInitiativeDeliveryOptIn(
@@ -1042,7 +1039,7 @@ export async function streamLocalChat(
   memoryMode: MemoryContextMode,
   obsidianMode: ObsidianContextMode,
   fileRefs: FileRef[],
-  threadContext: { title?: string; summary?: string; projectSummary?: string } | null,
+  threadContext: { id?: string; sessionId?: string; title?: string; summary?: string; projectSummary?: string } | null,
   onText: (text: string) => void,
   onToolEvent?: (event: ToolEvent) => void,
   onAgentEvent?: (event: AgentEvent) => void,
@@ -1052,7 +1049,7 @@ export async function streamLocalChat(
   const response = await apiFetch('/chat/stream', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ messages, memoryMode, obsidianMode, fileRefs, threadContext }),
+    body: JSON.stringify({ messages, memoryMode, obsidianMode, fileRefs, threadContext, threadId: threadContext?.id, sessionId: threadContext?.sessionId }),
     signal
   }, true, null)
   if (!response.ok || !response.body) {

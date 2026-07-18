@@ -90,8 +90,13 @@ class TestSimplePathFork:
         assert not [e for e in events if isinstance(e, dict) and e.get("type") == "orchestrationEvent"]
         assert not [e for e in events if isinstance(e, dict) and e.get("type") == "planEvent"]
         model_context = [e for e in events if isinstance(e, dict) and e.get("type") == "runtimeContextEvent"]
-        assert len(model_context) == 1
-        assert model_context[0]["runtimeContextEvent"]["phase"] == "model_stream"
+        assert len(model_context) == 2
+        memory_context = next(
+            event["runtimeContextEvent"] for event in model_context
+            if event["runtimeContextEvent"]["phase"] == "memory"
+        )
+        assert memory_context["contextReceipt"]["retrieval"]["reason"] == "mode_off"
+        assert any(event["runtimeContextEvent"]["phase"] == "model_stream" for event in model_context)
         # simple path 发 statusEvent 且 simplePath=True
         status_events = [e for e in events if isinstance(e, dict) and e.get("type") == "statusEvent"]
         assert status_events, "应至少发一个 statusEvent"

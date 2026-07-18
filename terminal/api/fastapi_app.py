@@ -21,7 +21,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.concurrency import run_in_threadpool
 from starlette.responses import Response
 
-from terminal.api._config import ALLOWED_DESKTOP_ORIGINS, ROOT
+from terminal.api._config import ALLOWED_DESKTOP_ORIGINS, ROOT, _load_config
 from terminal.api._routes import payload_get, payload_post
 from terminal.api._security import (
     MAX_CONTENT_LENGTH,
@@ -246,6 +246,15 @@ def create_app(
             clock=app.state.runtime_context.clock,
         )
         app.state.schema_version = migration_result.version
+        from memory.embedder import warmup
+
+        embedding_thread = threading.Thread(
+            target=warmup,
+            name="archer-embedding-warmup",
+            daemon=True,
+        )
+        embedding_thread.start()
+        app.state.embedding_warmup = embedding_thread
         from infrastructure.outbox import recover_interrupted
 
         app.state.outbox_recovered = recover_interrupted(
@@ -365,11 +374,16 @@ def create_app(
 
     @app.get("/ready")
     async def ready() -> dict[str, object]:
+        from core.persona_sources import persona_source_status
+        from terminal.api._config import _load_config
+
+        persona = persona_source_status(_load_config())
         return {
             "contractVersion": CONTRACT_VERSION,
             "ok": True,
             "ready": True,
             "runtime": "fastapi",
+            "persona": persona,
         }
 
     @app.get("/active-context")

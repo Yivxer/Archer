@@ -22,6 +22,12 @@ class ConfigValidationError(ValueError):
     """Raised when a configuration cannot be safely interpreted."""
 
 
+PERSONA_PATH_FIELDS = frozenset({
+    "soul_path", "memory_path", "covenant_path", "presence_path",
+    "soul_profile_path",
+})
+
+
 def _validate_mcp_config(mcp: dict) -> None:
     servers = mcp.get("servers", [])
     if not isinstance(servers, list):
@@ -108,6 +114,13 @@ def validate_config(raw: object) -> dict:
                 raise ConfigValidationError(f"unknown model profile: {profile_id}")
             if not isinstance(profile, dict):
                 raise ConfigValidationError(f"[model_profiles.{profile_id}] must be a TOML table")
+
+    persona = cfg.get("persona", {})
+    if isinstance(persona, dict):
+        for field in PERSONA_PATH_FIELDS:
+            value = persona.get(field)
+            if value is not None and (not isinstance(value, str) or not value.strip()):
+                raise ConfigValidationError(f"persona.{field} must be a non-empty path")
 
     mcp = cfg.get("mcp", {})
     if isinstance(mcp, dict):
