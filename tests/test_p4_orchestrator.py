@@ -1,8 +1,14 @@
-"""P4: Orchestrator 每轮前置判断。"""
+"""P4: Orchestrator 每轮前置判断。
+
+整个文件标 integration：场景类测试调用 `_iter_chat_chunks` 走真实模型 streaming，
+单次 30-60s；本地快速验证可用 `pytest -m "not integration"` 跳过。
+"""
 from __future__ import annotations
 
 import unittest
 from unittest.mock import patch
+
+import pytest
 
 from core.orchestrator import (
     build_memory_candidate_policy,
@@ -15,6 +21,9 @@ from core.orchestrator import (
     orchestrate_user_input,
     orchestration_status_labels,
 )
+
+# 文件级 marker：所有测试需要真实模型 streaming，归类为 integration 层。
+pytestmark = pytest.mark.integration
 
 
 class TestOrchestratorSnapshot(unittest.TestCase):

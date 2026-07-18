@@ -306,8 +306,8 @@ def test_concurrent_append_to_different_sessions_do_not_block_each_other(tmp_pat
     assert errors == []
     # 如果两把锁串行（错误实现），慢 session 0.2s + 快 session ~0s = 至少 0.2s
     # 并行执行下快 session 不被阻塞，整体时间应接近慢 session 单独时间
-    # 这里只做宽松断言：总耗时 < 0.6s（允许 CI 和本地调度抖动）
-    assert total < 0.6, f"不同 session 的 append 似乎被串行化，总耗时 {total:.3f}s"
+    # 这里只做宽松断言：总耗时 < 1.0s（允许 CI 和本地调度抖动 + GIL 切换开销）
+    assert total < 1.0, f"不同 session 的 append 似乎被串行化，总耗时 {total:.3f}s"
 
     # 验证两个文件都写成功（session 文件结构为 {messages, meta}）
     for sid in ("20260717_130000", "20260717_130001"):

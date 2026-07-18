@@ -8,6 +8,8 @@ import tempfile
 import types
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 
@@ -348,7 +350,10 @@ def test_artifacts_missing_with_fix(tmp_path):
 
 # ── run_checks integration ────────────────────────────────────────────────────
 
+@pytest.mark.integration
 def test_run_checks_returns_list():
+    """整个 run_checks 流程含 _check_api_dns 真实 DNS 解析，单次 ~30s，
+    归类为 integration；本地快速验证可用 `pytest -m "not integration"` 跳过。"""
     with tempfile.TemporaryDirectory() as tmp:
         cfg = _minimal_cfg(tmp)
         skills = {n: _mock_skill(n) for n in ["weather", "web_fetch"]}
