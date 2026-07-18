@@ -384,71 +384,9 @@ def update_last_used(mid: int):
 
 # ── Pending Memories（持久化候选记忆）─────────────────────────────────────────
 
-def add_pending(content: str, type: str = "insight", importance: int = 3,
-                tags: str = "", source: str = "auto", confidence: float = 0.7,
-                depth: int = 3, suggest_reason: str = "",
-                block_type: str | None = None, label: str | None = None,
-                session_summary: str = "", *, db_path: str | Path | None = None) -> int:
-    """将候选记忆写入 pending_memories 表，返回 ID。"""
-    content = content.strip()
-    if type not in MEMORY_TYPES:
-        type = "insight"
-    try:
-        importance = max(1, min(5, int(importance)))
-    except Exception:
-        importance = 3
-    try:
-        depth = max(1, min(5, int(depth)))
-    except Exception:
-        depth = 3
-    resolved_block = infer_block_type(type, block_type)
-    resolved_label = normalize_label(label)
-
-    conn = sqlite3.connect(db_path or DB_PATH)
-    cur = conn.execute(
-        "INSERT INTO pending_memories (content, type, importance, depth, tags, source, confidence, "
-        "created_at, suggest_reason, block_type, label, session_summary) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (content, type, importance, depth, tags.strip(), source, float(confidence),
-         _now(), suggest_reason.strip(), resolved_block, resolved_label, session_summary.strip()),
-    )
-    conn.commit()
-    pid = cur.lastrowid
-    conn.close()
-    return pid
-
-
-def list_pending(limit: int = 50, include_rejected: bool = False) -> list[dict]:
-    """返回待确认记忆。默认仅 pending，include_rejected=True 时包含 rejected。"""
-    conn = sqlite3.connect(DB_PATH)
-    if include_rejected:
-        rows = conn.execute(
-            "SELECT id, content, type, importance, depth, tags, source, confidence, created_at, "
-            "status, suggest_reason, block_type, label, session_summary "
-            "FROM pending_memories ORDER BY id LIMIT ?",
-            (limit,),
-        ).fetchall()
-    else:
-        rows = conn.execute(
-            "SELECT id, content, type, importance, depth, tags, source, confidence, created_at, "
-            "status, suggest_reason, block_type, label, session_summary "
-            "FROM pending_memories WHERE status = 'pending' ORDER BY id LIMIT ?",
-            (limit,),
-        ).fetchall()
-    conn.close()
-    return [
-        {
-            "id": r[0], "content": r[1], "type": r[2],
-            "importance": r[3], "depth": r[4], "tags": r[5],
-            "source": r[6], "confidence": r[7], "created_at": r[8],
-            "status": r[9] if len(r) > 9 and r[9] else "pending",
-            "suggest_reason": r[10] if len(r) > 10 and r[10] else "",
-            "block_type": r[11] if len(r) > 11 and r[11] else infer_block_type(r[2]),
-            "label": r[12] if len(r) > 12 and r[12] else "",
-            "session_summary": r[13] if len(r) > 13 and r[13] else "",
-        }
-        for r in rows
-    ]
+# ── P1: 待确认记忆审阅（已抽到 memory/store_pending.py） ──────────────────────
+# add_pending / list_pending / count_pending / update_pending / accept_pending / reject_pending
+# 全部迁移到 store_pending.py，下方 re-export 保持向后兼容
 
 
 def count_active() -> int:
@@ -458,360 +396,12 @@ def count_active() -> int:
     return n
 
 
-def count_pending(include_rejected: bool = False) -> int:
-    """返回待确认记忆数量。"""
-    conn = sqlite3.connect(DB_PATH)
-    if include_rejected:
-        n = conn.execute("SELECT COUNT(*) FROM pending_memories").fetchone()[0]
-    else:
-        n = conn.execute("SELECT COUNT(*) FROM pending_memories WHERE status = 'pending'").fetchone()[0]
-    conn.close()
-    return n
+# ── Themes / Projects / Soul Proposals（已抽到独立模块） ────────────────────────
+# store_themes.py:         save_theme / list_themes / link_memory_to_theme / get_theme_memories / get_memories_for_detection
+# store_projects.py:       create_project / list_projects / get_project / get_project_by_name / archive_project / log_project_event / get_project_events
+# store_soul_proposals.py: add_soul_proposal / list_soul_proposals / count_soul_proposals / resolve_soul_proposal
+# 下方 re-export 保持向后兼容
 
-
-def update_pending(pid: int, content: str) -> bool:
-    """编辑一条待确认记忆的内容，返回是否更新成功。"""
-    content = content.strip()
-    if not content:
-        return False
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.execute(
-        "UPDATE pending_memories SET content = ? WHERE id = ?",
-        (content, int(pid)),
-    )
-    conn.commit()
-    ok = cur.rowcount > 0
-    conn.close()
-    return ok
-
-
-def accept_pending(pid: int | str) -> list[int]:
-    """
-    接受待确认记忆，写入主 memories 表并从 pending 中删除。
-    pid 可以是具体 ID 或 "all"。返回写入的 memory ID 列表。
-    """
-    conn = sqlite3.connect(DB_PATH)
-    if str(pid) == "all":
-        rows = conn.execute(
-            "SELECT id, content, type, importance, depth, tags, source, confidence, block_type, label "
-            "FROM pending_memories WHERE status = 'pending'"
-        ).fetchall()
-    else:
-        rows = conn.execute(
-            "SELECT id, content, type, importance, depth, tags, source, confidence, block_type, label "
-            "FROM pending_memories WHERE id = ? AND status = 'pending'",
-            (int(pid),),
-        ).fetchall()
-    conn.close()
-
-    if not rows:
-        return []
-
-    memory_ids = []
-    accepted_pids = []
-    for row in rows:
-        p_id, content, type_, importance, depth, tags, source, confidence, block_type, label = row
-        mid = save(
-            content, tags=tags, type=type_, importance=importance, source=source,
-            confidence=confidence, depth=depth, block_type=block_type, label=label,
-        )
-        memory_ids.append(mid)
-        accepted_pids.append(p_id)
-
-    conn = sqlite3.connect(DB_PATH)
-    if str(pid) == "all":
-        conn.execute("DELETE FROM pending_memories WHERE status = 'pending'")
-    else:
-        conn.execute("DELETE FROM pending_memories WHERE id = ? AND status = 'pending'", (int(pid),))
-    conn.commit()
-    conn.close()
-
-    return memory_ids
-
-
-def reject_pending(pid: int | str) -> int:
-    """
-    软拒绝待确认记忆（status 改为 rejected）。pid 可以是具体 ID 或 "all"。返回更新数量。
-    """
-    conn = sqlite3.connect(DB_PATH)
-    if str(pid) == "all":
-        n = conn.execute("SELECT COUNT(*) FROM pending_memories WHERE status = 'pending'").fetchone()[0]
-        conn.execute("UPDATE pending_memories SET status = 'rejected' WHERE status = 'pending'")
-    else:
-        cur = conn.execute(
-            "UPDATE pending_memories SET status = 'rejected' WHERE id = ? AND status = 'pending'",
-            (int(pid),),
-        )
-        n = cur.rowcount
-    conn.commit()
-    conn.close()
-    return n
-
-
-# ── Themes（跨会话模式归纳）─────────────────────────────────────────────────────
-
-def save_theme(name: str, description: str = "", category: str = "behavior") -> int:
-    """保存或更新一个主题，重名时增加 occurrence_count。返回 theme ID。"""
-    name = name.strip()
-    conn = sqlite3.connect(DB_PATH)
-    existing = conn.execute(
-        "SELECT id FROM themes WHERE name = ? LIMIT 1", (name,)
-    ).fetchone()
-    if existing:
-        conn.execute(
-            "UPDATE themes SET occurrence_count = occurrence_count + 1, "
-            "last_seen_at = ?, description = CASE WHEN ? != '' THEN ? ELSE description END "
-            "WHERE id = ?",
-            (_now(), description, description, existing[0]),
-        )
-        conn.commit()
-        tid = existing[0]
-    else:
-        cur = conn.execute(
-            "INSERT INTO themes (name, description, category, occurrence_count, last_seen_at, created_at) "
-            "VALUES (?, ?, ?, 1, ?, ?)",
-            (name, description.strip(), category, _now(), _now()),
-        )
-        conn.commit()
-        tid = cur.lastrowid
-    conn.close()
-    return tid
-
-
-def list_themes(limit: int = 20) -> list[dict]:
-    conn = sqlite3.connect(DB_PATH)
-    rows = conn.execute(
-        "SELECT id, name, description, category, occurrence_count, last_seen_at "
-        "FROM themes ORDER BY occurrence_count DESC, last_seen_at DESC LIMIT ?",
-        (limit,),
-    ).fetchall()
-    conn.close()
-    return [
-        {"id": r[0], "name": r[1], "description": r[2],
-         "category": r[3], "occurrence_count": r[4], "last_seen_at": r[5]}
-        for r in rows
-    ]
-
-
-def link_memory_to_theme(memory_id: int, theme_id: int, strength: float = 0.5):
-    """关联记忆与主题，已存在则更新 strength。"""
-    conn = sqlite3.connect(DB_PATH)
-    conn.execute(
-        "INSERT INTO memory_links (memory_id, theme_id, strength, created_at) VALUES (?, ?, ?, ?) "
-        "ON CONFLICT(memory_id, theme_id) DO UPDATE SET strength = excluded.strength",
-        (memory_id, theme_id, float(strength), _now()),
-    )
-    conn.commit()
-    conn.close()
-
-
-def get_theme_memories(theme_id: int, limit: int = 10) -> list[dict]:
-    conn = sqlite3.connect(DB_PATH)
-    rows = conn.execute(
-        "SELECT m.id, m.content, m.tags, m.type, m.importance, m.depth, m.confidence, m.valid_until, ml.strength "
-        "FROM memory_links ml JOIN memories m ON ml.memory_id = m.id "
-        "WHERE ml.theme_id = ? AND m.status = 'active' "
-        "ORDER BY ml.strength DESC, m.importance DESC LIMIT ?",
-        (theme_id, limit),
-    ).fetchall()
-    conn.close()
-    return [
-        {"id": r[0], "content": r[1], "tags": r[2], "type": r[3],
-         "importance": r[4], "depth": _clamp_depth(r[5]), "confidence": r[6], "valid_until": r[7], "strength": r[8]}
-        for r in rows
-    ]
-
-
-def get_memories_for_detection(limit: int = 50) -> list[dict]:
-    """返回用于主题检测的核心记忆（importance >= 3，排除 reflection/context）。含 session_id。"""
-    conn = sqlite3.connect(DB_PATH)
-    rows = conn.execute(
-        "SELECT id, content, tags, type, importance, depth, created_at, confidence, valid_until, session_id "
-        "FROM memories WHERE status = 'active' AND importance >= 3 "
-        "AND type NOT IN ('reflection', 'context') "
-        "ORDER BY importance DESC, updated_at DESC LIMIT ?",
-        (limit,),
-    ).fetchall()
-    conn.close()
-    result = []
-    for r in rows:
-        d = _row_to_dict(r[:9], has_date=True)
-        d["session_id"] = r[9] if len(r) > 9 else None
-        result.append(d)
-    return result
-
-
-# ── Projects（多项目追踪）──────────────────────────────────────────────────────
-
-def create_project(name: str, description: str = "") -> int:
-    """创建项目，返回 ID。名称重复时返回已有 ID。"""
-    name = name.strip()
-    conn = sqlite3.connect(DB_PATH)
-    existing = conn.execute(
-        "SELECT id FROM projects WHERE name = ? LIMIT 1", (name,)
-    ).fetchone()
-    if existing:
-        conn.close()
-        return existing[0]
-    cur = conn.execute(
-        "INSERT INTO projects (name, description, status, created_at, updated_at) VALUES (?,?,?,?,?)",
-        (name, description.strip(), "active", _now(), _now()),
-    )
-    conn.commit()
-    pid = cur.lastrowid
-    conn.close()
-    return pid
-
-
-def list_projects(include_archived: bool = False) -> list[dict]:
-    conn = sqlite3.connect(DB_PATH)
-    if include_archived:
-        rows = conn.execute(
-            "SELECT id, name, description, status, created_at, updated_at FROM projects "
-            "ORDER BY status ASC, updated_at DESC"
-        ).fetchall()
-    else:
-        rows = conn.execute(
-            "SELECT id, name, description, status, created_at, updated_at FROM projects "
-            "WHERE status = 'active' ORDER BY updated_at DESC"
-        ).fetchall()
-    conn.close()
-    return [
-        {"id": r[0], "name": r[1], "description": r[2],
-         "status": r[3], "created_at": r[4], "updated_at": r[5]}
-        for r in rows
-    ]
-
-
-def get_project(pid: int) -> dict | None:
-    conn = sqlite3.connect(DB_PATH)
-    row = conn.execute(
-        "SELECT id, name, description, status, created_at, updated_at FROM projects WHERE id = ?",
-        (pid,),
-    ).fetchone()
-    conn.close()
-    if not row:
-        return None
-    return {"id": row[0], "name": row[1], "description": row[2],
-            "status": row[3], "created_at": row[4], "updated_at": row[5]}
-
-
-def get_project_by_name(name: str) -> dict | None:
-    conn = sqlite3.connect(DB_PATH)
-    row = conn.execute(
-        "SELECT id, name, description, status, created_at, updated_at FROM projects WHERE name = ?",
-        (name.strip(),),
-    ).fetchone()
-    conn.close()
-    if not row:
-        return None
-    return {"id": row[0], "name": row[1], "description": row[2],
-            "status": row[3], "created_at": row[4], "updated_at": row[5]}
-
-
-def archive_project(pid: int) -> bool:
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.execute(
-        "UPDATE projects SET status = 'archived', updated_at = ? WHERE id = ? AND status = 'active'",
-        (_now(), pid),
-    )
-    conn.commit()
-    ok = cur.rowcount > 0
-    conn.close()
-    return ok
-
-
-def log_project_event(project_id: int, event_type: str, content: str) -> int:
-    """向项目写入一条事件记录，返回事件 ID。"""
-    conn = sqlite3.connect(DB_PATH)
-    # 同步更新 projects.updated_at
-    conn.execute(
-        "UPDATE projects SET updated_at = ? WHERE id = ?", (_now(), project_id)
-    )
-    cur = conn.execute(
-        "INSERT INTO project_events (project_id, event_type, content, created_at) VALUES (?,?,?,?)",
-        (project_id, event_type.strip(), content.strip(), _now()),
-    )
-    conn.commit()
-    eid = cur.lastrowid
-    conn.close()
-    return eid
-
-
-def get_project_events(project_id: int, limit: int = 20) -> list[dict]:
-    conn = sqlite3.connect(DB_PATH)
-    rows = conn.execute(
-        "SELECT id, event_type, content, created_at FROM project_events "
-        "WHERE project_id = ? ORDER BY id DESC LIMIT ?",
-        (project_id, limit),
-    ).fetchall()
-    conn.close()
-    return [
-        {"id": r[0], "event_type": r[1], "content": r[2], "created_at": r[3]}
-        for r in rows
-    ]
-
-
-# ── Soul Proposals（SOUL.md 演化提议）────────────────────────────────────────
-
-def add_soul_proposal(content: str, source: str = "reflect") -> int:
-    """添加一条待审阅的 SOUL 演化提议，返回 ID。"""
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.execute(
-        "INSERT INTO soul_proposals (content, source, status, created_at) VALUES (?,?,?,?)",
-        (content.strip(), source, "pending", _now()),
-    )
-    conn.commit()
-    pid = cur.lastrowid
-    conn.close()
-    return pid
-
-
-def list_soul_proposals(status: str = "pending") -> list[dict]:
-    conn = sqlite3.connect(DB_PATH)
-    rows = conn.execute(
-        "SELECT id, content, source, status, created_at FROM soul_proposals "
-        "WHERE status = ? ORDER BY id",
-        (status,),
-    ).fetchall()
-    conn.close()
-    return [
-        {"id": r[0], "content": r[1], "source": r[2], "status": r[3], "created_at": r[4]}
-        for r in rows
-    ]
-
-
-def count_soul_proposals() -> int:
-    conn = sqlite3.connect(DB_PATH)
-    n = conn.execute(
-        "SELECT COUNT(*) FROM soul_proposals WHERE status = 'pending'"
-    ).fetchone()[0]
-    conn.close()
-    return n
-
-
-def resolve_soul_proposal(pid: int | str, accepted: bool) -> list[int]:
-    """将提议标记为 accepted 或 rejected，返回处理的 ID 列表。"""
-    conn = sqlite3.connect(DB_PATH)
-    status = "accepted" if accepted else "rejected"
-    if str(pid) == "all":
-        rows = conn.execute(
-            "SELECT id FROM soul_proposals WHERE status = 'pending'"
-        ).fetchall()
-        ids = [r[0] for r in rows]
-        conn.execute(
-            "UPDATE soul_proposals SET status = ?, reviewed_at = ? WHERE status = 'pending'",
-            (status, _now()),
-        )
-    else:
-        conn.execute(
-            "UPDATE soul_proposals SET status = ?, reviewed_at = ? WHERE id = ? AND status = 'pending'",
-            (status, _now(), int(pid)),
-        )
-        ids = [int(pid)]
-    conn.commit()
-    conn.close()
-    return ids
 
 
 # ── Session ID 生成 ──────────────────────────────────────────────────────────────
@@ -957,241 +547,11 @@ def refresh_memory(mid: int) -> bool:
     return ok
 
 
-# ── P2: 矛盾检测 ───────────────────────────────────────────────────────────────
-
-from difflib import SequenceMatcher
-from collections import Counter
-
-
-def _ngram_similarity(a: str, b: str, n: int = 2) -> float:
-    """基于字符 n-gram 的 Jaccard 相似度。用于记忆去重。"""
-    if len(a) < n or len(b) < n:
-        return 0.0
-    ng_a = Counter(a[i:i+n] for i in range(len(a) - n + 1))
-    ng_b = Counter(b[i:i+n] for i in range(len(b) - n + 1))
-    intersection = sum((ng_a & ng_b).values())
-    union = sum((ng_a | ng_b).values())
-    return intersection / union if union > 0 else 0.0
+# ── P2: 矛盾检测（已抽到 memory/store_quality.py） ───────────────────────────
+# 相似度工具 / 重复检测 / 低质量过滤 / 矛盾检测全部迁移到 store_quality.py
+# 下方 re-export 保持向后兼容
 
 
-def _text_similarity(a: str, b: str) -> float:
-    """综合字符级和 bigram 的文本相似度。对中文和英文都适用。"""
-    if a == b:
-        return 1.0
-    if a in b or b in a:
-        return 0.85
-    # 字符级 Jaccard（单字集合交集）
-    chars_a = set(a)
-    chars_b = set(b)
-    char_sim = len(chars_a & chars_b) / max(len(chars_a | chars_b), 1)
-    # Bigram Jaccard
-    bg_sim = _ngram_similarity(a, b, n=2)
-    return char_sim * 0.3 + bg_sim * 0.7
-
-
-# 中文停用字（在关键词提取时跳过）
-_TOPIC_STOPCHARS: set[str] = {
-    "用", "户", "希", "望", "要", "求", "认", "为", "觉", "得",
-    "这", "个", "那", "个", "自", "己", "什", "么", "可", "以",
-    "能", "够", "应", "该", "需", "已", "经", "还", "不", "但",
-    "一", "些", "样", "些", "那", "比", "较", "非", "常", "很",
-    "都", "也", "就", "再", "把", "被", "让", "给", "从", "在",
-    "与", "和", "的", "了", "会", "对", "等", "或", "而", "及",
-    "并", "中", "上", "下", "前", "后", "来", "去", "它", "他",
-    "她", "其", "你", "我", "且", "虽", "更", "最", "所", "着",
-    "却", "又", "走", "向", "做", "成", "为", "使", "进", "到",
-    "化", "取", "期", "望", "念", "想", "法", "表", "方", "式",
-}
-
-
-def _topic_keywords(text: str) -> set[str]:
-    """从中文文本中提取实质性话题关键词（2-3 字 ngram，跳过停用字）。
-    同时保留英文单词 2-3 词短语，避免"Archer 是我的 AI"被提取为空。"""
-    ngrams: set[str] = set()
-    # 中文 ngram
-    cleaned_cn = "".join(c for c in text if "\u4e00" <= c <= "\u9fff" and c not in _TOPIC_STOPCHARS)
-    for n in (2, 3):
-        for i in range(len(cleaned_cn) - n + 1):
-            ngrams.add(cleaned_cn[i:i + n])
-    # 英文 ngram（单词级别）
-    import re
-    _EN_STOP = {"the", "a", "an", "is", "are", "was", "were", "be", "been", "being",
-                "have", "has", "had", "do", "does", "did", "will", "would", "could",
-                "should", "may", "might", "can", "shall", "to", "of", "in", "for",
-                "on", "with", "at", "by", "from", "as", "into", "through", "during",
-                "before", "after", "above", "below", "between", "under", "again",
-                "further", "then", "once", "here", "there", "when", "where", "why",
-                "how", "all", "both", "each", "few", "more", "most", "other", "some",
-                "such", "no", "nor", "not", "only", "own", "same", "so", "than",
-                "too", "very", "just", "about", "now", "it", "its", "this", "that",
-                "these", "those", "and", "but", "or", "if", "while", "because",
-                "until", "up", "out", "off", "over", "my", "your", "his", "her", "our", "their"}
-    en_words = [w.lower() for w in re.findall(r'[a-zA-Z]{2,}', text) if w.lower() not in _EN_STOP]
-    for n in (2, 3):
-        for i in range(len(en_words) - n + 1):
-            ngrams.add(" ".join(en_words[i:i + n]))
-    return ngrams
-
-
-def _keyword_overlap(a: str, b: str, min_shared: int = 3) -> bool:
-    """两个文本是否共享足够多的实质性关键词 ngram。
-    用于补充字符相似度对中文近义表述的漏检。"""
-    kw_a = _topic_keywords(a)
-    kw_b = _topic_keywords(b)
-    shared = kw_a & kw_b
-    return len(shared) >= min_shared
-
-
-def is_duplicate_pending(
-    content: str, threshold: float = 0.25, *, db_path: str | Path | None = None,
-) -> bool:
-    """检查 content 是否与已有的 pending_memories 或 active memories 高度相似。
-    返回 True 表示存在重复，不应再添加。"""
-    content = content.strip()
-    if len(content) < 10:
-        return False  # 太短的不做模糊匹配
-    conn = sqlite3.connect(db_path or DB_PATH)
-    try:
-        # 检查 pending_memories
-        pending_rows = conn.execute(
-            "SELECT content FROM pending_memories"
-        ).fetchall()
-        for r in pending_rows:
-            if _text_similarity(content, r[0]) >= threshold:
-                conn.close()
-                return True
-            if _keyword_overlap(content, r[0], min_shared=3):
-                conn.close()
-                return True
-        # 检查 active memories（更严格阈值，避免误判）
-        active_rows = conn.execute(
-            "SELECT content FROM memories WHERE status = 'active' ORDER BY updated_at DESC LIMIT 150"
-        ).fetchall()
-        active_threshold = max(threshold, 0.40)
-        for r in active_rows:
-            if _text_similarity(content, r[0]) >= active_threshold:
-                conn.close()
-                return True
-            if _keyword_overlap(content, r[0], min_shared=4):
-                conn.close()
-                return True
-        conn.close()
-        return False
-    except Exception:
-        conn.close()
-        return False
-
-
-def is_low_quality_memory(content: str, mtype: str = "insight") -> bool:
-    """过滤低质量记忆。返回 True 表示应该丢弃。"""
-    content = content.strip()
-    # 太短
-    if len(content) < 10:
-        return True
-    # 太长：超过 200 字可能是啰嗦话
-    if len(content) > 200:
-        return True
-    # 纯事实性低价值短语（太泛了）
-    low_value_patterns = [
-        "好的", "明白了", "知道了", "嗯", "对", "是的",
-        "可以的", "没问题", "就这样", "行", "好",
-        "他说", "我说", "用户说", "你说",
-    ]
-    if any(content == p or content.startswith(p) and len(content) < 12 for p in low_value_patterns):
-        return True
-    # 无实质内容：只有代词和连接词
-    filler_ratio = sum(1 for c in content if c in "的了我是在有这和那就也他她对它") / max(len(content), 1)
-    if filler_ratio > 0.55 and len(content) < 30:
-        return True
-    # 重复相同字符（如 "好好好好好"）
-    if len(content) > 4 and len(set(content)) == 1:
-        return True
-    return False
-
-
-def _is_contradiction(a: str, b: str) -> bool:
-    """
-    判断两条记忆是否语义矛盾。
-    纯规则：不依赖模型——基于否定词 + 相似度。
-    高相似度 + 否定词 = 矛盾。
-    """
-    NEGATORS = ["不", "不再", "从不", "没", "没有", "否定", "取消", "放弃",
-                "don't", "not", "never", "no longer", "stop", "quit"]
-    a_neg = any(w in a for w in NEGATORS)
-    b_neg = any(w in b for w in NEGATORS)
-    # 一个肯定一个否定 + 文本相似 → 矛盾
-    if a_neg == b_neg:
-        return False
-    sim = SequenceMatcher(None, a, b).ratio()
-    return sim > 0.55
-
-
-def contradiction_detect(new_mid: int, new_content: str) -> list[int]:
-    """
-    新记忆入库后调用。与所有 active 记忆比对，发现矛盾则记录到 contradictions 表。
-    返回矛盾记忆 ID 列表。
-    """
-    conn = sqlite3.connect(DB_PATH)
-    rows = conn.execute(
-        "SELECT id, content FROM memories WHERE status = 'active' AND id != ?", (new_mid,),
-    ).fetchall()
-    conflicts = []
-    for r in rows:
-        if _is_contradiction(new_content, r[1]):
-            try:
-                a, b = sorted([new_mid, r[0]])
-                conn.execute(
-                    "INSERT INTO contradictions (memory_a, memory_b, description, status, created_at) "
-                    "VALUES (?, ?, ?, 'open', ?)",
-                    (a, b, f"{a} ↔ {b}", _now()),
-                )
-                conflicts.append(r[0])
-            except Exception:
-                pass  # UNIQUE 冲突：已存在，跳过
-    conn.commit()
-    conn.close()
-    return conflicts
-
-
-def list_contradictions() -> list[dict]:
-    """列出所有未解决的矛盾。"""
-    conn = sqlite3.connect(DB_PATH)
-    rows = conn.execute(
-        "SELECT c.id, c.memory_a, c.memory_b, c.description, c.status, c.created_at, "
-        "ma.content, mb.content "
-        "FROM contradictions c "
-        "JOIN memories ma ON ma.id = c.memory_a "
-        "JOIN memories mb ON mb.id = c.memory_b "
-        "WHERE c.status = 'open' ORDER BY c.created_at DESC",
-    ).fetchall()
-    conn.close()
-    return [
-        {"id": r[0], "memory_a": r[1], "memory_b": r[2], "description": r[3],
-         "status": r[4], "created_at": r[5],
-         "content_a": r[6][:80], "content_b": r[7][:80]}
-        for r in rows
-    ]
-
-
-def resolve_contradiction(cid: int, keep_memory: int) -> bool:
-    """
-    裁决矛盾：保留 keep_memory，归档另一边。
-    """
-    conn = sqlite3.connect(DB_PATH)
-    row = conn.execute(
-        "SELECT memory_a, memory_b FROM contradictions WHERE id = ?", (cid,),
-    ).fetchone()
-    if not row:
-        conn.close()
-        return False
-    discard = row[0] if row[1] == keep_memory else row[1]
-    conn.execute("UPDATE contradictions SET status = 'resolved', resolved_at = ? WHERE id = ?",
-                 (_now(), cid))
-    conn.execute("UPDATE memories SET status = 'archived', archived_at = ? WHERE id = ?",
-                 (_now(), discard))
-    conn.commit()
-    conn.close()
-    return True
 
 
 # ── P3: 记忆分类体系 ───────────────────────────────────────────────────────────
@@ -1367,3 +727,60 @@ def recent_memories_since(since_days: int = 7) -> list[dict]:
          "importance": r[3], "depth": r[4], "created_at": r[5], "confidence": r[6]}
         for r in rows
     ]
+
+
+# ---------------------------------------------------------------------------
+# 兼容性 re-export：质量检查与矛盾检测（已迁移到 store_quality.py）
+# ---------------------------------------------------------------------------
+# 历史代码通过 `from memory.store import contradiction_detect` 等方式访问，
+# 这里 re-export 保持向后兼容。新代码请直接 from memory.store_quality import X。
+
+from memory.store_quality import (  # noqa: F401  (re-export)
+    _EN_STOP,
+    _TOPIC_STOPCHARS,
+    _is_contradiction,
+    _keyword_overlap,
+    _ngram_similarity,
+    _text_similarity,
+    _topic_keywords,
+    contradiction_detect,
+    is_duplicate_pending,
+    is_low_quality_memory,
+    list_contradictions,
+    resolve_contradiction,
+)
+
+from memory.store_pending import (  # noqa: F401  (re-export)
+    accept_pending,
+    add_pending,
+    count_pending,
+    list_pending,
+    reject_pending,
+    update_pending,
+)
+
+from memory.store_themes import (  # noqa: F401  (re-export)
+    get_memories_for_detection,
+    get_theme_memories,
+    link_memory_to_theme,
+    list_themes,
+    save_theme,
+)
+
+from memory.store_projects import (  # noqa: F401  (re-export)
+    archive_project,
+    create_project,
+    get_project,
+    get_project_by_name,
+    get_project_events,
+    list_projects,
+    log_project_event,
+)
+
+from memory.store_soul_proposals import (  # noqa: F401  (re-export)
+    add_soul_proposal,
+    count_soul_proposals,
+    list_soul_proposals,
+    resolve_soul_proposal,
+)
+
