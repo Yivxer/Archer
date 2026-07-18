@@ -64,6 +64,7 @@ def save(name: str, steps: list[dict], keywords: str = "") -> int:
     conn.commit()
     wid = cur.lastrowid
     conn.close()
+    assert wid is not None, "INSERT 未返回 lastrowid"
     return wid
 
 

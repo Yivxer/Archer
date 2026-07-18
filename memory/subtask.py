@@ -100,6 +100,7 @@ def create(
     tid = cur.lastrowid
     conn.commit()
     conn.close()
+    assert tid is not None, "INSERT 未返回 lastrowid"
     return tid
 
 

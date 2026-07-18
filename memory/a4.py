@@ -96,7 +96,7 @@ _INTENT_TYPE_PRIORITY = {
 def clamp_depth(value: object) -> int:
     """把 depth 规范到 1-5；1=事实，5=精神母题。"""
     try:
-        depth = int(value)
+        depth = int(str(value)) if not isinstance(value, (int, float)) else int(value)
     except Exception:
         depth = 3
     return max(1, min(5, depth))

@@ -49,6 +49,7 @@ def record_unclosed_thread(
         """,
         (session_id.strip(), topic[:160], prompt.strip()[:500], stamp, stamp),
     )
+    assert cur.lastrowid is not None, "INSERT 未返回 lastrowid"
     thread_id = int(cur.lastrowid)
     conn.commit()
     conn.close()

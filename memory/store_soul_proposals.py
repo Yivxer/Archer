@@ -26,6 +26,7 @@ def add_soul_proposal(content: str, source: str = "reflect") -> int:
     conn.commit()
     pid = cur.lastrowid
     conn.close()
+    assert pid is not None, "INSERT 未返回 lastrowid"
     return pid
 
 

@@ -34,6 +34,7 @@ def create_project(name: str, description: str = "") -> int:
     conn.commit()
     pid = cur.lastrowid
     conn.close()
+    assert pid is not None, "INSERT 未返回 lastrowid"
     return pid
 
 
@@ -109,6 +110,7 @@ def log_project_event(project_id: int, event_type: str, content: str) -> int:
     conn.commit()
     eid = cur.lastrowid
     conn.close()
+    assert eid is not None, "INSERT 未返回 lastrowid"
     return eid
 
 

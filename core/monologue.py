@@ -65,6 +65,7 @@ def record_monologue(
             stamp,
         ),
     )
+    assert cur.lastrowid is not None, "INSERT 未返回 lastrowid"
     monologue_id = int(cur.lastrowid)
     conn.commit()
     conn.close()

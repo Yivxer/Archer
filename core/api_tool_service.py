@@ -6,6 +6,7 @@ after user approval.
 """
 from __future__ import annotations
 
+from collections.abc import Mapping
 from uuid import uuid4
 
 from core.policy import Decision, check as policy_check
@@ -24,7 +25,7 @@ def _preview_args(args: dict, max_chars: int = 500) -> str:
     return preview[:max_chars]
 
 
-def _permission_level(skill_name: str, args: dict, skills: dict) -> PermissionLevel:
+def _permission_level(skill_name: str, args: dict, skills: Mapping[str, object]) -> PermissionLevel:
     mod = skills.get(skill_name)
     meta = getattr(mod, "SKILL", {}) if mod else {}
     return permission_level_for_tool(skill_name, args, meta)
@@ -33,7 +34,7 @@ def _permission_level(skill_name: str, args: dict, skills: dict) -> PermissionLe
 def make_tool_request(
     skill_name: str,
     args: dict,
-    skills: dict,
+    skills: Mapping[str, object],
     cfg: dict | None = None,
     *,
     event_id: str | None = None,
@@ -67,7 +68,7 @@ def make_tool_request(
     return request
 
 
-def execute_tool_request(request: dict, skills: dict, cfg: dict | None = None) -> dict:
+def execute_tool_request(request: dict, skills: Mapping[str, object], cfg: dict | None = None) -> dict:
     """Execute an approved tool request through the shared policy/runtime path."""
     if request.get("kind") != "tool_request":
         raise ValueError("not a tool request")
@@ -92,7 +93,7 @@ def execute_tool_request(request: dict, skills: dict, cfg: dict | None = None) -
     return _tool_result_payload(skill_name, args, tr, pr, skills)
 
 
-def _tool_result_payload(skill_name: str, args: dict, tr: ToolResult, pr, skills: dict) -> dict:
+def _tool_result_payload(skill_name: str, args: dict, tr: ToolResult, pr, skills: Mapping[str, object]) -> dict:
     output = tr.content_preview or tr.summary
     if tr.truncated and tr.artifact_path:
         output = f"{output}\n[完整结果已保存：{tr.artifact_path}]"

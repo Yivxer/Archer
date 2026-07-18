@@ -55,8 +55,9 @@ def dir_size() -> int:
 
 def fmt_size(n_bytes: int) -> str:
     """将字节数格式化为人类可读字符串。"""
+    size = float(n_bytes)
     for unit in ("B", "KB", "MB", "GB"):
-        if n_bytes < 1024:
-            return f"{n_bytes:.1f} {unit}" if unit != "B" else f"{n_bytes} B"
-        n_bytes /= 1024
-    return f"{n_bytes:.1f} TB"
+        if size < 1024:
+            return f"{size:.1f} {unit}" if unit != "B" else f"{int(size)} B"
+        size /= 1024
+    return f"{size:.1f} TB"

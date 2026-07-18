@@ -188,7 +188,7 @@ def _memory_rank(item: dict[str, Any]) -> tuple[int, int]:
 
 def _clamp_depth(value: object) -> int:
     try:
-        depth = int(value)
+        depth = int(str(value)) if not isinstance(value, (int, float)) else int(value)
     except Exception:
         depth = 3
     return max(1, min(5, depth))

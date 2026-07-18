@@ -93,6 +93,7 @@ def record_shadow_initiative(
             stamp,
         ),
     )
+    assert cur.lastrowid is not None, "INSERT 未返回 lastrowid"
     log_id = int(cur.lastrowid)
     conn.commit()
     conn.close()

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from collections.abc import Mapping
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -159,6 +160,7 @@ def add_task(
     task_id = cur.lastrowid
     conn.commit()
     conn.close()
+    assert task_id is not None, "INSERT 未返回 lastrowid"
     _after_mutate(db_path, now=now, output_path=output_path)
     return task_id
 
@@ -249,7 +251,7 @@ def _mark_ran(
 
 # ── 执行 ───────────────────────────────────────────────────────────────────────
 
-def run_task(task: dict, skills: dict, db_path: Path = DB_PATH) -> Any:
+def run_task(task: dict, skills: Mapping[str, Any], db_path: Path = DB_PATH) -> Any:
     """执行单个任务，返回 ToolResult（技能不存在时返回 None）。"""
     skill_name = task["skill_name"]
     if skill_name == "reflection_scheduler.scan_hypotheses":
@@ -270,7 +272,7 @@ def run_task(task: dict, skills: dict, db_path: Path = DB_PATH) -> Any:
 
 
 def run_due_tasks(
-    skills: dict,
+    skills: Mapping[str, Any],
     db_path: Path = DB_PATH,
     *,
     now: datetime | None = None,
@@ -298,7 +300,7 @@ def run_due_tasks(
 
 def run_task_by_id(
     task_id: int,
-    skills: dict,
+    skills: Mapping[str, Any],
     db_path: Path = DB_PATH,
     *,
     now: datetime | None = None,

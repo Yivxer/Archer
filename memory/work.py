@@ -67,6 +67,7 @@ def create(
     wid = cur.lastrowid
     conn.commit()
     conn.close()
+    assert wid is not None, "INSERT 未返回 lastrowid"
     return wid
 
 

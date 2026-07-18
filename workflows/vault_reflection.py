@@ -288,6 +288,7 @@ def _record_reflection(
     conn.commit()
     rid = cur.lastrowid
     conn.close()
+    assert rid is not None, "INSERT 未返回 lastrowid"
     return int(rid)
 
 

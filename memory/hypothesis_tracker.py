@@ -110,6 +110,7 @@ def create_hypothesis(
     hid = cur.lastrowid
     conn.commit()
     conn.close()
+    assert hid is not None, "INSERT 未返回 lastrowid"
     return int(hid)
 
 
@@ -298,7 +299,7 @@ def _note_date(path: Path) -> datetime | None:
 
 def _clean_days(value: object) -> int:
     try:
-        days = int(value)
+        days = int(str(value)) if not isinstance(value, (int, float)) else int(value)
     except Exception:
         days = 30
     return max(1, min(days, 365))
@@ -306,7 +307,7 @@ def _clean_days(value: object) -> int:
 
 def _clean_limit(value: object) -> int:
     try:
-        limit = int(value)
+        limit = int(str(value)) if not isinstance(value, (int, float)) else int(value)
     except Exception:
         limit = 20
     return max(1, min(limit, 100))

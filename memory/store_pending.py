@@ -57,6 +57,7 @@ def add_pending(content: str, type: str = "insight", importance: int = 3,
     conn.commit()
     pid = cur.lastrowid
     conn.close()
+    assert pid is not None, "INSERT 未返回 lastrowid"
     return pid
 
 

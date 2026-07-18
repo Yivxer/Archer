@@ -140,12 +140,14 @@ def detect_and_save(limit: int = 50) -> list[dict]:
 
         for link in valid_links:
             mid = link.get("memory_id")
+            if not isinstance(mid, int):
+                continue
             raw_strength = float(link.get("strength", 0.5))
             # 同 session 同日场景：限制 strength 上限
             if not cross_day:
                 raw_strength = min(raw_strength, _SAME_DAY_CONF_CAP)
             try:
-                link_memory_to_theme(int(mid), tid, raw_strength)
+                link_memory_to_theme(mid, tid, raw_strength)
             except Exception:
                 pass
 

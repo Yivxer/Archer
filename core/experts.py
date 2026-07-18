@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import re
 import tomllib
+from collections.abc import Mapping
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
@@ -276,7 +277,7 @@ def expert_skill_allowlist(expert: dict[str, object]) -> set[str] | None:
     return {str(name).strip() for name in raw if str(name).strip()}
 
 
-def filter_skills_for_expert(all_skills: dict, expert: dict[str, object]) -> dict:
+def filter_skills_for_expert(all_skills: Mapping[str, Any], expert: dict[str, object]) -> dict:
     allowlist = expert_skill_allowlist(expert)
     if not allowlist:
         return dict(all_skills)

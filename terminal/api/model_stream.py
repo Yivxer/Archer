@@ -193,7 +193,9 @@ def _token_usage_since(initial_call_count: int) -> dict[str, int] | None:
     from core.token_usage import get_last_call_usage, get_session_usage
 
     session = get_session_usage()
-    if int(session.get("call_count") or 0) <= initial_call_count:
+    cc_raw = session.get("call_count") or 0
+    cc = sum(cc_raw.values()) if isinstance(cc_raw, dict) else int(cc_raw)
+    if cc <= initial_call_count:
         return None
     usage = get_last_call_usage()
     return {
@@ -246,7 +248,8 @@ def iter_model_stream(
 ) -> Iterator[dict]:
     from core.token_usage import get_session_usage
 
-    initial_call_count = int(get_session_usage().get("call_count") or 0)
+    _cc_raw = get_session_usage().get("call_count") or 0
+    initial_call_count = sum(_cc_raw.values()) if isinstance(_cc_raw, dict) else int(_cc_raw)
     if stream is None and llm_client is not None:
         primary_stream = llm_client.stream_chat
     elif stream is None:

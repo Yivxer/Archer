@@ -76,7 +76,7 @@ def _try_embed(memory_id: int, content: str) -> None:
 
 def _clamp_depth(value: object) -> int:
     try:
-        depth = int(value)
+        depth = int(str(value)) if not isinstance(value, (int, float)) else int(value)
     except Exception:
         depth = 3
     return max(1, min(5, depth))
@@ -126,6 +126,7 @@ def save(content: str, tags: str = "", type: str = "insight", importance: int = 
     conn.commit()
     mid = cur.lastrowid
     conn.close()
+    assert mid is not None, "INSERT 未返回 lastrowid"
     if Path(resolved_db_path) == Path(DB_PATH):
         _try_embed(mid, content)
         # P2: 新记忆入库后自动矛盾检测

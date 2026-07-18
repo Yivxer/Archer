@@ -58,7 +58,8 @@ def prepare_approval_draft(
     skill_name = str(draft.get("skillName") or "")
     if draft.get("kind") != "tool_request" or skill_name not in idempotent_skills:
         return ApprovalPreparation(draft)
-    args = draft.get("args") if isinstance(draft.get("args"), dict) else {}
+    _raw_args = draft.get("args")
+    args = _raw_args if isinstance(_raw_args, dict) else {}
     fingerprint = fingerprint_for(skill_name, args)
     if decision != "approved":
         return ApprovalPreparation(draft, fingerprint)
@@ -113,7 +114,8 @@ def execute_approved_draft(
     if draft.get("kind") == "tool_request":
         result = execute_tool_request(draft)
         executed = bool(result.get("executed"))
-        receipt = result.get("workReceipt") if isinstance(result.get("workReceipt"), dict) else None
+        _raw_receipt = result.get("workReceipt")
+        receipt = _raw_receipt if isinstance(_raw_receipt, dict) else None
         return ApprovalExecution(
             executed,
             str(result.get("output", "")),
@@ -175,12 +177,14 @@ def apply_approval_followup(
     if not execution.executed or draft.get("kind") != "tool_request":
         return execution
     skill_name = str(draft.get("skillName") or "")
-    args = draft.get("args") if isinstance(draft.get("args"), dict) else {}
+    _raw_args = draft.get("args")
+    args = _raw_args if isinstance(_raw_args, dict) else {}
     deploy_args: dict | None = None
     title = "博客文章"
     if skill_name == "hugo_blog" and str(args.get("action") or "") == "new":
         result = execution.raw_result or {}
-        metadata = result.get("metadata") if isinstance(result.get("metadata"), dict) else {}
+        _raw_meta = result.get("metadata")
+        metadata = _raw_meta if isinstance(_raw_meta, dict) else {}
         filename = str(metadata.get("filename") or "").strip()
         created_path = str(metadata.get("createdFile") or "").strip()
         deploy_args = {"action": "deploy"}
@@ -220,7 +224,11 @@ def summarize_api_tool_events(
     direct_obsidian_writes: list[str] = []
     tool_notes: list[str] = []
     for event in events:
-        tool_event = event.get("toolEvent", {}) if isinstance(event, dict) else {}
+        if not isinstance(event, dict):
+            continue
+        tool_event = event.get("toolEvent", {})
+        if not isinstance(tool_event, dict):
+            tool_event = {}
         name = str(tool_event.get("name", ""))
         raw_draft = tool_event.get("draft")
         draft = raw_draft if isinstance(raw_draft, dict) else {}
@@ -241,7 +249,8 @@ def summarize_api_tool_events(
                 "如需新建文章请给出标题（## 开头）、分类和正文；如需部署已有文章请说明文件名。"
             )
         elif tool_event.get("requiresApproval") and "obsidian" in name:
-            nested_args = draft.get("args") if isinstance(draft.get("args"), dict) else {}
+            _raw_nested = draft.get("args")
+            nested_args = _raw_nested if isinstance(_raw_nested, dict) else {}
             target_path = draft.get("path") or nested_args.get("path") or "未指定"
             tool_notes.append(
                 "已生成 Obsidian 写入草稿，正在等待用户在工具卡片点击「写入」确认；"

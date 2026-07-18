@@ -290,7 +290,10 @@ def get_last_usage() -> dict[str, int]:
 def get_session_tokens() -> int:
     """返回本次会话累计 token 数。"""
     usage = get_session_usage()
-    return int(usage["total_tokens"])
+    total = usage.get("total_tokens", 0)
+    if isinstance(total, dict):
+        return sum(total.values())
+    return int(total)
 
 
 def reset_session_tokens() -> None:

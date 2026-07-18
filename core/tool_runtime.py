@@ -11,6 +11,7 @@ import logging
 import queue
 import threading
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -56,7 +57,7 @@ class ToolResult:
         return "\n".join(parts)
 
 
-def invoke(skill_name: str, args: dict, skills: dict,
+def invoke(skill_name: str, args: dict, skills: Mapping[str, Any],
            timeout: int | None = None) -> ToolResult:
     """调用技能并返回 ToolResult，任何情况下都不抛异常。"""
     mod = skills.get(skill_name)

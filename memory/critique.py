@@ -97,6 +97,7 @@ def create_critique(
     cid = cur.lastrowid
     conn.commit()
     conn.close()
+    assert cid is not None, "INSERT 未返回 lastrowid"
     return cid
 
 

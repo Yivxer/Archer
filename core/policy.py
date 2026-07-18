@@ -22,6 +22,7 @@ v1.5 P0-S3 变更：
 import ast
 import os
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -314,7 +315,7 @@ _DANGEROUS_APIS: list[str] = [
 ]
 
 
-def check(skill_name: str, args: dict, skills: dict, cfg: dict | None = None) -> PolicyResult:
+def check(skill_name: str, args: dict, skills: Mapping[str, object], cfg: dict | None = None) -> PolicyResult:
     """
     评估此次技能调用的风险，返回 PolicyResult。
 
