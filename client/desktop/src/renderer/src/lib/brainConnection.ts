@@ -1,5 +1,6 @@
 import type { ArcherAdapter, ApiConnectionState } from '../types'
 import { mockArcher } from '../adapters/mockArcher'
+import { defaultInitiativeShadowExposureReport } from '../adapters/initiativeReports'
 import { loadLocalArcher, resolveDesktopApiToken } from '../adapters/localArcher'
 
 export const BRAIN_LINKED_KEY = 'archer-brain-linked'
@@ -56,18 +57,7 @@ export function createOfflineLocalShell(previous?: ArcherAdapter): ArcherAdapter
       globalThrottleActive: false,
       presenceState: 'idle',
       items: [],
-      exposureReport: {
-        surface: 'chat_workspace',
-        days: 14,
-        exposureCount: 0,
-        feedbackCount: 0,
-        conversionRate: 0,
-        acknowledgedCount: 0,
-        recognitionRate: 0,
-        tooFrequentCount: 0,
-        tooFrequentRate: 0,
-        muteCount: 0,
-      },
+      exposureReport: defaultInitiativeShadowExposureReport(),
       report: {
         observationDays: 0,
         totalCandidates: 0,

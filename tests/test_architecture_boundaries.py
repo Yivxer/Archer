@@ -14,12 +14,12 @@ ROOT = Path(__file__).resolve().parents[1]
 GOD_FILE_LINE_BASELINE = {
     # Part 10 Wave 4 收尾后收紧（2026-07-17）：基线从拆分前高位降到当前实际行数 +10% buffer，
     # 让后续回归被更早发现。新增 job_routes.py 守门（enrichment 已抽到 job_enrichment.py）。
-    "terminal/api/_tools.py": 840,        # 实际 756
-    "terminal/api/_routes.py": 660,        # 实际 593
+    "terminal/api/_tools.py": 781,        # 实际 781
+    "terminal/api/_routes.py": 629,        # 实际 629
     "terminal/api/job_routes.py": 880,     # 实际 824
     "memory/store.py": 1609,
-    "client/desktop/src/renderer/src/pages/ChatPage.tsx": 2361,
-    "client/desktop/src/renderer/src/adapters/localArcher.ts": 1132,
+    "client/desktop/src/renderer/src/pages/ChatPage.tsx": 2355,
+    "client/desktop/src/renderer/src/adapters/localArcher.ts": 1129,
 }
 
 

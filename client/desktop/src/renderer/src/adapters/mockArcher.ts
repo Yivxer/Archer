@@ -1,4 +1,5 @@
 import type { ArcherAdapter } from '../types'
+import { defaultInitiativeShadowExposureReport } from './initiativeReports'
 
 export const mockArcher: ArcherAdapter = {
   status: {
@@ -249,18 +250,7 @@ export const mockArcher: ArcherAdapter = {
     globalThrottleActive: false,
     presenceState: 'idle',
     items: [],
-    exposureReport: {
-      surface: 'chat_workspace',
-      days: 14,
-      exposureCount: 0,
-      feedbackCount: 0,
-      conversionRate: 0,
-      acknowledgedCount: 0,
-      recognitionRate: 0,
-      tooFrequentCount: 0,
-      tooFrequentRate: 0,
-      muteCount: 0,
-    },
+    exposureReport: defaultInitiativeShadowExposureReport(),
     report: {
       observationDays: 3,
       totalCandidates: 5,
