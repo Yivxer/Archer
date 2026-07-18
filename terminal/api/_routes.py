@@ -78,12 +78,14 @@ from terminal.api.job_routes import (
 # ---------------------------------------------------------------------------
 
 from terminal.api.memory_routes import (
+    _archive_memory,
     _batch_resolve_pending,
     _create_hypothesis,
     _hypotheses,
     _import_obsidian_hypotheses,
     _list_recent_reflections,
     _memory,
+    _remember_memory,
     _resolve_pending_memory,
     _sensor_obsidian_focus,
     _sensors_status,
@@ -220,6 +222,8 @@ def _status(cfg: dict) -> dict:
     from core.token_usage import status_payload
     token_limit = int(cfg.get("context", {}).get("token_limit", 1_000_000))
     expert = active_expert(cfg)
+    from core.persona_sources import persona_source_status
+
     return {
         "adapter": "local",
         "model": status_model_label(cfg),
@@ -234,6 +238,7 @@ def _status(cfg: dict) -> dict:
         "isLoggedIn": bool(access_token and archer_id),
         "archerId": archer_id[:8] if archer_id else "",
         "tokenUsage": status_payload(token_limit=token_limit),
+        "persona": persona_source_status(cfg),
     }
 
 
@@ -242,8 +247,12 @@ def _status(cfg: dict) -> dict:
 # ---------------------------------------------------------------------------
 
 from terminal.api.initiative_routes import (
+    _companion_pending,
+    _companion_respond,
     _initiative_delivery_opt_in,
+    _initiative_exposure_report,
     _initiative_presence,
+    _initiative_review_candidate,
     _initiative_shadow,
     _initiative_shadow_delivery_gate,
     _initiative_shadow_failure,
@@ -283,7 +292,14 @@ def payload_get(path: str, runtime_context=None) -> tuple[int, dict | list]:
     if path == "/health":
         return 200, {"ok": True}
     if path == "/ready":
-        return 200, {"ok": True, "ready": True, "runtime": "legacy"}
+        from core.persona_sources import persona_source_status
+
+        return 200, {
+            "ok": True,
+            "ready": True,
+            "runtime": "legacy",
+            "persona": persona_source_status(_load_config()),
+        }
     cfg = _load_config()
     if path == "/status":
         return 200, _status(cfg)
@@ -341,16 +357,20 @@ def payload_get(path: str, runtime_context=None) -> tuple[int, dict | list]:
         return 200, _available_experts(cfg)
     if path == "/proactive-touch":
         return 200, _proactive_touch(cfg)
+    if path == "/companion/pending":
+        return _companion_pending(runtime_context)
+    if path == "/initiative-shadow/exposure-report" or path.startswith("/initiative-shadow/exposure-report?"):
+        return 200, _initiative_exposure_report(path, runtime_context)
     if path == "/initiative-shadow/long-term-report":
-        return 200, _initiative_shadow_long_term_report()
+        return 200, _initiative_shadow_long_term_report(runtime_context)
     if path == "/initiative-shadow/delivery-gate":
-        return 200, _initiative_shadow_delivery_gate()
+        return 200, _initiative_shadow_delivery_gate(runtime_context)
     if path == "/initiative-shadow/review-packet":
-        return 200, _initiative_shadow_review_packet()
+        return 200, _initiative_shadow_review_packet(runtime_context)
     if path == "/initiative-shadow/report":
-        return 200, _initiative_shadow_report()
+        return 200, _initiative_shadow_report(runtime_context)
     if path == "/initiative-shadow" or path.startswith("/initiative-shadow?"):
-        return 200, _initiative_shadow(path)
+        return 200, _initiative_shadow(path, runtime_context)
     if path == "/reviews" or path.startswith("/reviews?"):
         match = re.search(r"(?:\?|&)period=([^&]+)", path)
         period = match.group(1) if match else "weekly"
@@ -467,11 +487,16 @@ def payload_post(path: str, payload: dict, runtime_context=None) -> tuple[int, d
         }
     initiative_feedback = re.fullmatch(r"/initiative-shadow/([0-9]+)/feedback", path)
     if initiative_feedback:
-        return _initiative_shadow_feedback(initiative_feedback.group(1), payload)
+        return _initiative_shadow_feedback(initiative_feedback.group(1), payload, runtime_context)
+    if path == "/initiative-shadow/review-candidate":
+        return _initiative_review_candidate(payload, runtime_context)
     if path == "/initiative-shadow/presence":
-        return _initiative_presence(payload)
+        return _initiative_presence(payload, runtime_context)
     if path == "/initiative-shadow/opt-in":
         return _initiative_delivery_opt_in(payload, runtime_context)
+    companion_response = re.fullmatch(r"/companion/([0-9]+)/respond", path)
+    if companion_response:
+        return _companion_respond(companion_response.group(1), payload, runtime_context)
     if path == "/jobs":
         return 200, _create_job(payload)
     if path == "/schedules":
@@ -577,6 +602,17 @@ def payload_post(path: str, payload: dict, runtime_context=None) -> tuple[int, d
         from memory.store import update_memory_content
         ok = update_memory_content(mid, content)
         return 200, {"ok": ok, "id": mid} if ok else (404, {"error": "memory not found or update failed"})
+    if path == "/memory/remember":
+        try:
+            return 200, _remember_memory(payload)
+        except ValueError as exc:
+            return 400, {"ok": False, "error": str(exc)}
+    if path == "/memory/archive":
+        try:
+            result = _archive_memory(payload)
+        except ValueError as exc:
+            return 400, {"ok": False, "error": str(exc)}
+        return (200 if result["ok"] else 404), result
     if path == "/memory/evolve":
         mid = int(payload.get("id", 0))
         content = str(payload.get("content", "")).strip()

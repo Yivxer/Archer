@@ -36,6 +36,11 @@ memory/background_jobs.json
 memory/schedules.json
 memory/conversation_threads.json
 
+# Part 8 thread + soul runtime products (codex 2026-07-18 引入)
+memory/.backups/
+memory/backups/
+memory/SOUL_PROFILE.json
+
 # Session & artifact storage
 sessions/
 memory/sessions/

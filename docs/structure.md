@@ -1,7 +1,7 @@
 # Archer 整体结构说明
 
-> 更新日期：2026-07-17
-> 当前定位：一个项目根目录内维护三个使用端口：终端端、桌面客户端、网页端；同时以 Runtime Foundation 作为稳定性地基，统一承接本地 API、工具执行、权限审计、Trace 诊断、幂等和后台任务。Part 10（架构治理）已完成 Wave 1-4，god file 拆分收口，Desktop API 按 domain 模块化。
+> 更新日期：2026-07-18
+> 当前定位：一个项目根目录内维护三个使用端口：终端端、桌面客户端、网页端；同时以 Runtime Foundation 作为稳定性地基，统一承接本地 API、工具执行、权限审计、Trace 诊断、幂等和后台任务。Part 10（架构治理）已完成 Wave 1-4，god file 拆分收口，Desktop API 按 domain 模块化。codex 2026-07-18 在 Part 8 thread 持久化、initiative feedback/exposure、memory grounded companion、persona sources 上做了补充，引入 `runtime_context` 贯穿让测试可注入 `db_path` / `now()`。
 
 ## 一句话结构
 
@@ -86,7 +86,6 @@ terminal/api/_tools.py                # facade：re-export 工具执行 helper�
 terminal/api/_config.py               # 配置、tool approval audit、客户端状态缓存
 terminal/api/_security.py             # token 校验、限流、安全辅助
 terminal/api/contract.py              # CONTRACT_VERSION + versioned_payload
-terminal/api/turn_context.py          # TurnContext + file_refs/memory_mode/obsidian_mode 清洗
 
 # Domain routes（每个独立模块承担一组路由的实现）
 terminal/api/session_routes.py        # sessions / threads / append_session / save_session（含 per-session-id 锁）
@@ -94,14 +93,20 @@ terminal/api/job_routes.py            # 后台 job lifecycle（_run_job / _run_j
 terminal/api/job_enrichment.py        # 后台 job memory/web_search/web_fetch 上下文增强
 terminal/api/tool_approval_routes.py  # tool approval 流程（_tool_approval / _run_approved_draft / outbox）
 terminal/api/tool_stage.py            # tool stage 共享状态
-terminal/api/memory_routes.py         # memory / hypotheses / vault_reflection / sensors
+terminal/api/memory_routes.py         # memory / hypotheses / vault_reflection / sensors / remember / archive
 terminal/api/profile_routes.py        # settings / profiles / skills / soul
-terminal/api/initiative_routes.py     # Part 8 shadow initiative 路由
+terminal/api/initiative_routes.py     # Part 8 shadow initiative 路由（含 runtime_context 贯穿 + companion pending/respond）
 
 # Tool execution helpers（从 _tools.py 抽出）
 terminal/api/api_tool_helpers.py      # _is_dangerous_shell / _execute_shell_command / _obsidian_write_draft 等 11 个安全敏感 helper
 terminal/api/hugo_workflow.py         # Hugo 发布/删除工作流 helper
 terminal/api/desktop_tool_execution.py # _run_desktop_tool_loop / _iter_*_events / _append_obsidian_draft
+
+# Chat turn & context assembly（codex 2026-07-18 拆分）
+terminal/api/chat_turn_context.py     # 单轮聊天的 shadow events 注入 + runtime_context 适配
+terminal/api/context_assembly.py      # ContextAssemblyResult + build_memory_context_event（记忆注入可观测性）
+terminal/api/turn_context.py          # TurnContext + file_refs/memory_mode/obsidian_mode 清洗
+terminal/api/turn_pipeline.py         # turn 级流水线协调
 ```
 
 facade 边界由 `tests/test_architecture_boundaries.py` 守门，每个 domain 模块对应一个 `test_*_live_behind_routes_facade` 测试，确保 `_routes.py` / `_tools.py` 只 re-export 不直接定义 domain 函数。god file 行数由 `GOD_FILE_LINE_BASELINE` 监控，超基线即测试失败。
@@ -512,6 +517,11 @@ tests/        # Python 测试；Desktop 测试在 client/desktop/src/**/__tests_
 | P10 安全敏感 helper 测试 | `tests/test_api_tool_helpers.py` |
 | P10 job trace / session 并发 | `tests/test_job_trace_and_session_concurrency.py` |
 | P10 trace_id 绑定 | `infrastructure/observability.py`（`bind_trace_context` / `clear_trace_context`）、`terminal/api/job_routes.py` |
+| Persona 来源状态 | `core/persona_sources.py`、`terminal/api/_routes.py`（/status、/ready 注入 persona） |
+| Memory grounded companion | `core/memory_grounded_companion.py`、`client/desktop/src/renderer/src/adapters/companion.ts`、`useMemoryGroundedCompanion.ts` |
+| Initiative feedback / exposure | `core/initiative_feedback.py`、`terminal/api/initiative_routes.py`（`_initiative_review_candidate` / `_initiative_exposure_report` / `_companion_*`）、`client/desktop/src/renderer/src/lib/useShadowFeedback.ts`、`components/ShadowCandidateCard.tsx` |
+| Thread 情境胶囊 | `memory/thread_context.py`、`core/part8_threads.py`、`terminal/api/context_assembly.py`（`build_memory_context_event`） |
+| runtime_context 注入 | `terminal/api/chat_turn_context.py`、`terminal/api/initiative_routes.py`、`terminal/api/memory_routes.py`（测试可注入 `db_path` / `now()`） |
 
 ## 当前还可以优化的方向
 
@@ -591,26 +601,26 @@ client/desktop/resources/
 
 ---
 
-## 数字 Baseline（2026-07-17 Part 10 Wave 4 收尾后更新）
+## 数字 Baseline（2026-07-18 codex Part 8 thread / initiative feedback / memory companion 补充后更新）
 
 > Source-of-truth 口径：以本节为准，其他文档引用时需对齐此处。
 
 | 维度 | 数值 | 统计方式 |
 |---|---|---|
-| Python 测试文件 | 150 | `ls tests/test_*.py \| wc -l` |
-| Python 测试用例 | 1682 | `pytest --collect-only` 全量（含 Wave 4 新增 5 个） |
-| TS 测试文件 | 37 | 28 `.test.ts` + 9 `.test.tsx` |
-| TS 测试用例 | 538 | `npm test -- --run` |
+| Python 测试文件 | 158 | `ls tests/test_*.py \| wc -l`（含 codex 新增 8 个：initiative_feedback / memory_grounded_companion / persona_sources / thread_context / journey_isolation / memory_continuity_j8 / memory_control_routes / quarantine_test_threads） |
+| Python 测试用例 | 1703 | `pytest --collect-only` 全量 |
+| TS 测试文件 | 39 | 29 `.test.ts` + 10 `.test.tsx` |
+| TS 测试用例 | 541 | `npm test -- --run` |
 | 技能数 | 43 | `ls skills/*.py \| wc -l`（Python-only，无 TS skill） |
 | 对话模式 | 12 | `ls modes/*.md \| wc -l` |
 | Memory SQLite | 1 | `memory/archer.db` |
 
 **god file 行数基线**（`tests/test_architecture_boundaries.py::GOD_FILE_LINE_BASELINE`）：
 
-| 文件 | 基线 | 实际（2026-07-17） |
+| 文件 | 基线 | 实际（2026-07-18） |
 |---|---:|---:|
-| `terminal/api/_tools.py` | 840 | 756 |
-| `terminal/api/_routes.py` | 660 | 593 |
+| `terminal/api/_tools.py` | 840 | 781 |
+| `terminal/api/_routes.py` | 660 | 629 |
 | `terminal/api/job_routes.py` | 880 | 824 |
 | `memory/store.py` | 1609 | 1369 |
 | `client/desktop/src/renderer/src/pages/ChatPage.tsx` | 2361 | 2343 |
