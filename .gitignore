@@ -85,3 +85,10 @@ client/desktop/out/
 client/desktop/release/
 client/desktop/index-*.js
 client/desktop/resources/*.bak-*
+
+# ── 临时技术文档模板（非项目产物）────────────────────────────────────────────
+技术文档*.docx
+技术设计文档*.docx
+用户中心*.docx
+系统架构设计文档.docx
+分布式缓存系统技术方案.docx
