@@ -29,7 +29,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pytest
+          pip install pytest ruff
 
       - name: Run focused tests
         env:
@@ -46,8 +46,31 @@ jobs:
             tests/test_workflow_evals.py \
             tests/test_desktop_contract.py \
             tests/test_journey_smoke_script.py \
+            tests/test_architecture_boundaries.py \
+            tests/test_api_tool_helpers.py \
+            tests/test_job_trace_and_session_concurrency.py \
             tests/test_desktop_api.py::TestDesktopSessions \
             -q --no-header
+
+  ruff-lint:
+    name: Ruff Lint（非阻塞，展示 violation 趋势）
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install ruff
+        run: pip install ruff
+
+      - name: Run ruff check
+        run: ruff check . --statistics
 
   ts-tests:
     name: TypeScript 单元测试
@@ -72,7 +95,7 @@ jobs:
         run: npm test -- --run
 
   ts-typecheck:
-    name: TypeScript 类型检查
+    name: TypeScript 类型检查 + 构建
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -89,6 +112,8 @@ jobs:
         working-directory: client/desktop
         run: npm ci
 
-      - name: Type check
+      # 用 npm run build 替代 tsc --noEmit：build = tsc + vite build，
+      # 能同时捕获类型错误和打包错误
+      - name: Build (tsc + vite)
         working-directory: client/desktop
-        run: npx tsc --noEmit
+        run: npm run build

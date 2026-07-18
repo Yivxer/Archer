@@ -18,6 +18,10 @@ def test_pr_ci_is_deterministic_and_never_runs_real_model_journeys():
     assert "DEEPSEEK_API_KEY" not in source
     assert "tests/test_ci_workflows.py" in source
     assert "tests/test_workflow_evals.py" in source
+    # Part 10 守门测试必须在每次 PR 跑，防止架构回退
+    assert "tests/test_architecture_boundaries.py" in source
+    assert "tests/test_api_tool_helpers.py" in source
+    assert "tests/test_job_trace_and_session_concurrency.py" in source
 
 
 @pytest.mark.contract

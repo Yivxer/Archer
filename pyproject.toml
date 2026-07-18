@@ -1,0 +1,52 @@
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+extend-exclude = [
+    ".venv",
+    "client/desktop",
+    "web",
+    "out",
+    "release",
+    "docs/refactor",
+    "docs/superpowers/plans",
+]
+
+[tool.ruff.lint]
+# 保守规则集：只开明显有价值的检查，避免一开始大量 violation
+# F:   pyflakes (unused imports/variables, f-string 等)
+# I:   isort (import 顺序)
+# UP:  pyupgrade (现代语法)
+# E/W: pycodestyle errors/warnings（只开少量）
+select = ["F", "I", "UP", "E", "W"]
+ignore = [
+    "E501",   # line too long — 已有 line-length=120，不强制折行
+    "E402",   # module level import not at top — facade re-export 模式需要
+    "E701",   # multiple-statements-on-one-line-colon — 风格问题，不影响正确性
+    "E711",   # comparison to None — 历史代码有 `== None`
+    "E712",   # comparison to True/False — 历史代码有 `== True`，改 is 有时改变语义
+    "E722",   # do not use bare except — 历史代码有，逐个改风险高
+    "E731",   # lambda-assignment — 风格问题
+    "E741",   # ambiguous variable name (l/I/O) — 历史代码有
+    "F821",   # undefined-name — match-case 作用域误报多，后续单独处理
+    "F823",   # undefined-local — 同 F821
+    "F811",   # redefined-while-unused — 历史代码有重定义模式
+    "F841",   # unused-variable — 历史代码有，不影响正确性，后续清理
+    "UP006",  # `Dict` → `dict` — 历史代码用 typing.Dict
+    "UP007",  # `Optional[X]` → `X | None` — 历史代码大量使用 Optional
+    "UP035",  # `typing.Dict` deprecated
+    "UP037",  # quoted annotations
+    "UP045",  # `Optional[X]` → `X | None` (PEP 604)
+]
+
+[tool.ruff.lint.per-file-ignores]
+# 测试文件允许未使用 import（fixture / pytest marker）
+"tests/**" = ["F401"]
+# facade 模块允许 re-export 未使用名
+"terminal/api/_routes.py" = ["F401"]
+"terminal/api/_tools.py" = ["F401"]
+# __init__.py 允许未使用 import（显式 re-export）
+"**/__init__.py" = ["F401"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["core", "memory", "skills", "workflows", "terminal", "integrations", "knowledge", "infrastructure"]
+combine-as-imports = true
