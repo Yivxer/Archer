@@ -74,31 +74,47 @@ Decision: keep TS modules, but move them toward read-through caches fed by SSE p
 
 ## Skill System Boundary
 
-Current skill execution is mixed by design:
+> Updated 2026-07-17 to reflect Part 10 Wave 2 `skill-single-source` completion.
+> The TS-first/Python-fallback execution path has been removed; Python is now
+> the sole skill runtime. The historical TS overlap table is preserved below
+> for reference, but the "keep both" recommendations are superseded by the
+> Part 10 decision to consolidate on Python.
 
-- Python skills remain the primary capability layer.
-- Some TS skills exist for local desktop operations.
-- `core/tool_runtime.py` / `core/ts_skill_bridge.py` already support TS-first with Python fallback for selected skills.
+Current skill execution is Python-only by design:
+
+- Python skills are the single capability layer.
+- The TS skill bridge (`core/ts_skill_bridge.py`) and Desktop local skill
+  runtime (`client/desktop/src/agent/skills/localSkillBridge.ts`) were removed
+  in Part 10 Wave 2 `skill-single-source`.
+- `core/tool_runtime.py` no longer imports or calls `try_execute_ts_skill`;
+  this is enforced by `test_python_tool_runtime_does_not_delegate_to_ts_bridge`
+  in `tests/test_architecture_boundaries.py`.
+- A Desktop-side guard test (`client/desktop/src/agent/skills/__tests__/pythonSkillAuthority.test.ts`)
+  asserts both deleted files stay deleted and that the main process source
+  never re-introduces `localSkillBridge`.
 
 Current audit:
 
 | Runtime | Count | Entry |
 |---|---:|---|
-| Python skills | 40 registered | `skills.loader.register_all_skills()` |
-| TS local skills | 6 registered | `client/desktop/src/agent/skills/localSkillBridge.ts` |
+| Python skills | 43 registered | `skills.loader.register_all_skills()` |
+| TS local skills | 0 (removed in Part 10 Wave 2) | n/a |
 
-Duplicated or overlapping capabilities:
+Historical overlap table (superseded — kept for traceability):
 
-| Skill | Python | TS | Recommendation |
+| Skill | Python | TS (removed) | Resolution |
 |---|---|---|---|
-| `obsidian_read` | full Python skill | TS local read | Keep TS for Desktop-local fast path; Python remains fallback |
-| `obsidian_write` | full Python skill | TS local write | Keep both until approval/state source is fully Python-owned |
-| `file_ops` | broader read/write/list behavior | TS read/list subset | Keep TS subset; fallback for write/unsupported actions |
-| `file_search` | Python search | TS local search | Keep both until routing telemetry shows one can be retired |
-| `web_fetch` | Python fetch | TS fetch with local URL safety | Keep both; normalize safety policy before consolidation |
-| `web_search` | Python search | TS DDG search | Keep both; do not migrate search while API stability is the active goal |
+| `obsidian_read` | full Python skill | TS local read | Python-only; TS path deleted |
+| `obsidian_write` | full Python skill | TS local write | Python-only; approval/state owned by Python |
+| `file_ops` | broader read/write/list behavior | TS read/list subset | Python-only; TS path deleted |
+| `file_search` | Python search | TS local search | Python-only; TS path deleted |
+| `web_fetch` | Python fetch | TS fetch with local URL safety | Python-only; safety policy normalized in `core/policy.py` |
+| `web_search` | Python search | TS DDG search | Python-only; TS path deleted |
 
-Decision: do not force MCP migration in Part 7. Treat MCP as a later interface target after API/runtime state is stable. The immediate Part 7 goal is to make the current TS-first/Python-fallback behavior explicit and observable, not to delete one side.
+Decision: Part 7's "make TS-first/Python-fallback explicit" goal was superseded
+by Part 10's stronger stance — Python is the single skill runtime, with the
+bridge deleted and architecture-boundary tests guarding against reintroduction.
+MCP remains a later interface target, not a runtime replacement.
 
 ## Immediate Corrections To Part 7
 

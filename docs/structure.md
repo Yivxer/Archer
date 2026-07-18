@@ -1,7 +1,7 @@
 # Archer 整体结构说明
 
-> 更新日期：2026-07-04
-> 当前定位：一个项目根目录内维护三个使用端口：终端端、桌面客户端、网页端；同时以 Runtime Foundation 作为稳定性地基，统一承接本地 API、工具执行、权限审计、Trace 诊断、幂等和后台任务。
+> 更新日期：2026-07-17
+> 当前定位：一个项目根目录内维护三个使用端口：终端端、桌面客户端、网页端；同时以 Runtime Foundation 作为稳定性地基，统一承接本地 API、工具执行、权限审计、Trace 诊断、幂等和后台任务。Part 10（架构治理）已完成 Wave 1-4，god file 拆分收口，Desktop API 按 domain 模块化。
 
 ## 一句话结构
 
@@ -75,17 +75,36 @@ cd /Users/Yivxer/Projects/Archer
 
 ## Desktop 本地 API 状态
 
-桌面客户端现在主要通过 FastAPI runtime 连接 Archer 能力层。
+桌面客户端现在主要通过 FastAPI runtime 连接 Archer 能力层。Part 10 Wave 1-2 把原本两个 god file（`_routes.py` 913 行、`_tools.py` 3368 行）按 domain 拆分到独立模块，`_routes.py` / `_tools.py` 退化为 facade，通过 re-export 保持向后兼容。
 
 主要文件：
 
 ```text
-terminal/api/fastapi_app.py   # FastAPI app 入口，供 Electron 启动
-terminal/api/_routes.py       # settings、model profile、chat stream、health/ready/status 等路由
-terminal/api/_tools.py        # Desktop 工具桥，连接 skill/runtime/tool service
-terminal/api/_config.py       # 配置、tool approval audit、客户端状态缓存
-terminal/api/_security.py     # token 校验、限流、安全辅助
+terminal/api/fastapi_app.py           # FastAPI app 入口，供 Electron 启动
+terminal/api/_routes.py               # facade：re-export 各 domain 模块公开函数（593 行）
+terminal/api/_tools.py                # facade：re-export 工具执行 helper（756 行）
+terminal/api/_config.py               # 配置、tool approval audit、客户端状态缓存
+terminal/api/_security.py             # token 校验、限流、安全辅助
+terminal/api/contract.py              # CONTRACT_VERSION + versioned_payload
+terminal/api/turn_context.py          # TurnContext + file_refs/memory_mode/obsidian_mode 清洗
+
+# Domain routes（每个独立模块承担一组路由的实现）
+terminal/api/session_routes.py        # sessions / threads / append_session / save_session（含 per-session-id 锁）
+terminal/api/job_routes.py            # 后台 job lifecycle（_run_job / _run_job_chat_with_tools / trace_id 绑定）
+terminal/api/job_enrichment.py        # 后台 job memory/web_search/web_fetch 上下文增强
+terminal/api/tool_approval_routes.py  # tool approval 流程（_tool_approval / _run_approved_draft / outbox）
+terminal/api/tool_stage.py            # tool stage 共享状态
+terminal/api/memory_routes.py         # memory / hypotheses / vault_reflection / sensors
+terminal/api/profile_routes.py        # settings / profiles / skills / soul
+terminal/api/initiative_routes.py     # Part 8 shadow initiative 路由
+
+# Tool execution helpers（从 _tools.py 抽出）
+terminal/api/api_tool_helpers.py      # _is_dangerous_shell / _execute_shell_command / _obsidian_write_draft 等 11 个安全敏感 helper
+terminal/api/hugo_workflow.py         # Hugo 发布/删除工作流 helper
+terminal/api/desktop_tool_execution.py # _run_desktop_tool_loop / _iter_*_events / _append_obsidian_draft
 ```
+
+facade 边界由 `tests/test_architecture_boundaries.py` 守门，每个 domain 模块对应一个 `test_*_live_behind_routes_facade` 测试，确保 `_routes.py` / `_tools.py` 只 re-export 不直接定义 domain 函数。god file 行数由 `GOD_FILE_LINE_BASELINE` 监控，超基线即测试失败。
 
 关键接口：
 
@@ -275,8 +294,48 @@ client/desktop/src/renderer/src/lib/connectionLog.ts  # Q1 transitions localStor
 
 - ✅ 阶段 0-5 完成（baseline + L0/§三-B + L1 + L2 + L3 + L4），tag `part9-L4-done`（commit `36ef256`）
 - ✅ 阶段 6 可自动部分（L5.1 / L5.2 / L5.11）+ Journey 1-7 基础验证 + 阶段 7 Q1 量化采集
-- ⏸ L5.3 Journey 0 非交互/expect 验证 + L5.12 连续 7 天 8/8 pass
-- ⏸ Q2-Q4 三天真实使用观察 + 整体验收
+- ✅ 2026-07-10 阶段性收口：L5.12 口径调整为趋势报警（不再要求连续 7 天 8/8），Q2-Q4 转为持续观察，无硬性未完成项
+
+## Part 10 架构治理
+
+Part 10 在 Runtime Foundation + Part 9 稳定性框架之上，把 god file 拆分、domain 模块化、facade 边界守门、安全敏感函数测试补齐、可观测性 trace 绑定收口。详细工作计划见 `docs/superpowers/plans/2026-07-1[2-6]-part10-*.md`，成长计划见 Obsidian `Archer 成长计划.md` Part 10 节。
+
+### Wave 1：god file 拆分（2026-07-12 ~ 07-13）
+
+- `_tools.py` 从 3368 行拆出 `api_tool_helpers.py` / `hugo_workflow.py` / `desktop_tool_execution.py` 三个 helper 模块，自身降到 756 行 facade
+- `_routes.py` 从 3075 行（实际工作版本 913 行）拆出 `session_routes.py` / `job_routes.py` / `memory_routes.py` / `profile_routes.py` / `initiative_routes.py` / `tool_approval_routes.py`，自身降到 593 行 facade
+
+### Wave 2：六项 authority 迁移（2026-07-13 ~ 07-16）
+
+- approval / job / session / profile / skill / taskRoute 六个 domain 的实现 authority 从 `_routes.py` / `_tools.py` 迁移到对应 domain 模块
+- `_routes.py` / `_tools.py` 通过 `from X import Y as _Y` 形式 re-export 历史私有名，保持 `archer_api.py` / 测试 / 桌面端的导入路径不变
+- Skill System 收口为 Python-only：删除 `core/ts_skill_bridge.py` 和 `client/desktop/src/agent/skills/localSkillBridge.ts`，43 个 Python skill / 0 个 TS skill
+
+### Wave 3：后置能力（2026-07-16）
+
+- Durable Outbox：tool approval 的持久化 outbox，避免 LLM 幻觉"已部署"
+- `archer.toml` v1 schema 校验
+- MCP config v2
+- Skill Manifest（manifest 强制 `name/version/risk/auto_trigger/permissions/inputs/outputs`）
+- performanceEvent 协议
+- contractVersion 协商
+- Evals 框架评估
+
+### Wave 4：收尾审查与债务收口（2026-07-17）
+
+- **P0 并发与边界债**：`session_routes.append_session` 并发漏洞修补（per-session-id `threading.Lock`）；`_routes.py` god file 阈值超标（抽 9 个 tool approval 函数到 `tool_approval_routes.py`，913→593 行）；17 个死 import 清理
+- **P1 测试与可观测性补强**：`taskRouter.ts` 死代码删除；`api_tool_helpers.py` 22 个直接单元测试（`tests/test_api_tool_helpers.py`）；`session_routes` facade 边界测试；后台 job trace_id 绑定 structlog（`job_routes.py` 的 `_run_job` / `_run_job_chat_with_tools`）
+- **P2 文档校正**：`docs/refactor/audit-report.md` Skill System Boundary 节更新
+- **Wave 4 后置修补**：5 个 job trace_id 绑定/清理 + session append 并发压力测试（`tests/test_job_trace_and_session_concurrency.py`）；抽 `job_enrichment.py` 让 `job_routes.py` 从 896 降到 824 行；收紧 `GOD_FILE_LINE_BASELINE`（`_tools.py` 3368→840、`_routes.py` 3075→660，新增 `job_routes.py` 880）
+
+### 守门测试
+
+```text
+tests/test_architecture_boundaries.py  # facade 边界 + god file 行数 + 模块依赖禁令 + skill system 边界
+tests/test_api_tool_helpers.py          # 11 个安全敏感 helper 直接单元测试
+tests/test_job_trace_and_session_concurrency.py  # job trace_id 绑定/清理 + session append 并发压力
+client/desktop/src/agent/__tests__/pythonSkillAuthority.test.ts  # 桌面端 skill 加载只走 Python
+```
 
 ## 真实工作流地图
 
@@ -423,19 +482,21 @@ tests/        # Python 测试；Desktop 测试在 client/desktop/src/**/__tests_
 | 想改什么 | 优先看哪里 |
 |---|---|
 | 终端命令、REPL 行为 | `terminal/archer.py` |
-| Desktop API 路由和返回值 | `terminal/api/_routes.py`、`terminal/api/fastapi_app.py` |
-| 聊天流、模型调用、工具事件 | `terminal/api/_tools.py`、`core/llm.py`、`client/desktop/src/agent/`、`client/desktop/src/renderer/src/adapters/localArcher.ts` |
+| Desktop API 路由和返回值 | `terminal/api/_routes.py`（facade）、对应 domain 模块（`session_routes.py` / `job_routes.py` / `memory_routes.py` / `profile_routes.py` / `initiative_routes.py` / `tool_approval_routes.py`） |
+| 聊天流、模型调用、工具事件 | `terminal/api/_tools.py`（facade）、`api_tool_helpers.py` / `hugo_workflow.py` / `desktop_tool_execution.py`、`core/llm.py`、`client/desktop/src/agent/` |
+| 后台 job lifecycle / trace_id | `terminal/api/job_routes.py`、`terminal/api/job_enrichment.py` |
+| session 并发写入 | `terminal/api/session_routes.py`（per-session-id 锁） |
 | 桌面窗口、自动启动 API | `client/desktop/src/main/index.ts`、`client/desktop/src/main/apiProcess.ts` |
 | 桌面 UI 页面 | `client/desktop/src/renderer/src/` |
-| 模型切换和 profile | `terminal/api/_routes.py`、`core/model_profiles.py`、`client/desktop/src/renderer/src/pages/ChatPage.tsx` |
-| 工具权限、审批、审计、幂等 | `core/permission_levels.py`、`core/api_tool_service.py`、`terminal/api/_config.py`、`skills/obsidian_write.py`、`skills/hugo_blog.py` |
+| 模型切换和 profile | `terminal/api/profile_routes.py`、`core/model_profiles.py`、`client/desktop/src/renderer/src/pages/ChatPage.tsx` |
+| 工具权限、审批、审计、幂等 | `core/permission_levels.py`、`core/api_tool_service.py`、`terminal/api/_config.py`、`terminal/api/tool_approval_routes.py`、`skills/obsidian_write.py`、`skills/hugo_blog.py` |
 | Trace 诊断面板 | `client/desktop/src/agent/traceDiagnostics.ts`、`client/desktop/src/renderer/src/pages/SettingsPage.tsx`、`client/desktop/src/renderer/src/pages/ChatPage.tsx` |
-| 后台任务 stale/cancel | `terminal/api/_routes.py`、`client/desktop/src/agent/`、`client/desktop/src/renderer/src/pages/TasksPage.tsx` |
+| 后台任务 stale/cancel | `terminal/api/job_routes.py`、`client/desktop/src/agent/`、`client/desktop/src/renderer/src/pages/TasksPage.tsx` |
 | 官网首页和网页入口 | `web/public/index.html`、`web/public/archer.html` |
 | 部署官网 | `web/deploy.sh` |
 | 记忆数据库结构 | `memory/store.py` |
 | 记忆检索 | `memory/retrieve.py`、`memory/vector_store.py` |
-| 技能加载 | `skills/loader.py`、`skills/*.py` |
+| 技能加载 | `skills/loader.py`、`skills/*.py`（43 个 Python skill，无 TS skill） |
 | 上下文注入 | `core/context.py` |
 | 配置路径 | `archer.toml`、`core/paths.py` |
 | Desktop installed smoke | `scripts/verify_desktop_live.sh`、`client/desktop/scripts/install-local-mac.sh` |
@@ -447,6 +508,10 @@ tests/        # Python 测试；Desktop 测试在 client/desktop/src/**/__tests_
 | P9 L4 交互原语 | `client/desktop/src/renderer/src/components/`（8 原语 + 专属 .css）、`docs/ui-primitives.md` |
 | P9 L5 旅程 Smoke / trace 回放 | `scripts/journey_smoke.sh`、`scripts/replay_trace.py` |
 | P9 Q1 量化指标采集 | `scripts/collect_metrics.py`、`client/desktop/src/renderer/src/lib/connectionLog.ts` |
+| P10 facade 边界守门 | `tests/test_architecture_boundaries.py`（6 个 `test_*_live_behind_*_facade` + god file 基线） |
+| P10 安全敏感 helper 测试 | `tests/test_api_tool_helpers.py` |
+| P10 job trace / session 并发 | `tests/test_job_trace_and_session_concurrency.py` |
+| P10 trace_id 绑定 | `infrastructure/observability.py`（`bind_trace_context` / `clear_trace_context`）、`terminal/api/job_routes.py` |
 
 ## 当前还可以优化的方向
 
@@ -457,19 +522,25 @@ tests/        # Python 测试；Desktop 测试在 client/desktop/src/**/__tests_
    七月初先固定 DeepSeek/lite 跑几天真实使用，不急着反复切 Kimi/GLM。等 DeepSeek 基线稳定后，再把多模型切换作为独立压力测试。
 
 3. **真实 provider/model 可见化**
-   聊天请求可以在 Trace 里展示实际使用的 provider、model、base URL 摘要，但不展示 key。这样能区分“前端显示切换了”和“后端真的切换了”。
+   聊天请求可以在 Trace 里展示实际使用的 provider、model、base URL 摘要，但不展示 key。这样能区分"前端显示切换了"和"后端真的切换了"。
 
 4. **博客发布链路单独验收**
    博客发布不要混在通用聊天稳定性里一起测。建议单独建立 Hugo/Obsidian 发布 smoke：读取源稿、确认标题、生成 slug、写入、构建、部署、HTTP 验证、失败回滚提示。
 
 5. **长上下文与工具调用分离**
-   长对话里工具指令要从普通聊天内容里更明确地抽出来，避免“回答旧问题”“执行错文章”“标题被模型自己改写”这类问题复发。
+   长对话里工具指令要从普通聊天内容里更明确地抽出来，避免"回答旧问题""执行错文章""标题被模型自己改写"这类问题复发。
 
 6. **权限提示更贴近用户动作**
-   现在已经有权限等级，下一步可以把提示文案从“读取文件夹权限”改成“本次要读取/写入哪个具体路径、属于哪个权限等级、为什么需要”。
+   现在已经有权限等级，下一步可以把提示文案从"读取文件夹权限"改成"本次要读取/写入哪个具体路径、属于哪个权限等级、为什么需要"。
 
 7. **旧文档链接清理**
    README、旧 handoff、旧架构说明里如果仍指向 `terminal/archer_api.py` 或旧 Desktop 路径，后续应统一改到这份结构文档，减少接力误判。
+
+8. **Part 8 thread_resume 真实投递验收（待用户 opt-in）**
+   Part 10 Wave 3 gate 因 `insufficient_feedback` 关闭，依赖用户主动 opt-in 后积累反馈样本再验收。
+
+9. **tool domain 进一步合并（架构演进，非修补范畴）**
+   `tool_approval_routes.py` 与 `tool_stage.py` 为同域两个模块，未来可考虑合并为单一 tool domain 模块。
 
 ## 旧路径对照
 
@@ -520,23 +591,34 @@ client/desktop/resources/
 
 ---
 
-## 数字 Baseline（2026-07-04 固化，Gate 0 第 3 项）
+## 数字 Baseline（2026-07-17 Part 10 Wave 4 收尾后更新）
 
 > Source-of-truth 口径：以本节为准，其他文档引用时需对齐此处。
 
 | 维度 | 数值 | 统计方式 |
 |---|---|---|
-| Python 测试文件 | 117 | `ls tests/test_*.py \| wc -l` |
-| Python 测试用例 | 1431 | `pytest --collect-only` 全量 |
-| TS 测试文件 | 32 | `find client/desktop/src -name "*.test.ts" \| wc -l` |
-| TS 测试用例 | 555 | `npm test -- --run` |
-| 技能数 | 45 | `ls skills/*.py \| wc -l` |
+| Python 测试文件 | 150 | `ls tests/test_*.py \| wc -l` |
+| Python 测试用例 | 1682 | `pytest --collect-only` 全量（含 Wave 4 新增 5 个） |
+| TS 测试文件 | 37 | 28 `.test.ts` + 9 `.test.tsx` |
+| TS 测试用例 | 538 | `npm test -- --run` |
+| 技能数 | 43 | `ls skills/*.py \| wc -l`（Python-only，无 TS skill） |
 | 对话模式 | 12 | `ls modes/*.md \| wc -l` |
 | Memory SQLite | 1 | `memory/archer.db` |
 
+**god file 行数基线**（`tests/test_architecture_boundaries.py::GOD_FILE_LINE_BASELINE`）：
+
+| 文件 | 基线 | 实际（2026-07-17） |
+|---|---:|---:|
+| `terminal/api/_tools.py` | 840 | 756 |
+| `terminal/api/_routes.py` | 660 | 593 |
+| `terminal/api/job_routes.py` | 880 | 824 |
+| `memory/store.py` | 1609 | 1369 |
+| `client/desktop/src/renderer/src/pages/ChatPage.tsx` | 2361 | 2343 |
+| `client/desktop/src/renderer/src/adapters/localArcher.ts` | 1132 | 1132 |
+
 **PR CI 子集**（必绿）：7 个 Python 测试文件 + TS 全量单元测试 + tsc 类型检查
 - Python 子集：`tests/test_fastapi_routes.py` / `tests/test_active_context.py` / `tests/test_provider_breaker.py` / `tests/test_simple_path_fork.py` / `tests/test_p0_skill_wrapping.py` / `tests/test_thread_store.py` / `tests/test_desktop_api.py::TestDesktopSessions`
-- 当前子集用例数：95（约占总数 6.6%）
+- 当前子集用例数：95（约占总数 5.6%）
 
 **Nightly CI**：`scripts/journey_smoke.sh --all` 8 条旅程（journey 0 skip 待 `archer.py --prompt`）+ `scripts/collect_metrics.py` 指标采集
 
