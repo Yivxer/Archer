@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { apiRetryDelayMs, brainStatusReason, probeExistingApi, probeReadyApi, resolveApiLaunchPaths, verifyApiToken, waitForHealthyApi, waitForReadyApi } from './apiProcess'
+import { apiRetryDelayMs, brainStatusReason, probeExistingApi, probeReadyApi, reclaimApiPort, resolveApiLaunchPaths, verifyApiToken, waitForHealthyApi, waitForReadyApi } from './apiProcess'
 
 describe('resolveApiLaunchPaths', () => {
   it('uses the self-use defaults when no overrides are set', () => {
@@ -105,6 +105,45 @@ describe('apiRetryDelayMs', () => {
   it('normalizes invalid attempts to the first delay', () => {
     expect(apiRetryDelayMs(-1)).toBe(1000)
     expect(apiRetryDelayMs(Number.NaN)).toBe(1000)
+  })
+})
+
+describe('reclaimApiPort', () => {
+  it('waits until the previous listener actually releases the port', async () => {
+    const listPids = vi.fn()
+      .mockResolvedValueOnce([4312])
+      .mockResolvedValueOnce([4312])
+      .mockResolvedValueOnce([])
+    const killProcess = vi.fn()
+    const sleep = vi.fn(async () => {})
+
+    await expect(reclaimApiPort(8765, {
+      timeoutMs: 1000,
+      intervalMs: 10,
+      listPids,
+      killProcess,
+      sleep,
+    })).resolves.toBe(true)
+
+    expect(killProcess).toHaveBeenCalledOnce()
+    expect(killProcess).toHaveBeenCalledWith(4312)
+    expect(sleep).toHaveBeenCalledOnce()
+  })
+
+  it('returns false when the listener remains after the timeout', async () => {
+    const listPids = vi.fn(async () => [4312])
+    const killProcess = vi.fn()
+    const sleep = vi.fn(async () => {})
+
+    await expect(reclaimApiPort(8765, {
+      timeoutMs: 0,
+      listPids,
+      killProcess,
+      sleep,
+    })).resolves.toBe(false)
+
+    expect(killProcess).toHaveBeenCalledWith(4312)
+    expect(sleep).not.toHaveBeenCalled()
   })
 })
 

@@ -347,7 +347,11 @@ async function ensureApiProcess(): Promise<ApiEnsureResult> {
         apiProcess.kill('SIGTERM')
         apiProcess = null
       }
-      await reclaimApiPort(8765)
+      const portReleased = await reclaimApiPort(8765)
+      if (!portReleased) {
+        console.error('[archer_api] Port 8765 stayed occupied after termination request')
+        return { ok: false, reason: 'port_busy' }
+      }
     }
 
     apiProcess = spawnApiProcess()

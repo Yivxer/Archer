@@ -75,29 +75,54 @@ function execFileText(command: string, args: string[]): Promise<string> {
   })
 }
 
-/** Stop whatever is listening on the desktop API port so we can spawn our own process. */
-export async function reclaimApiPort(port = 8765): Promise<void> {
+type ReclaimApiPortOptions = {
+  timeoutMs?: number
+  intervalMs?: number
+  listPids?: (port: number) => Promise<number[]>
+  killProcess?: (pid: number) => void
+  sleep?: (delayMs: number) => Promise<void>
+}
+
+async function listenerPids(port: number): Promise<number[]> {
   try {
     const stdout = await execFileText('lsof', ['-ti', `tcp:${port}`])
-    const pids = stdout
+    return stdout
       .split('\n')
-      .map((line) => line.trim())
-      .filter(Boolean)
-      .map((value) => Number(value))
+      .map((line) => Number(line.trim()))
       .filter((pid) => Number.isFinite(pid) && pid > 0)
-    for (const pid of pids) {
-      try {
-        process.kill(pid, 'SIGTERM')
-      } catch {
-        // Process may already be gone.
-      }
-    }
-    if (pids.length) {
-      await new Promise((resolve) => setTimeout(resolve, 450))
-    }
   } catch {
-    // Nothing listening — fine.
+    return []
   }
+}
+
+/** Stop whatever is listening on the desktop API port so we can spawn our own process. */
+export async function reclaimApiPort(
+  port = 8765,
+  options: ReclaimApiPortOptions = {}
+): Promise<boolean> {
+  const listPids = options.listPids || listenerPids
+  const killProcess = options.killProcess || ((pid: number) => process.kill(pid, 'SIGTERM'))
+  const sleep = options.sleep || ((delayMs: number) => new Promise<void>((resolve) => setTimeout(resolve, delayMs)))
+  const timeoutMs = Math.max(0, options.timeoutMs ?? 3000)
+  const intervalMs = Math.max(10, options.intervalMs ?? 100)
+  const initialPids = await listPids(port)
+
+  for (const pid of initialPids) {
+    try {
+      killProcess(pid)
+    } catch {
+      // Process may already be gone.
+    }
+  }
+
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    if ((await listPids(port)).length === 0) {
+      return true
+    }
+    await sleep(intervalMs)
+  }
+  return (await listPids(port)).length === 0
 }
 
 export async function probeExistingApi(
