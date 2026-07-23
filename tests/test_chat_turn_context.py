@@ -43,6 +43,9 @@ def test_prepare_full_turn_preserves_context_event_order_and_trace_id():
         format_expert=lambda expert: "expert",
         scoped_skills=lambda cfg: {"web_search": object()},
         select_tools=lambda *args, **kwargs: selected_turn_tools,
+        decide=lambda query, **kwargs: SimpleNamespace(
+            handling="converse", action_requests=(), confidence=0.9, summary="chat",
+        ),
         shadow_events=lambda runtime: [_event("shadow")],
         file_context=lambda refs: ("file context", [_event("file")]),
         vault=lambda messages, **kwargs: SimpleNamespace(

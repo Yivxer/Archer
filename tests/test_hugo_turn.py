@@ -28,28 +28,29 @@ def test_hugo_turn_uses_direct_paths_before_agent_fallback():
         redeploy=lambda query, refs, messages: calls.append("redeploy"),
         existing=lambda messages, query: (calls.append("existing") or ([_event()], "published")),
         publish=lambda query, refs, messages: (_ for _ in ()).throw(AssertionError("publish called")),
-        agent=lambda messages, query, file_refs: (_ for _ in ()).throw(AssertionError("agent called")),
+        agent=lambda messages, query, file_refs, action: (_ for _ in ()).throw(AssertionError("agent called")),
     )
 
     events = list(iter_hugo_turn_events(
         query="deploy", file_refs=[], messages=[], intent="chat", selected_tools={"hugo_blog": object()},
         memory_scope=[], trace_id="trace-1", dependencies=dependencies,
+        authorized_action="deploy",
     ))
 
-    assert calls == ["delete", "redeploy", "existing"]
+    assert calls == ["redeploy", "existing"]
     assert [event["type"] for event in events] == ["tool_event", "ready", "token", "done"]
     assert events[0]["traceId"] == "trace-1"
 
 
 def test_hugo_turn_emits_heartbeat_while_direct_workflow_runs():
-    def slow_delete(query):
+    def slow_delete(*args):
         time.sleep(0.02)
         return ([_event()], "published")
 
     events = list(iter_hugo_turn_events(
         query="deploy", file_refs=[], messages=[], intent="chat", selected_tools={"hugo_blog": object()},
         memory_scope=["local"], trace_id="trace-1",
-        dependencies=_deps(delete=slow_delete, redeploy=lambda *args: None, existing=lambda *args: None, publish=lambda *args: None, agent=lambda *args: None),
+        dependencies=_deps(delete=lambda *args: None, redeploy=lambda *args: None, existing=lambda *args: None, publish=slow_delete, agent=lambda *args: None),
         heartbeat_seconds=0.001,
     ))
 
@@ -60,7 +61,7 @@ def test_hugo_turn_emits_failure_hint_for_blocked_result():
     events = list(iter_hugo_turn_events(
         query="deploy", file_refs=[], messages=[], intent="chat", selected_tools={"hugo_blog": object()},
         memory_scope=[], trace_id="trace-1",
-        dependencies=_deps(delete=lambda query: ([_event("blocked")], "blocked"), redeploy=lambda *args: None, existing=lambda *args: None, publish=lambda *args: None, agent=lambda *args: None),
+        dependencies=_deps(delete=lambda *args: None, redeploy=lambda *args: None, existing=lambda *args: None, publish=lambda *args: ([_event("blocked")], "blocked"), agent=lambda *args: None),
     ))
 
     assert events[1]["type"] == "failureHintEvent"
@@ -81,7 +82,7 @@ def test_hugo_turn_raises_timeout_when_worker_exceeds_limit():
         list(iter_hugo_turn_events(
             query="deploy", file_refs=[], messages=[], intent="chat", selected_tools={"hugo_blog": object()},
             memory_scope=[], trace_id="trace-1",
-            dependencies=_deps(delete=lambda *args: time.sleep(0.02), redeploy=lambda *args: None, existing=lambda *args: None, publish=lambda *args: None, agent=lambda *args: None),
+        dependencies=_deps(delete=lambda *args: None, redeploy=lambda *args: None, existing=lambda *args: None, publish=lambda *args: time.sleep(0.02), agent=lambda *args: None),
             heartbeat_seconds=0.001,
             total_timeout_seconds=0.002,
         ))

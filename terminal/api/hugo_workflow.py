@@ -7,7 +7,6 @@ import re
 from pathlib import Path
 from uuid import uuid4
 
-from core.desktop_tool_router import wants_hugo_publish as _wants_hugo_publish
 from terminal.api._config import _load_config, set_tool_draft
 from terminal.api.api_tool_helpers import (
     _make_api_tool_request,
@@ -746,10 +745,9 @@ def _run_hugo_agent_turn(
     query: str,
     *,
     file_refs: list[dict] | None = None,
+    authorized_action: str = "publish",
 ) -> tuple[list[dict], list[dict], str]:
     """LLM 驱动枫弋札记工作流；ALLOW 操作自动执行，不弹确认卡。"""
-    if not _wants_hugo_publish(query, file_refs):
-        return messages, [], ""
 
     from core.llm import call_with_tools
     from core.policy import check as policy_check, Decision
@@ -766,7 +764,7 @@ def _run_hugo_agent_turn(
         return messages, [], ""
 
     agent_messages: list[dict] = [
-        {"role": "system", "content": _HUGO_AGENT_SYSTEM_PROMPT},
+        {"role": "system", "content": f"{_HUGO_AGENT_SYSTEM_PROMPT}\n\n本轮已授权动作：{authorized_action}。不得扩大为其他副作用动作。"},
         *messages,
     ]
     tool_events: list[dict] = []
@@ -832,6 +830,28 @@ def _run_hugo_agent_turn(
             pr = policy_check(fn_name, fn_args, all_skills, cfg=_load_config())
             event_id = f"hugo-agent-{uuid4().hex[:8]}"
             action = str(fn_args.get("action", "") or "…")
+            allowed_actions = {
+                "publish": {"list", "read", "publish", "new", "deploy"},
+                "deploy": {"list", "read", "deploy"},
+                "redeploy": {"list", "read", "deploy"},
+                "delete": {"list", "read", "delete"},
+                "unpublish": {"list", "read", "delete"},
+                "delete_and_deploy": {"list", "read", "delete", "deploy"},
+            }.get(authorized_action, {"list", "read"})
+            if action not in allowed_actions:
+                tool_events.append({
+                    "type": "tool_event", "toolEvent": {
+                        "id": event_id, "name": "hugo_blog", "status": "blocked",
+                        "risk": "high", "summary": f"hugo_blog {action} 超出本轮授权",
+                        "detail": f"authorized_action={authorized_action}", "requiresApproval": False,
+                    },
+                })
+                agent_messages.append({
+                    "role": "tool", "tool_call_id": tc.id,
+                    "content": "[授权范围拒绝] 工具参数扩大了当前轮授权。",
+                })
+                final_text = "枫弋札记操作未执行：工具请求超出了当前轮授权范围。"
+                break
 
             if pr.decision == Decision.DENY:
                 tool_events.append({
@@ -852,6 +872,23 @@ def _run_hugo_agent_turn(
                     "content": f"[策略拒绝] {pr.reason}",
                 })
                 continue
+
+            if pr.decision == Decision.CONFIRM:
+                request = _make_api_tool_request(
+                    fn_name, fn_args, event_id=event_id, display_name="hugo_blog",
+                    force_approval=True,
+                )
+                if not request.get("blocked"):
+                    set_tool_draft(event_id, request)
+                tool_events.append(_tool_event_from_request(
+                    request, summary=f"确认 hugo_blog · {action}", detail_prefix=pr.reason,
+                ))
+                agent_messages.append({
+                    "role": "tool", "tool_call_id": tc.id,
+                    "content": "[等待用户确认] 已生成审批草稿，本轮未执行。",
+                })
+                final_text = "枫弋札记操作正在等待你的确认，尚未执行。"
+                break
 
             hugo_tool_invoked = True
             tr = runtime_invoke(fn_name, fn_args, all_skills)
@@ -874,6 +911,8 @@ def _run_hugo_agent_turn(
                 "tool_call_id": tc.id,
                 "content": tr.to_message_content() if tr.ok else f"[执行失败] {tr.summary}\n{tr.content_preview or ''}",
             })
+        if final_text:
+            break
 
     # 根因 A 修复：循环结束但从未成功调用 hugo_blog 时，兜底告知用户
     if not final_text and not hugo_tool_succeeded:
@@ -890,4 +929,3 @@ def _run_hugo_agent_turn(
                     break
 
     return messages, tool_events, final_text
-

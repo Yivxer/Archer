@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Callable
 
 
@@ -19,6 +19,7 @@ class FullTurnDependencies:
     format_expert: Callable
     scoped_skills: Callable
     select_tools: Callable
+    decide: Callable
     shadow_events: Callable
     file_context: Callable
     vault: Callable
@@ -49,6 +50,7 @@ class PreparedFullTurn:
     turn_plan: object
     selected_tools: object
     tool_plan: object
+    turn_decision: object
     enriched_messages: list[dict]
     events: list[dict]
 
@@ -95,6 +97,26 @@ def prepare_full_turn(
     events.extend(file_events)
     if file_context:
         enriched_messages = [{"role": "system", "content": file_context}, *enriched_messages]
+    candidate_skills = list(getattr(selected.turn_plan, "raw_selected", {}) or {})
+    if file_context or "hugo_blog" in candidate_skills:
+        turn_decision = dependencies.decide(
+            query, file_context=file_context, candidate_capabilities=candidate_skills,
+        )
+    else:
+        from core.turn_decision import default_conversation_decision
+        turn_decision = default_conversation_decision(query)
+    selected_tools = dict(selected.selected_tools)
+    if getattr(turn_decision, "handling", "") != "execute_action":
+        selected_tools.pop("hugo_blog", None)
+    elif any(getattr(action, "capability", "") == "hugo_blog" for action in turn_decision.action_requests):
+        raw_selected = getattr(selected.turn_plan, "raw_selected", {}) or {}
+        if "hugo_blog" in raw_selected:
+            selected_tools["hugo_blog"] = raw_selected["hugo_blog"]
+    if orchestration is not None:
+        try:
+            orchestration = replace(orchestration, turn_decision=turn_decision)
+        except TypeError:
+            pass
 
     vault_result = dependencies.vault(
         enriched_messages,
@@ -125,6 +147,7 @@ def prepare_full_turn(
                 orchestration=orchestration,
                 file_refs=file_refs,
                 trace_id=trace_id,
+                turn_decision=turn_decision,
             ),
         }, trace_id))
         matched_skills = list(orchestration.matched_skills)
@@ -202,8 +225,9 @@ def prepare_full_turn(
         mode_constraint_block=orchestrated.mode_constraint_block,
         matched_skills_block=orchestrated.matched_skills_block,
         turn_plan=selected.turn_plan,
-        selected_tools=selected.selected_tools,
+        selected_tools=selected_tools,
         tool_plan=selected.tool_plan,
+        turn_decision=turn_decision,
         enriched_messages=enriched_messages,
         events=events,
     )

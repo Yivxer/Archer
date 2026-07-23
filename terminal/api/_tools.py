@@ -18,6 +18,7 @@ from terminal.api.turn_context import (
     clean_file_refs as _clean_file_refs,
     clean_memory_mode as _clean_memory_mode,
     clean_obsidian_mode as _clean_obsidian_mode,
+    merge_inline_markdown_refs,
 )
 from terminal.api.context_assembly import (
     assemble_memory_context,
@@ -57,27 +58,7 @@ from terminal.api.part8_runtime import (
 )
 
 
-def _runtime_context_event(
-    *,
-    query: str,
-    intent_info: dict,
-    orchestration,
-    file_refs: list[dict] | None = None,
-    trace_id: str = "",
-) -> dict:
-    matched_skills = list(getattr(orchestration, "matched_skills", []) or [])
-    wants_blog = _wants_hugo_publish(query, file_refs or [])
-    task = "blog_publish" if wants_blog else str(getattr(orchestration, "sub_intent", "") or intent_info.get("intent", "chat"))
-    return {
-        "id": f"runtime-context-{uuid4().hex[:8]}",
-        "traceId": trace_id,
-        "task": task,
-        "phase": "route",
-        "userIntent": str(getattr(orchestration, "sub_intent", "") or intent_info.get("intent", "chat")),
-        "lastResult": "",
-        "expectedNext": "select_workflow_or_model",
-        "matchedSkills": matched_skills,
-    }
+from terminal.api.runtime_context import build_route_runtime_context as _runtime_context_event
 
 
 def _failure_hint_event(exc: Exception, *, stage: str, trace_id: str = "") -> dict:
@@ -300,6 +281,7 @@ def _full_turn_dependencies() -> FullTurnDependencies:
         select_tools=lambda query, scoped_skills, **kwargs: select_turn_tools(
             query, scoped_skills, planner=_plan_desktop_turn, **kwargs,
         ),
+        decide=__import__("core.turn_decision", fromlist=["decide_turn"]).decide_turn,
         shadow_events=_yield_shadow_initiative_events,
         file_context=_file_reference_context,
         vault=assemble_vault_focus,
@@ -323,8 +305,8 @@ def _hugo_turn_dependencies() -> HugoTurnDependencies:
         publish=lambda query, refs, messages: _try_direct_hugo_publish(
             query, refs, messages=messages,
         ),
-        agent=lambda messages, query, refs: _run_hugo_agent_turn(
-            messages, query, file_refs=refs,
+        agent=lambda messages, query, refs, authorized_action: _run_hugo_agent_turn(
+            messages, query, file_refs=refs, authorized_action=authorized_action,
         ),
         trace_event=_with_trace_id,
         failure_hint=_failure_hint_event,
@@ -541,6 +523,7 @@ def _iter_chat_chunks_impl(
 
     classified_turn = classify_turn(messages)
     query = classified_turn.query
+    file_refs = merge_inline_markdown_refs(query, file_refs)
     trace_id = f"trace-{uuid4().hex[:12]}"
     yield {"type": "_metric", "stage": "trace_started", "traceId": trace_id}
     _record_part8_shadow_material(messages, runtime_context)
@@ -586,6 +569,7 @@ def _iter_chat_chunks_impl(
     _turn_plan = prepared_turn.turn_plan
     _selected_tools = prepared_turn.selected_tools
     _tool_plan = prepared_turn.tool_plan
+    _turn_decision = prepared_turn.turn_decision
     intent = intent_info["intent"]
     enriched_messages = prepared_turn.enriched_messages
     for event in prepared_turn.events:
@@ -602,9 +586,10 @@ def _iter_chat_chunks_impl(
     except Exception:
         active_stance = None
         stance_prompt = ""
-    # ── 枫弋札记：附件/路径直发 或 LLM 工具链，自动执行，不弹确认卡
-    if _wants_hugo_publish(query, file_refs) and "hugo_blog" in _selected_tools:
-        yield from iter_hugo_turn_events(
+    from terminal.api.action_mediation_stage import run_action_mediation
+
+    def run_hugo(authorized_action: str):
+        return iter_hugo_turn_events(
             query=query,
             file_refs=file_refs,
             messages=enriched_messages,
@@ -615,8 +600,21 @@ def _iter_chat_chunks_impl(
             dependencies=_hugo_turn_dependencies(),
             heartbeat_seconds=HUGO_WORKFLOW_HEARTBEAT_SECONDS,
             total_timeout_seconds=HUGO_WORKFLOW_TOTAL_TIMEOUT_SECONDS,
+            authorized_action=authorized_action,
         )
-        return
+
+    mediated = run_action_mediation(
+        _turn_decision, query, _selected_tools, enriched_messages, trace_id,
+        run_hugo=run_hugo, delete=_try_direct_hugo_delete,
+        make_request=_make_api_tool_request, set_draft=set_tool_draft,
+        event_from_request=_tool_event_from_request,
+    )
+    enriched_messages = mediated.enriched_messages
+    pre_model_tool_events = mediated.tool_events
+    yield _with_trace_id({
+        "type": "runtimeContextEvent",
+        "runtimeContextEvent": mediated.runtime_event,
+    }, trace_id)
 
     api_tool_events = list(_iter_api_tool_events(query, turn_plan=_turn_plan))
 
@@ -628,6 +626,7 @@ def _iter_chat_chunks_impl(
         )
     else:
         tool_loop_events = []
+    tool_loop_events = [*pre_model_tool_events, *tool_loop_events]
     for event in tool_loop_events:
         yield _with_trace_id(event, trace_id)
 

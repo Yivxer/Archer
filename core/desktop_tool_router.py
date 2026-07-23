@@ -667,10 +667,8 @@ def plan_desktop_turn(
 
     skills = all_skills if all_skills is not None else load_skills()
     raw = select_skills(query, skills)
-    force_hugo_workflow = wants_hugo_publish(query) and "hugo_blog" in raw
-    filtered = filter_skills_for_intent(query, raw, intent=intent) if (needs_tools or force_hugo_workflow) else {}
-    if force_hugo_workflow:
-        filtered = {"hugo_blog": raw["hugo_blog"]}
+    # 路由器只提供候选能力；是否执行 Hugo 由语义决策 + Action Mediator 决定。
+    filtered = filter_skills_for_intent(query, raw, intent=intent) if needs_tools else {}
     tool_plan = plan_desktop_tools(
         query, filtered,
         intent=intent,

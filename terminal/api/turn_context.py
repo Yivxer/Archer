@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import re
 
 from terminal.api._config import _clean_chat_messages, _inject_thread_context
 
@@ -68,6 +69,18 @@ def clean_file_refs(raw: object) -> list[dict]:
             clean_ref["truncated"] = bool(item.get("truncated"))
         refs.append(clean_ref)
     return refs
+
+
+def merge_inline_markdown_refs(query: str, refs: list[dict] | None) -> list[dict]:
+    """Treat explicit local Markdown paths as bounded, read-only context refs."""
+    merged = list(refs or [])
+    known = {str(ref.get("path", "")) for ref in merged if isinstance(ref, dict)}
+    for raw_path in re.findall(r"(?:~|/Users)/[^\n\r`'\"]+?\.md\b", query):
+        path = raw_path.strip()
+        if path not in known:
+            merged.append({"path": path, "name": Path(path).name, "size": 0})
+            known.add(path)
+    return merged[:5]
 
 
 @dataclass(frozen=True, slots=True)

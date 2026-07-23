@@ -27,3 +27,13 @@ def test_hugo_eval_contract_requires_approval_for_publish_and_delete():
         assert actual[case_id]["side_effect_level"] == "approval_required"
         assert actual[case_id]["wants_publish_workflow"] is True
         assert actual[case_id]["needs_tools"] is True
+
+
+def test_action_mediation_eval_contract():
+    actual = _actual()
+    assert actual["mediate.real_incident"]["disposition"] == "DENY"
+    assert actual["mediate.propose_republish"]["disposition"] == "PROPOSE_ONLY"
+    assert actual["mediate.explicit_publish"]["disposition"] == "AUTO_EXECUTE"
+    assert actual["mediate.negated_publish"]["disposition"] == "DENY"
+    for case_id in ("mediate.delete", "mediate.missing_evidence", "mediate.expanded_scope"):
+        assert actual[case_id]["disposition"] == "REQUEST_CONFIRMATION"

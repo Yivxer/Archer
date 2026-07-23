@@ -47,9 +47,10 @@ def test_runtime_activity_prevents_empty_home_state():
 
 def test_chat_busy_error_restores_input_without_connection_failure_copy():
     source = CHAT_PAGE.read_text()
+    guards = (ROOT / "client/desktop/src/renderer/src/pages/chatPage/errorGuards.ts").read_text()
 
-    assert "ChatBusyError" in source
-    assert "function isChatBusy" in source
+    assert "ChatBusyError" in guards
+    assert "function isChatBusy" in guards
     assert "上一轮还在处理中，内容已放回输入框。等它结束后再发送。" in source
     assert "上一轮还在处理中，暂时不能重新生成。" in source
     assert source.index("isChatBusy(error)") < source.index("本地聊天请求失败。")

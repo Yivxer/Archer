@@ -10,8 +10,15 @@
       "phase": "route",
       "userIntent": "project_planning",
       "lastResult": "",
-      "expectedNext": "select_workflow_or_model",
-      "matchedSkills": ["obsidian_read"]
+      "expectedNext": "model_response",
+      "matchedSkills": ["obsidian_read"],
+      "decisionTrace": {
+        "handling": "converse",
+        "candidateCapabilities": ["obsidian_read"],
+        "requestedActions": [],
+        "confidence": 0.0,
+        "summary": ""
+      }
     },
     "toolEvent": {
       "id": "hugo-blog-contract-1",

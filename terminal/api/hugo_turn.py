@@ -26,22 +26,27 @@ def iter_hugo_turn_events(
     intent: str, selected_tools, memory_scope, trace_id: str,
     dependencies: HugoTurnDependencies, heartbeat_seconds: float = 8.0,
     total_timeout_seconds: float = 300.0,
+    authorized_action: str = "publish",
 ):
     output: queue.Queue[tuple[str, object]] = queue.Queue()
 
     def run_workflow() -> None:
         try:
-            direct = dependencies.delete(query)
-            if not direct:
+            direct = None
+            if authorized_action in {"delete", "unpublish", "delete_and_deploy"}:
+                direct = dependencies.delete(query)
+            elif authorized_action in {"deploy", "redeploy"}:
                 direct = dependencies.redeploy(query, file_refs or [], messages)
-            if not direct:
-                direct = dependencies.deploy_existing(messages, query)
-            if not direct:
+                if not direct:
+                    direct = dependencies.deploy_existing(messages, query)
+            elif authorized_action == "publish":
                 direct = dependencies.publish(query, file_refs or [], messages)
             if direct:
                 output.put(("result", direct))
                 return
-            _, agent_events, agent_summary = dependencies.agent(messages, query, file_refs or [])
+            _, agent_events, agent_summary = dependencies.agent(
+                messages, query, file_refs or [], authorized_action,
+            )
             output.put(("result", (agent_events, agent_summary)))
         except Exception as exc:
             output.put(("error", exc))

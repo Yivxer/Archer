@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 from core.intent import classify_query_intent
+from core.turn_decision import TurnDecision
 
 Intent = Literal["chat", "task", "decision", "project", "reflection", "emotional"]
 SubIntent = Literal[
@@ -59,6 +60,7 @@ class OrchestrationResult:
     soul_insight: dict = field(default_factory=dict)
     reasons: list[str] = field(default_factory=list)
     source: str = "rules"
+    turn_decision: TurnDecision | None = None
 
 
 @dataclass(frozen=True)

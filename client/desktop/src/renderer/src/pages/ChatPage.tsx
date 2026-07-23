@@ -33,7 +33,6 @@ import {
   fileAttachLabel,
   dedupeFileRefs,
   isTextLikeFile,
-  shouldLetBackendReadExplicitMarkdownPath,
   extractMarkdownPathRefs,
 } from './chatPage/fileRefHelpers'
 import { backgroundRouteReasonLabel } from './chatPage/toolEventHelpers'
@@ -981,7 +980,7 @@ export function ChatPage({
   }
 
   async function prepareFileRefsForSend(text: string): Promise<FileRef[]> {
-    const explicitRefs = shouldLetBackendReadExplicitMarkdownPath(text) ? [] : extractMarkdownPathRefs(text)
+    const explicitRefs = extractMarkdownPathRefs(text)
     const merged = dedupeFileRefs([...fileRefs, ...explicitRefs])
     const hydrated = await hydrateFileRefs(merged)
     lastAttachedFilesRef.current = hydrated
@@ -1851,4 +1850,3 @@ export function ChatPage({
     </div>
   )
 }
-

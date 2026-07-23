@@ -127,6 +127,54 @@
     "needs_tools": true,
     "source": "rules"
   },
+  "mediate.delete": {
+    "authorization_source": "current_turn",
+    "disposition": "REQUEST_CONFIRMATION",
+    "has_fingerprint": true,
+    "reason": "destructive_action"
+  },
+  "mediate.expanded_scope": {
+    "authorization_source": "current_turn",
+    "disposition": "REQUEST_CONFIRMATION",
+    "has_fingerprint": true,
+    "reason": "parameter_scope_expanded"
+  },
+  "mediate.explicit_publish": {
+    "authorization_source": "current_turn",
+    "disposition": "AUTO_EXECUTE",
+    "has_fingerprint": true,
+    "reason": "explicit_current_turn_authorization"
+  },
+  "mediate.invalid_model": {
+    "authorization_source": "none",
+    "disposition": "DENY",
+    "has_fingerprint": false,
+    "reason": "no_authorized_action"
+  },
+  "mediate.missing_evidence": {
+    "authorization_source": "none",
+    "disposition": "REQUEST_CONFIRMATION",
+    "has_fingerprint": false,
+    "reason": "missing_verbatim_evidence"
+  },
+  "mediate.negated_publish": {
+    "authorization_source": "none",
+    "disposition": "DENY",
+    "has_fingerprint": false,
+    "reason": "no_authorized_action"
+  },
+  "mediate.propose_republish": {
+    "authorization_source": "none",
+    "disposition": "PROPOSE_ONLY",
+    "has_fingerprint": false,
+    "reason": "model_proposal"
+  },
+  "mediate.real_incident": {
+    "authorization_source": "none",
+    "disposition": "DENY",
+    "has_fingerprint": false,
+    "reason": "no_authorized_action"
+  },
   "tools.github": {
     "filtered_skills": [
       "github_ops"

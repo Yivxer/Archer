@@ -20,5 +20,14 @@
   {"id":"hugo.review","domain":"hugo_side_effect","query":"我让 Codex 部署了这篇文章，你看看内容写得如何"},
   {"id":"hugo.publish","domain":"hugo_side_effect","query":"把 /Users/demo/文章.md 发布到枫弋札记"},
   {"id":"hugo.negated","domain":"hugo_side_effect","query":"先不要发布到枫弋札记，只分析内容"},
-  {"id":"hugo.delete","domain":"hugo_side_effect","query":"把枫弋札记里的测试文章删除"}
+  {"id":"hugo.delete","domain":"hugo_side_effect","query":"把枫弋札记里的测试文章删除"},
+
+  {"id":"mediate.real_incident","domain":"action_mediation","query":"昨天写的这篇文章/Users/Yivxer/Library/Mobile Documents/iCloud~md~obsidian/Documents/个人知识管理系统/第二大脑的下一步：让 AI 开始工作.md，反响其实并不好，阅读量惨淡，也是我太心急了，折腾一晚上搞出来的文章好像是为了应付差事，这让我感到很失落","handling":"analyze","action_requests":[]},
+  {"id":"mediate.propose_republish","domain":"action_mediation","query":"是不是该重新发布","handling":"propose_action","action_requests":[{"capability":"hugo_blog","action":"redeploy","target":"枫弋札记","parameters":{},"evidence":"是不是该重新发布"}]},
+  {"id":"mediate.explicit_publish","domain":"action_mediation","query":"帮我发布到枫弋札记 /Users/demo/文章.md","handling":"execute_action","action_requests":[{"capability":"hugo_blog","action":"publish","target":"/Users/demo/文章.md","parameters":{},"evidence":"帮我发布到枫弋札记"}]},
+  {"id":"mediate.negated_publish","domain":"action_mediation","query":"不要发布，先分析","handling":"analyze","action_requests":[]},
+  {"id":"mediate.delete","domain":"action_mediation","query":"删除线上文章","handling":"execute_action","action_requests":[{"capability":"hugo_blog","action":"delete","target":"线上文章","parameters":{},"evidence":"删除线上文章"}]},
+  {"id":"mediate.invalid_model","domain":"action_mediation","query":"帮我看看文章","handling":"analyze","confidence":0,"action_requests":[]},
+  {"id":"mediate.missing_evidence","domain":"action_mediation","query":"帮我发布","handling":"execute_action","action_requests":[{"capability":"hugo_blog","action":"publish","target":"/Users/demo/文章.md","parameters":{},"evidence":"不存在的原文"}]},
+  {"id":"mediate.expanded_scope","domain":"action_mediation","query":"帮我发布到枫弋札记 /Users/demo/文章.md","handling":"execute_action","action_requests":[{"capability":"hugo_blog","action":"publish","target":"/Users/demo/文章.md","parameters":{"sourcePath":"/Users/demo/另一篇.md"},"evidence":"帮我发布到枫弋札记"}]}
 ]

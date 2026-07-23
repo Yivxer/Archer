@@ -92,11 +92,30 @@ def _hugo_side_effect(case: dict) -> dict:
     }
 
 
+def _action_mediation(case: dict) -> dict:
+    from core.action_mediator import mediate_turn
+    from core.turn_decision import ActionRequest, TurnDecision
+
+    actions = tuple(ActionRequest(**item) for item in case.get("action_requests", []))
+    decision = TurnDecision(
+        user_goal=case.get("user_goal", ""), handling=case["handling"],
+        action_requests=actions, confidence=case.get("confidence", 0.9),
+    )
+    result = mediate_turn(decision, case["query"])
+    return {
+        "disposition": result.disposition.value,
+        "authorization_source": result.authorization_source,
+        "reason": result.reason,
+        "has_fingerprint": bool(result.fingerprint),
+    }
+
+
 EVALUATORS = {
     "intent": _intent,
     "tool_selection": _tool_selection,
     "context": _context,
     "hugo_side_effect": _hugo_side_effect,
+    "action_mediation": _action_mediation,
 }
 
 

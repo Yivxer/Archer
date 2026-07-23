@@ -28,11 +28,6 @@ export function extractMarkdownPathRefs(text: string): FileRef[] {
   })
 }
 
-export function shouldLetBackendReadExplicitMarkdownPath(text: string): boolean {
-  if (!extractMarkdownPathRefs(text).length) return false
-  return /(?:枫弋札记|博客|博文|部署|发布|上传|发到|写到博客|hugo|yivxer-blog)/i.test(text)
-}
-
 export function isExplicitMarkdownPath(text: string, path: string): boolean {
   return extractMarkdownPathRefs(text).some((ref) => ref.path === path)
 }

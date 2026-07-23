@@ -133,7 +133,7 @@ class TestTurnPlanIntegration(unittest.TestCase):
         self.assertIn("shell", turn.filtered_skills)
         self.assertTrue(turn.tool_plan.should_run("shell"))
 
-    def test_hugo_upload_forces_tool_even_when_intent_classifier_misses_tools(self):
+    def test_hugo_upload_remains_candidate_when_intent_classifier_misses_tools(self):
         query = (
             "你好啊，帮我上传一篇文章到枫弋札记上，要保留原来的格式，标签是复盘；"
             "不用带里面的双链"
@@ -149,7 +149,8 @@ class TestTurnPlanIntegration(unittest.TestCase):
 
         turn = plan_desktop_turn(query, skills, intent="writing", needs_tools=False, llm_fallback=False)
 
-        self.assertEqual(list(turn.filtered_skills.keys()), ["hugo_blog"])
+        self.assertIn("hugo_blog", turn.raw_selected)
+        self.assertEqual(turn.filtered_skills, {})
         self.assertFalse(turn.tool_plan.obsidian_write)
 
     def test_hugo_image_capability_question_filters_hugo_tool(self):

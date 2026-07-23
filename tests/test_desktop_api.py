@@ -45,7 +45,25 @@ def _reset_background_jobs(routes, path):
     jobs.BACKGROUND_JOBS_PATH = path
 
 
+def _stub_hugo_decision(monkeypatch):
+    from core.turn_decision import ActionRequest, TurnDecision
+    def decide(query, **kwargs):
+        refs = kwargs.get("file_context", "")
+        target_match = __import__("re").search(r"(?:~|/Users|/private)/[^\n]+?\.md", query + "\n" + refs)
+        target = target_match.group(0) if target_match else "枫弋札记"
+        action = "deploy" if "部署" in query and not refs else "publish"
+        return TurnDecision(
+            user_goal="发布文章", handling="execute_action",
+            action_requests=(ActionRequest(
+                capability="hugo_blog", action=action, target=target, evidence=query,
+            ),), confidence=0.99, summary="测试中的明确发布授权",
+        )
+
+    monkeypatch.setattr("core.turn_decision.decide_turn", decide)
+
+
 def _stub_direct_hugo_execution(monkeypatch):
+    _stub_hugo_decision(monkeypatch)
     calls = []
 
     def fake_run(*, title, actions, summary_prefix=None):
@@ -1035,6 +1053,7 @@ class TestApiSkillRouting:
 
     def test_hugo_deploy_chat_uses_agent_turn_without_stream_chat(self, monkeypatch):
         from terminal.api import _tools as tools
+        from core.turn_decision import ActionRequest, TurnDecision
         from types import SimpleNamespace
 
         monkeypatch.setattr(tools, "_select_api_skills", lambda _query: {"hugo_blog": object()})
@@ -1053,11 +1072,14 @@ class TestApiSkillRouting:
                 },
             }], "枫弋札记已部署上线。"
 
-        def fail_stream_chat(_messages):
-            raise AssertionError("hugo deploy must use agent turn, not stream_chat")
-
         monkeypatch.setattr(tools, "_run_hugo_agent_turn", fake_agent)
-        monkeypatch.setattr("core.llm.stream_chat", fail_stream_chat)
+        monkeypatch.setattr("core.turn_decision.decide_turn", lambda query, **kwargs: TurnDecision(
+            user_goal="部署博客", handling="execute_action",
+            action_requests=(ActionRequest(
+                capability="hugo_blog", action="deploy", target="枫弋札记", evidence=query,
+            ),), confidence=0.99, summary="明确部署",
+        ))
+        monkeypatch.setattr("core.llm.stream_chat", lambda messages, **kwargs: iter(["枫弋札记已部署上线。"]))
 
         events = list(tools._iter_chat_chunks(
             [{"role": "user", "content": "部署枫弋札记"}],
@@ -1075,6 +1097,47 @@ class TestApiSkillRouting:
         assert any("枫弋札记已部署上线" in event.get("text", "") for event in events)
         assert not any("部署确认卡" in event.get("text", "") for event in events)
         assert events[-1] == {"type": "done", "done": True}
+
+    def test_real_article_disappointment_message_analyzes_with_zero_hugo_side_effects(
+        self, monkeypatch, tmp_path,
+    ):
+        from core.turn_decision import TurnDecision
+        from terminal.api import _tools as tools
+
+        note = tmp_path / "第二大脑的下一步：让 AI 开始工作.md"
+        note.write_text("# 第二大脑的下一步：让 AI 开始工作\n\n这是一篇讨论第二大脑与 AI 行动关系的文章。", encoding="utf-8")
+        query = (
+            f"昨天写的这篇文章{note}，反响其实并不好，阅读量惨淡，也是我太心急了，"
+            "折腾一晚上搞出来的文章好像是为了应付差事，这让我感到很失落。"
+            "以后还是要做好规划，然后确定好自己要写什么内容，还有就是关于自己账号的定位，"
+            "要想清楚自己是不是要把读书笔记、AI 和健身思考都放在一起。"
+        )
+        before_drafts = set(PENDING_TOOL_DRAFTS)
+        monkeypatch.setattr("core.turn_decision.decide_turn", lambda query, **kwargs: TurnDecision(
+            user_goal="分析文章反馈与账号定位", handling="analyze", confidence=0.97,
+            summary="先读文章并回应失落与定位问题。",
+        ))
+        monkeypatch.setattr("core.llm.stream_chat", lambda messages, **kwargs: iter([
+            "这不是一次发布请求。文章的问题更像是写作动机和账号定位尚未收束。"
+        ]))
+        monkeypatch.setattr(
+            "terminal.api.hugo_workflow._run_hugo_publish_workflow",
+            lambda **kwargs: (_ for _ in ()).throw(AssertionError("Hugo must not run")),
+        )
+
+        events = list(tools._iter_chat_chunks(
+            [{"role": "user", "content": query}], memory_mode="off", obsidian_mode="off",
+        ))
+
+        rendered = "".join(event.get("text", "") for event in events)
+        assert "写作动机和账号定位" in rendered
+        assert not any(event.get("toolEvent", {}).get("name") == "hugo_blog" for event in events)
+        assert set(PENDING_TOOL_DRAFTS) == before_drafts
+        mediation = next(
+            event["runtimeContextEvent"] for event in events
+            if event.get("runtimeContextEvent", {}).get("phase") == "action_mediation"
+        )
+        assert mediation["decisionTrace"]["actionResult"] == "DENY"
 
     def test_parse_markdown_for_hugo_from_obsidian_note(self):
         from terminal.api._tools import _parse_markdown_for_hugo
@@ -1342,6 +1405,7 @@ class TestApiSkillRouting:
 
         monkeypatch.setattr("skills.hugo_blog.run_structured", fail_hugo_run)
         monkeypatch.setattr(tools, "_select_api_skills", lambda _query: {"hugo_blog": object()})
+        _stub_hugo_decision(monkeypatch)
 
         events = list(tools._iter_chat_chunks(
             [{"role": "user", "content": "把这篇发到枫弋札记"}],
@@ -3291,11 +3355,20 @@ def test_chat_stream_emits_runtime_context_event(monkeypatch):
     """每轮 chat stream 开始时应携带标准化运行上下文。"""
     from terminal.api._tools import _iter_chat_chunks
     from core.orchestrator import OrchestrationResult
+    from core.turn_decision import ActionRequest, TurnDecision
 
     monkeypatch.setattr("core.llm.stream_chat", lambda messages, **kwargs: iter(["ok"]))
+    monkeypatch.setattr("core.turn_decision.decide_turn", lambda query, **kwargs: TurnDecision(
+        user_goal="部署文章", handling="execute_action",
+        action_requests=(ActionRequest(
+            capability="hugo_blog", action="deploy", target="枫弋札记", evidence=query,
+        ),), confidence=0.9, summary="明确部署",
+    ))
     monkeypatch.setattr(
         "terminal.api._tools._run_hugo_agent_turn",
-        lambda messages, query, file_refs=None: (messages, [], "mock deploy done"),
+        lambda messages, query, file_refs=None, authorized_action="publish": (
+            messages, [], "mock deploy done",
+        ),
     )
     monkeypatch.setattr(
         "core.context.classify_query_intent",
@@ -3327,7 +3400,7 @@ def test_chat_stream_emits_runtime_context_event(monkeypatch):
     ))
 
     context_events = [e for e in events if e.get("type") == "runtimeContextEvent"]
-    assert len(context_events) == 2
+    assert len(context_events) >= 3
     context = next(
         event["runtimeContextEvent"] for event in context_events
         if event["runtimeContextEvent"]["phase"] == "route"
@@ -3335,7 +3408,7 @@ def test_chat_stream_emits_runtime_context_event(monkeypatch):
     assert context["task"] == "blog_publish"
     assert context["phase"] == "route"
     assert context["userIntent"] == "writing_assist"
-    assert context["expectedNext"] == "select_workflow_or_model"
+    assert context["expectedNext"] == "mediate_action"
     assert "hugo_blog" in context["matchedSkills"]
     memory_context = next(
         event["runtimeContextEvent"] for event in context_events

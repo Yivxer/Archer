@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from terminal.api.turn_context import TurnContext
+from terminal.api.turn_context import TurnContext, merge_inline_markdown_refs
 
 
 def test_turn_context_normalizes_chat_request_payload():
@@ -58,3 +58,13 @@ def test_turn_context_rejects_invalid_file_refs():
                 "fileRefs": "not-a-list",
             }
         )
+
+
+def test_inline_markdown_path_is_merged_as_read_only_context_reference():
+    query = "昨天发布的 /Users/Yivxer/Documents/文章 A.md 反响不好，先分析"
+
+    assert merge_inline_markdown_refs(query, []) == [{
+        "path": "/Users/Yivxer/Documents/文章 A.md",
+        "name": "文章 A.md",
+        "size": 0,
+    }]
