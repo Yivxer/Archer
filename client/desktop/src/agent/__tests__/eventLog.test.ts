@@ -123,6 +123,20 @@ describe('event log', () => {
 
     expect(log.all().map((item) => item.id)).toEqual(['2'])
   })
+
+  it('rebinds pending events when a new chat receives its persisted session id', () => {
+    const storage = memoryStorage()
+    const log = createPersistentEventLog(storage, 'events')
+    log.append({ ...event('plan-1', 'tool.request'), sessionId: 'desktop-session' })
+    log.append({ ...event('other-1', 'tool.request'), sessionId: 'existing-session' })
+
+    log.moveSession('desktop-session', 'saved-session')
+
+    expect(log.forSession('saved-session').map((item) => item.id)).toEqual(['plan-1'])
+    expect(log.forSession('desktop-session')).toEqual([])
+    expect(log.forSession('existing-session').map((item) => item.id)).toEqual(['other-1'])
+    expect(createPersistentEventLog(storage, 'events').forSession('saved-session').map((item) => item.id)).toEqual(['plan-1'])
+  })
 })
 
 function memoryStorage(): EventLogStorage {

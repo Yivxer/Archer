@@ -7,6 +7,7 @@ export type EventLog = {
   all: () => AgentEvent[]
   forSession: (sessionId: string) => AgentEvent[]
   get: (eventId: string) => AgentEvent | undefined
+  moveSession: (fromSessionId: string, toSessionId: string) => void
   clearSession: (sessionId: string) => void
   clear: () => void
 }
@@ -56,6 +57,17 @@ export function createEventLog(initial: AgentEvent[] = []): EventLog {
     get(eventId) {
       return events.find((event) => event.id === eventId)
     },
+    moveSession(fromSessionId, toSessionId) {
+      if (!fromSessionId || !toSessionId || fromSessionId === toSessionId) return
+      const rebound = events.map((event) => (
+        event.sessionId === fromSessionId
+          ? { ...event, sessionId: toSessionId }
+          : event
+      ))
+      events.length = 0
+      seen.clear()
+      for (const event of rebound) append(event)
+    },
     clearSession(sessionId) {
       const kept = events.filter((event) => event.sessionId !== sessionId)
       events.length = 0
@@ -99,6 +111,10 @@ export function createPersistentEventLog(
     all: log.all,
     forSession: log.forSession,
     get: log.get,
+    moveSession(fromSessionId, toSessionId) {
+      log.moveSession(fromSessionId, toSessionId)
+      persist()
+    },
     clearSession(sessionId) {
       log.clearSession(sessionId)
       persist()

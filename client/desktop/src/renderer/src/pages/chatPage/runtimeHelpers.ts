@@ -7,6 +7,19 @@ export function restoreRuntimeState(sessionId: string, eventLog: EventLog | null
   return restoreRuntimeStateFromEvents(sessionId, eventLog?.all() ?? [])
 }
 
+export function rebindNewRuntimeSession(
+  eventLog: EventLog | null,
+  previousSessionId: string,
+  currentSessionId: string,
+): void {
+  if (
+    previousSessionId === 'desktop-session'
+    && currentSessionId !== previousSessionId
+  ) {
+    eventLog?.moveSession(previousSessionId, currentSessionId)
+  }
+}
+
 export function mergeWorkspaceJobs(runtimeJobs: JobEvent[], workspaceJobs: BackgroundJob[]): WorkspaceJobSummary[] {
   const merged = new Map<string, WorkspaceJobSummary>()
   for (const job of workspaceJobs) {

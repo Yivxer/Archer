@@ -41,6 +41,7 @@ import { backgroundRouteReasonLabel } from './chatPage/toolEventHelpers'
 import { JobEventCard, PlanEventCard, ToolEventCard } from './chatPage/eventCards'
 import {
   restoreRuntimeState,
+  rebindNewRuntimeSession,
   mergeWorkspaceJobs,
   isHiddenToolEvent,
   isCompletedHugoToolEvent,
@@ -199,6 +200,7 @@ export function ChatPage({
   const [collapsedMessages, setCollapsedMessages] = React.useState<Record<number, boolean>>({})
   const runtimeSessionId = activeSession?.id || 'desktop-session'
   const eventLogRef = React.useRef<EventLog | null>(null)
+  const previousRuntimeSessionIdRef = React.useRef(runtimeSessionId)
   if (eventLogRef.current === null) {
     eventLogRef.current = createPersistentEventLog(window.localStorage)
     if (resetRuntimeOnMount) {
@@ -243,6 +245,12 @@ export function ChatPage({
   }
 
   React.useEffect(() => {
+    rebindNewRuntimeSession(
+      eventLogRef.current,
+      previousRuntimeSessionIdRef.current,
+      runtimeSessionId,
+    )
+    previousRuntimeSessionIdRef.current = runtimeSessionId
     setMessages(activeSession?.messages ?? data.chat.initialMessages)
     setIsTyping(false)
     setIsSending(false)
@@ -256,12 +264,12 @@ export function ChatPage({
     setActiveComposerMenu(null)
     setCopiedMessageId(null)
     setCollapsedMessages({})
-    setRuntimeState(restoreRuntimeState(activeSession?.id || 'desktop-session', eventLogRef.current))
+    setRuntimeState(restoreRuntimeState(runtimeSessionId, eventLogRef.current))
     abortControllerRef.current?.abort()
     abortControllerRef.current = null
     backgroundJobAbortRef.current?.abort()
     backgroundJobAbortRef.current = null
-  }, [activeSession?.id])
+  }, [activeSession?.id, runtimeSessionId])
 
   // After restore from eventLog, detect stale jobs (active-status jobs persisted before app restart)
   // and sync their real status from the backend API
