@@ -23,7 +23,9 @@ import { TracePanel } from '../components/TracePanel'
 import { buildThinkingMutter } from '../lib/thinkingMutter'
 import { useMemoryGroundedCompanion } from '../lib/useMemoryGroundedCompanion'
 import { loadJobList, mergeJobEvent, useJobStore } from '../lib/jobStore'
-import { buildTraceDiagnostics, createInitialRuntimeState, createPersistentEventLog, reduceRuntimeEvent, restoreRuntimeStateFromEvents, isForegroundOnlyWritingFeedbackPlan, isHugoBlogPublishPlan, jobSnapshotToAgentEvent, buildPlanChildJobSpecs, buildPlanCoordinatorPrompt, buildPlanExecutionPrompt, planWithStatus } from '../../../agent'
+import { loadRuntimeRuns, useRuntimeRunStore } from '../lib/runtimeRunStore'
+import { bindTaskPlanShadowJob, observeTaskPlanShadow, observeTaskPlanShadowJob } from '../adapters/runtimeRunsAdapter'
+import { buildTraceDiagnostics, createInitialRuntimeState, createPersistentEventLog, reduceRuntimeEvent, restoreRuntimeStateFromEvents, isForegroundOnlyWritingFeedbackPlan, isHugoBlogPublishPlan, jobSnapshotToAgentEvent, buildConfirmedPlanJobPayload, buildPlanChildJobSpecs, buildPlanCoordinatorPrompt, buildPlanResultSessionMessages, planWithStatus } from '../../../agent'
 import type { AgentEvent, ApprovalResultEvent, EventLog, JobEvent, OrchestrationEvent, PlanEvent, TraceDiagnostics } from '../../../agent'
 import type { FailureHintEvent, InitiativeEvent } from '../../../agent/contracts'
 import { isAbortError, isRequestTimeout, isChatBusy } from './chatPage/errorGuards'
@@ -141,6 +143,7 @@ export function ChatPage({
   const [expertSwitching, setExpertSwitching] = React.useState(false)
   const workspaceJobs = useJobStore((state) => state.jobs)
   const workspaceJobsLoadState = useJobStore((state) => state.loadState)
+  const runtimeRuns = useRuntimeRunStore((state) => state.runs)
   const workspaceJobsState: 'idle' | 'loading' | 'error' = workspaceJobsLoadState === 'loading'
     ? 'loading'
     : workspaceJobsLoadState === 'error' ? 'error' : 'idle'
@@ -181,7 +184,9 @@ export function ChatPage({
   }
 
   React.useEffect(() => {
-    if (data.status.adapter === 'local') void loadJobList()
+    if (data.status.adapter === 'local') {
+      void Promise.all([loadJobList(), loadRuntimeRuns()])
+    }
   }, [data.status.adapter])
 
   React.useEffect(() => {
@@ -594,20 +599,97 @@ export function ChatPage({
     abortControllerRef.current?.abort()
   }
 
+  async function recordPlanLifecycleStatus(
+    plan: PlanEvent,
+    status: 'accepted' | 'dismissed',
+  ): Promise<void> {
+    const event = planWithStatus(plan, status)
+    recordAgentEvent(event)
+    const shadow = event.shadowProjection
+    if (!shadow) return
+    try {
+      await observeTaskPlanShadow(shadow.runId, {
+        planId: shadow.planId,
+        traceId: shadow.traceId,
+        status,
+        observedAt: event.createdAt,
+      })
+    } catch {
+      // Shadow observation must never block the still-authoritative legacy path.
+    }
+  }
+
+  async function bindPlanJob(plan: PlanEvent, job: BackgroundJob): Promise<void> {
+    const shadow = plan.shadowProjection
+    if (!shadow) return
+    try {
+      await bindTaskPlanShadowJob(shadow.runId, {
+        planId: shadow.planId,
+        jobId: job.id,
+        jobKind: job.kind,
+        boundAt: job.createdAt,
+      })
+    } catch {
+      // Job correlation evidence must never block the authoritative legacy Job.
+    }
+  }
+
+  async function recordPlanJobSnapshot(
+    plan: PlanEvent,
+    job: BackgroundJob,
+  ): Promise<void> {
+    const shadow = plan.shadowProjection
+    if (!shadow) return
+    try {
+      const artifact = job.resultArtifact
+      const verification = job.resultVerification
+      const outcome = job.outcomeVerification
+      const evidenceSummary = job.createCommandId || job.startCommandId || artifact || verification || outcome
+        ? {
+            createCommandId: job.createCommandId,
+            startCommandId: job.startCommandId,
+            artifactId: artifact?.id,
+            contentFingerprint: artifact?.contentFingerprint,
+            attemptId: artifact?.attemptId || job.startCommandId,
+            attemptIdentitySource: artifact?.attemptIdentitySource
+              || (job.startCommandId ? 'start_command' : undefined),
+            verificationId: verification?.id,
+            verificationArtifactId: verification?.artifactId,
+            verificationExpectedFingerprint: verification?.expectedFingerprint || undefined,
+            verificationObservedFingerprint: verification?.observedFingerprint || undefined,
+            verificationStatus: verification?.status,
+            verifier: verification?.verifier,
+            verificationReason: verification?.reason,
+            outcomeVerificationId: outcome?.id,
+            outcomeStatus: outcome?.status,
+            outcomeVerifier: outcome?.verifier,
+            outcomeReason: outcome?.reason,
+          }
+        : undefined
+      await observeTaskPlanShadowJob(shadow.runId, job.id, {
+        status: job.status,
+        jobUpdatedAt: job.updatedAt,
+        observedAt: new Date().toISOString(),
+        evidenceSummary,
+      })
+    } catch {
+      // Job status evidence must never block the authoritative legacy Job.
+    }
+  }
+
   async function executeConfirmedPlan(plan: PlanEvent) {
     if (plan.status !== 'proposed' || isBackgrounding || data.status.adapter !== 'local') return
     if (isHugoBlogPublishPlan(plan, hugoPlanContextText)) {
-      recordAgentEvent(planWithStatus(plan, 'dismissed'))
+      await recordPlanLifecycleStatus(plan, 'dismissed')
       setToolNotice('这类博客发布计划不能放到后台执行，请使用枫弋札记确认卡继续。')
       return
     }
     if (isForegroundOnlyWritingFeedbackPlan(plan)) {
-      recordAgentEvent(planWithStatus(plan, 'dismissed'))
+      await recordPlanLifecycleStatus(plan, 'dismissed')
       setToolNotice('这类只读写作反馈不能放到后台写入，请直接在当前对话里继续。')
       return
     }
-    const prompt = buildPlanExecutionPrompt(plan)
-    recordAgentEvent(planWithStatus(plan, 'accepted'))
+    await recordPlanLifecycleStatus(plan, 'accepted')
 
     const assistantId = messages.length + 1
     const pendingAssistant: ChatMessage = {
@@ -627,18 +709,21 @@ export function ChatPage({
     setIsBackgrounding(true)
 
     try {
-      const { result, event } = await createBackgroundJobEvent(runtimeSessionId, {
-        title: plan.title || '任务计划',
-        kind: 'chat',
-        prompt,
-        timeoutSeconds: 600,
-      })
+      const { result, event } = await createBackgroundJobEvent(
+        runtimeSessionId,
+        buildConfirmedPlanJobPayload(plan),
+      )
       recordAgentEvent(event)
+      await bindPlanJob(plan, result.job)
+      await recordPlanJobSnapshot(plan, result.job)
       const finalJob = await pollBackgroundJobEvents(
         runtimeSessionId,
         result.job.id,
         recordAgentEvent,
-        { signal: controller.signal },
+        {
+          signal: controller.signal,
+          onSnapshot: (job) => recordPlanJobSnapshot(plan, job),
+        },
       )
       const reply = finalJob.status === 'complete'
         ? finalJob.result || '后台任务已完成，但没有返回内容。'
@@ -655,7 +740,10 @@ export function ChatPage({
           setSaveState('计划任务结果已续写当前会话')
         } else {
           const requestMessages = messages.map((message) => ({ role: message.role, content: message.text }))
-          const saved = await saveLocalSession([...requestMessages, { role: 'assistant', content: reply }], sessionSaveMeta())
+          const saved = await saveLocalSession(
+            buildPlanResultSessionMessages(plan, requestMessages, reply),
+            sessionSaveMeta(),
+          )
           onSessionAppended?.(nextMessages.map((message) =>
             message.id === assistantId ? { ...message, text: reply } : message,
           ), saved)
@@ -685,7 +773,7 @@ export function ChatPage({
     const childSpecs = buildPlanChildJobSpecs(plan)
     if (!childSpecs.length) return
 
-    recordAgentEvent(planWithStatus(plan, 'accepted'))
+    await recordPlanLifecycleStatus(plan, 'accepted')
     const assistantId = messages.length + 1
     const pendingAssistant: ChatMessage = {
       id: assistantId,
@@ -705,8 +793,11 @@ export function ChatPage({
         prompt: buildPlanCoordinatorPrompt(plan),
         autoStart: false,
         timeoutSeconds: 600,
+        runtimeShadowRunId: plan.shadowProjection?.runId,
       })
       recordAgentEvent(event)
+      await bindPlanJob(plan, result.job)
+      await recordPlanJobSnapshot(plan, result.job)
       const spawn = await spawnChildJobs(result.job.id, childSpecs)
       recordAgentEvent(jobSnapshotToAgentEvent(runtimeSessionId, result.job))
       const notice = spawn.spawned > 0
@@ -728,9 +819,9 @@ export function ChatPage({
     }
   }
 
-  function dismissPlan(plan: PlanEvent) {
+  async function dismissPlan(plan: PlanEvent) {
     if (plan.status !== 'proposed') return
-    recordAgentEvent(planWithStatus(plan, 'dismissed'))
+    await recordPlanLifecycleStatus(plan, 'dismissed')
     setToolNotice('已忽略此计划')
   }
 
@@ -919,7 +1010,7 @@ export function ChatPage({
     && !isHiddenToolEvent(event.name)
     && !isCompletedHugoToolEvent(event)
   ))
-  const hasRuntimeActivity = runtimePlans.length > 0 || runtimeJobs.length > 0 || runtimeState.pendingApprovals.length > 0 || visibleToolEvents.length > 0
+  const hasRuntimeActivity = runtimeRuns.length > 0 || runtimePlans.length > 0 || runtimeJobs.length > 0 || runtimeState.pendingApprovals.length > 0 || visibleToolEvents.length > 0
   const isHome = messages.length === 0 && !isTyping && !isSending && !activeSession && !hasRuntimeActivity
   const displayToolEvents = React.useMemo(() => (
     toolEvents
@@ -1687,6 +1778,7 @@ export function ChatPage({
           sidebarJobs={sidebarJobs}
           workspaceJobsState={workspaceJobsState}
           activeSidebarJobCount={activeSidebarJobCount}
+          runtimeRuns={runtimeRuns}
           homeStarters={homeStarters}
           onUseStarter={useStarter}
           onNavigate={onNavigate}

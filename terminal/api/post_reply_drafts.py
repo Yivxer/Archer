@@ -21,10 +21,36 @@ class PostReplyDraftDependencies:
     obsidian_work_intent: Callable
 
 
+def _bind_obsidian_runtime(
+    request: dict,
+    *,
+    runtime_context,
+    trace_id: str,
+    objective: str,
+) -> dict:
+    if runtime_context is None:
+        return request
+    from core.obsidian_runtime import stage_obsidian_write
+    from terminal.api._config import tool_request_fingerprint
+
+    args = request.get("args") if isinstance(request.get("args"), dict) else {}
+    fingerprint = tool_request_fingerprint("obsidian_write", args)
+    binding = stage_obsidian_write(
+        runtime_context.db_path,
+        objective=objective,
+        approval_fingerprint=fingerprint,
+        now=runtime_context.now().isoformat(),
+        trace_id=trace_id,
+    )
+    request["approvalFingerprint"] = fingerprint
+    request["runtimeContract"] = binding.to_dict()
+    return request
+
+
 def iter_post_reply_draft_events(
     *, query: str, messages: list[dict], ai_reply: str, obsidian_write_intent: bool,
     obsidian_target_path: str | None, hugo_blog_triggered: bool,
-    dependencies: PostReplyDraftDependencies,
+    dependencies: PostReplyDraftDependencies, runtime_context=None, trace_id: str = "",
 ):
     if obsidian_write_intent:
         try:
@@ -59,6 +85,7 @@ def iter_post_reply_draft_events(
                         "expected_mtime": preview["mtime"] if preview else None,
                         "expected_size": preview["size"] if preview else None,
                         "expected_fingerprint": preview["fingerprint"] if preview else None,
+                        "expected_exists": preview["exists"] if preview else None,
                     },
                     event_id=event_id,
                     display_name="obsidian_write",
@@ -83,6 +110,12 @@ def iter_post_reply_draft_events(
                         detail_prefix=f"path: {obsidian_target_path}",
                     )
                 elif request.get("requiresApproval"):
+                    request = _bind_obsidian_runtime(
+                        request,
+                        runtime_context=runtime_context,
+                        trace_id=trace_id,
+                        objective=f"受控写入 Obsidian：{obsidian_target_path}",
+                    )
                     dependencies.set_draft(event_id, request)
                     yield dependencies.event_from_request(
                         request, summary=f"确认 Obsidian 写入：{content[:80].strip()}",

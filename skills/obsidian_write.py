@@ -1,14 +1,17 @@
-from datetime import datetime
+from __future__ import annotations
+
 import hashlib
-from pathlib import Path
 import re
 import threading
 import time
+from datetime import datetime
+from pathlib import Path
 
+from core.runtime_cancellation import CancellationToken
 from skills._vault import (
-    resolve_note_path as _resolve_note_path,
-    read_note as _read_note,
     parse_frontmatter as _parse_frontmatter,
+    read_note as _read_note,
+    resolve_note_path as _resolve_note_path,
 )
 
 # per-path 写入锁：防止同一篇笔记多个确认卡并发点确认时
@@ -132,7 +135,7 @@ def schema() -> dict:
         },
     }
 
-def run(args: dict) -> str:
+def _run_unchecked(args: dict) -> str:
     raw_path = args.get("path", "").strip()
     content = args.get("content", "")
     mode = args.get("mode", "append")
@@ -142,6 +145,7 @@ def run(args: dict) -> str:
     expected_mtime = args.get("expected_mtime")
     expected_size = args.get("expected_size")
     expected_fingerprint = args.get("expected_fingerprint")
+    expected_exists = args.get("expected_exists")
 
     if mode == "section" and not heading:
         return "错误：mode=section 时必须指定 heading 参数"
@@ -167,6 +171,15 @@ def run(args: dict) -> str:
                 return cached
 
             p.parent.mkdir(parents=True, exist_ok=True)
+
+            if (
+                expected_exists is not None
+                and p.exists() != bool(expected_exists)
+            ):
+                return (
+                    f"写入已取消：笔记「{p.name}」在预览后"
+                    f"{'被创建' if p.exists() else '被删除'}，请重新生成确认卡。"
+                )
 
             # mtime 校验：预览后文件被外部修改则拒绝写入
             if expected_mtime is not None and p.exists():
@@ -265,8 +278,18 @@ def run(args: dict) -> str:
             return f"写入失败：{e}"
 
 
-def run_structured(args: dict) -> dict:
-    output = run(args)
+def run(args: dict) -> str:
+    return _run_unchecked(args)
+
+
+def run_cancelable(args: dict, cancellation_token: CancellationToken) -> str:
+    with cancellation_token.side_effect_guard() as allowed:
+        if not allowed:
+            return "写入已取消：Runtime cancellation requested before side effect"
+        return _run_unchecked(args)
+
+
+def _structured_result(args: dict, output: str) -> dict:
     ok = not output.startswith(("错误：", "路径被拒绝", "写入失败", "写入已取消", "未找到章节"))
     metadata: dict = {}
     if ok:
@@ -299,6 +322,17 @@ def run_structured(args: dict) -> dict:
         "output": output,
         "metadata": metadata,
     }
+
+
+def run_structured(args: dict) -> dict:
+    return _structured_result(args, run(args))
+
+
+def run_structured_cancelable(
+    args: dict,
+    cancellation_token: CancellationToken,
+) -> dict:
+    return _structured_result(args, run_cancelable(args, cancellation_token))
 
 
 def _insert_under_heading(text: str, heading_text: str, content: str) -> str | None:

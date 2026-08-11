@@ -1,4 +1,4 @@
-import type { AgentEvent, ApprovalDecision, PermissionLevel, PlanStatus, RiskLevel, RuntimeContextEvent, ToolStatus, WorkReceipt } from './contracts'
+import type { AgentEvent, ApprovalDecision, PermissionLevel, PlanEvent, PlanStatus, RiskLevel, RuntimeContextEvent, ToolStatus, WorkReceipt } from './contracts'
 
 export const SUPPORTED_CONTRACT_VERSION = 1
 
@@ -63,12 +63,14 @@ type PythonPlanEvent = {
   status: PlanStatus
   detail: string
   prompt?: string
+  execution?: PlanEvent['execution']
   steps: Array<{
     id: number
     action: string
     tool: string
     requiresApproval: boolean
   }>
+  shadowProjection?: PlanEvent['shadowProjection']
 }
 
 type PythonOrchestrationEvent = {
@@ -152,7 +154,9 @@ export function pythonPlanToAgentEvent(sessionId: string, plan: PythonPlanEvent)
     status: plan.status,
     detail: plan.detail,
     prompt: plan.prompt,
+    execution: plan.execution,
     steps: plan.steps,
+    shadowProjection: plan.shadowProjection,
   }
 }
 

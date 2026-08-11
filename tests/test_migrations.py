@@ -6,13 +6,13 @@ from datetime import datetime
 import pytest
 from fastapi.testclient import TestClient
 
+from core.runtime_context import create_runtime_context
 from memory.migrations import (
     LATEST_SCHEMA_VERSION,
     Migration,
     MigrationError,
     run_migrations,
 )
-from core.runtime_context import create_runtime_context
 from terminal.api.fastapi_app import create_app
 
 
@@ -51,6 +51,17 @@ def test_empty_database_upgrades_to_latest_schema(tmp_path):
     ).fetchone()[0] == 1
     assert conn.execute(
         "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='initiative_shadow_interactions'"
+    ).fetchone()[0] == 1
+    assert conn.execute(
+        "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='runtime_checkpoints'"
+    ).fetchone()[0] == 1
+    assert conn.execute(
+        "SELECT count(*) FROM sqlite_master "
+        "WHERE type='table' AND name='runtime_task_plan_observations'"
+    ).fetchone()[0] == 1
+    assert conn.execute(
+        "SELECT count(*) FROM sqlite_master "
+        "WHERE type='table' AND name='runtime_authority_comparisons'"
     ).fetchone()[0] == 1
     conn.close()
 

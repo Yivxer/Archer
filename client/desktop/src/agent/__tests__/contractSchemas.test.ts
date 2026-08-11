@@ -102,6 +102,11 @@ describe('contract schemas', () => {
       title: '提炼内容并写入 Obsidian',
       status: 'proposed',
       detail: '先整理，再请求写入确认',
+      execution: {
+        jobKind: 'vault_reflection',
+        vaultArgs: { notePath: '/Users/example/Vault/note.md', force: false },
+        timeoutSeconds: 600,
+      },
       steps: [
         { id: 1, action: 'read_source', tool: 'input_context', requiresApproval: false },
         { id: 2, action: 'write_obsidian', tool: 'obsidian_write', requiresApproval: true },
@@ -109,6 +114,9 @@ describe('contract schemas', () => {
     })
 
     expect(parsed.type).toBe('plan.event')
+    if (parsed.type === 'plan.event') {
+      expect(parsed.execution?.jobKind).toBe('vault_reflection')
+    }
   })
 
   it('accepts a valid orchestration event', () => {

@@ -1,5 +1,10 @@
 from types import SimpleNamespace
 
+from core.run_contract import RunState, StepState
+from core.run_store import get_run
+from core.runtime_context import create_runtime_context
+from core.step_store import get_step
+from memory.migrations import run_migrations
 from terminal.api.post_reply_drafts import PostReplyDraftDependencies, iter_post_reply_draft_events
 
 
@@ -59,3 +64,38 @@ def test_post_reply_drafts_emits_hugo_approval_request():
     ))
 
     assert events == [{"type": "request", "summary": "确认发布博客文章：Post"}]
+
+
+def test_obsidian_approval_draft_is_bound_to_runtime(tmp_path):
+    db_path = tmp_path / "archer.db"
+    run_migrations(db_path)
+    captured = {}
+    dependencies = _deps(
+        generate_obsidian=lambda *args: "draft",
+        request=lambda *args, **kwargs: {
+            "kind": "tool_request",
+            "skillName": "obsidian_write",
+            "args": args[1],
+            "requiresApproval": True,
+        },
+    )
+    dependencies = SimpleNamespace(
+        **{
+            **dependencies.__dict__,
+            "set_draft": lambda event_id, request: captured.update(request),
+        }
+    )
+
+    list(iter_post_reply_draft_events(
+        query="write", messages=[], ai_reply="reply", obsidian_write_intent=True,
+        obsidian_target_path="note.md", hugo_blog_triggered=False,
+        dependencies=dependencies,
+        runtime_context=create_runtime_context(db_path=db_path),
+        trace_id="trace-runtime",
+    ))
+
+    contract = captured["runtimeContract"]
+    assert captured["approvalFingerprint"] == contract["approvalFingerprint"]
+    assert contract["traceId"] == "trace-runtime"
+    assert get_run(db_path, contract["runId"]).state is RunState.WAITING_APPROVAL
+    assert get_step(db_path, contract["stepId"]).state is StepState.WAITING_APPROVAL

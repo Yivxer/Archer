@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Any
 
 from core.permission_levels import permission_level_for_tool
+from core.runtime_cancellation import CancellationToken
 from terminal.api._config import (
     _load_config,
     get_tool_draft,
@@ -27,7 +28,6 @@ from terminal.api._tools import (
     _execute_shell_command,
     _run_hugo_publish_workflow,
 )
-
 
 IDEMPOTENT_TOOL_SKILLS = {"obsidian_write", "hugo_blog", "file_ops"}
 
@@ -56,15 +56,27 @@ def _build_hugo_approval_draft(event_id: str) -> dict:
     )
 
 
-def _run_approved_draft(draft: dict):
+def _run_approved_draft(
+    draft: dict,
+    cancellation_token: CancellationToken | None = None,
+) -> Any:
     from core.api_tool_service import execute_tool_request
     from skills.loader import load_skills
     from terminal.api.tool_stage import apply_approval_followup, execute_approved_draft
+
+    def execute_request(request: dict) -> dict:
+        if cancellation_token is None:
+            return execute_tool_request(request, load_skills(), cfg=_load_config())
+        return execute_tool_request(
+            request,
+            load_skills(),
+            cfg=_load_config(),
+            cancellation_token=cancellation_token,
+        )
+
     execution = execute_approved_draft(
         draft,
-        execute_tool_request=lambda request: execute_tool_request(
-            request, load_skills(), cfg=_load_config()
-        ),
+        execute_tool_request=execute_request,
         append_obsidian=_append_obsidian_draft,
         execute_shell=_execute_shell_command,
         execute_github=_execute_github_operation,
@@ -72,7 +84,14 @@ def _run_approved_draft(draft: dict):
     return apply_approval_followup(draft, execution, deploy=_run_hugo_deploy_followup)
 
 
-def _finalize_approval(event_id: str, decision: str, draft: dict, execution, fingerprint: str) -> dict:
+def _finalize_approval(
+    event_id: str,
+    decision: str,
+    draft: dict,
+    execution,
+    fingerprint: str,
+    verification_receipt: dict | None = None,
+) -> dict:
     from terminal.api.tool_stage import build_approval_response, persist_approval_response
     permission_level = ""
     if draft.get("kind") == "tool_request":
@@ -82,6 +101,10 @@ def _finalize_approval(event_id: str, decision: str, draft: dict, execution, fin
         event_id=event_id, decision=decision, execution=execution, draft=draft,
         fingerprint=fingerprint, permission_level=permission_level,
     )
+    if verification_receipt:
+        response["verificationReceipt"] = verification_receipt
+    if draft.get("runtimeContract"):
+        response["runtimeContract"] = draft["runtimeContract"]
     return persist_approval_response(
         response, event_id=event_id, decision=decision, draft=draft,
         fingerprint=fingerprint, record_audit=record_tool_approval_audit,
@@ -119,9 +142,20 @@ def _tool_approval(payload: dict, runtime_context: Any = None) -> dict:
         )
         request_fingerprint = prepared.fingerprint
         if prepared.reused_response:
-            record_tool_approval_audit(event_id=event_id, decision=decision, draft=draft, response=prepared.reused_response)
-            set_tool_result(event_id, prepared.reused_response)
-            return prepared.reused_response
+            from terminal.api.obsidian_runtime_bridge import (
+                close_reused_runtime_response,
+            )
+
+            reused = close_reused_runtime_response(
+                draft,
+                prepared.reused_response,
+                fingerprint=request_fingerprint,
+                event_id=event_id,
+                runtime_context=runtime_context,
+            )
+            record_tool_approval_audit(event_id=event_id, decision=decision, draft=draft, response=reused)
+            set_tool_result(event_id, reused)
+            return reused
         outbox_item = _prepare_tool_outbox(
             event_id, decision, draft, request_fingerprint, runtime_context,
         )
@@ -138,6 +172,17 @@ def _tool_approval(payload: dict, runtime_context: Any = None) -> dict:
                     cached["traceId"] = trace_id
                 cached["reused"] = True
                 cached["outbox"] = _outbox_receipt(outbox_item)
+                from terminal.api.obsidian_runtime_bridge import (
+                    close_reused_runtime_response,
+                )
+
+                cached = close_reused_runtime_response(
+                    draft,
+                    cached,
+                    fingerprint=request_fingerprint,
+                    event_id=event_id,
+                    runtime_context=runtime_context,
+                )
                 return cached
             if outbox_item:
                 from infrastructure.outbox import claim_for_sending
@@ -150,8 +195,72 @@ def _tool_approval(payload: dict, runtime_context: Any = None) -> dict:
                         "ok": True, "eventId": event_id, "decision": decision,
                         "executed": False, "message": "该副作用正在发送或尚未到重试时间。",
                     }
+            runtime_binding = None
+            cancellation_token = None
+            runtime_contract = draft.get("runtimeContract")
+            runtime_run_id = (
+                str(runtime_contract.get("runId") or "").strip()
+                if isinstance(runtime_contract, dict)
+                else ""
+            )
+            verification_receipt = None
+            cancellation = None
             try:
-                execution = _run_approved_draft(draft)
+                from terminal.api.obsidian_runtime_bridge import begin_runtime_approval
+
+                runtime_binding = begin_runtime_approval(
+                    draft,
+                    fingerprint=request_fingerprint,
+                    runtime_context=runtime_context,
+                )
+                cancellation_token = (
+                    runtime_context.cancellations.token(runtime_binding.run_id)
+                    if runtime_binding is not None and runtime_context is not None
+                    else None
+                )
+                try:
+                    execution = (
+                        _run_approved_draft(
+                            draft,
+                            cancellation_token=cancellation_token,
+                        )
+                        if cancellation_token is not None
+                        else _run_approved_draft(draft)
+                    )
+                except Exception as exc:
+                    from terminal.api.obsidian_runtime_bridge import fail_runtime_approval
+
+                    fail_runtime_approval(
+                        draft,
+                        runtime_context=runtime_context,
+                        summary=str(exc),
+                        error_code="obsidian_write_exception",
+                    )
+                    raise
+                if cancellation_token is not None:
+                    from terminal.api.obsidian_runtime_bridge import (
+                        finalize_runtime_cancellation,
+                        finalize_runtime_execution,
+                    )
+
+                    with cancellation_token.finalization_guard() as cancellation_requested:
+                        if cancellation_requested:
+                            cancellation = finalize_runtime_cancellation(
+                                draft,
+                                execution,
+                                cancellation_token,
+                                fingerprint=request_fingerprint,
+                                event_id=event_id,
+                                runtime_context=runtime_context,
+                            )
+                        else:
+                            verification_receipt = finalize_runtime_execution(
+                                draft,
+                                execution,
+                                fingerprint=request_fingerprint,
+                                event_id=event_id,
+                                runtime_context=runtime_context,
+                            )
             except Exception as exc:
                 if outbox_item:
                     from infrastructure.outbox import mark_failed
@@ -161,11 +270,50 @@ def _tool_approval(payload: dict, runtime_context: Any = None) -> dict:
                         now=runtime_context.now(),
                     )
                 raise
+            finally:
+                if runtime_context is not None:
+                    release_run_id = (
+                        runtime_binding.run_id
+                        if runtime_binding is not None
+                        else runtime_run_id
+                    )
+                    if release_run_id:
+                        runtime_context.cancellations.release(release_run_id)
+            if cancellation is not None:
+                response = {
+                    "ok": True,
+                    "eventId": event_id,
+                    "decision": decision,
+                    "executed": False,
+                    "runtimeContract": draft.get("runtimeContract"),
+                    **(cancellation or {}),
+                }
+                if outbox_item:
+                    from infrastructure.outbox import mark_failed
+
+                    final_item = mark_failed(
+                        runtime_context.db_path,
+                        outbox_item["id"],
+                        str(response.get("message") or "runtime cancelled"),
+                        now=runtime_context.now(),
+                    )
+                    response["outbox"] = _outbox_receipt(final_item)
+                record_tool_approval_audit(
+                    event_id=event_id,
+                    decision=decision,
+                    draft=draft,
+                    response=response,
+                )
+                set_tool_result(event_id, response)
+                return response
             executed = execution.executed
             result_output = execution.output
             message = execution.message
             work_receipt = execution.work_receipt
         else:
+            from terminal.api.obsidian_runtime_bridge import cancel_runtime_approval
+
+            cancel_runtime_approval(draft, runtime_context=runtime_context)
             response = build_denied_response(event_id, trace_id=str(draft.get("traceId") or "").strip())
             if outbox_item:
                 response["outbox"] = _outbox_receipt(outbox_item)
@@ -175,8 +323,15 @@ def _tool_approval(payload: dict, runtime_context: Any = None) -> dict:
         from terminal.api.tool_stage import ApprovalExecution
         response = _finalize_approval(
             event_id, decision, draft,
-            ApprovalExecution(executed, result_output, message, work_receipt),
+            ApprovalExecution(
+                executed,
+                result_output,
+                message,
+                work_receipt,
+                execution.raw_result,
+            ),
             request_fingerprint,
+            verification_receipt,
         )
         if outbox_item:
             if executed:
@@ -248,6 +403,78 @@ def _outbox_receipt(item: dict | None) -> dict | None:
     }
 
 
+def _run_runtime_bound_outbox_draft(
+    draft: dict,
+    *,
+    event_id: str,
+    runtime_context: Any,
+) -> tuple[Any, str, dict | None, dict | None]:
+    from terminal.api.obsidian_runtime_bridge import (
+        begin_runtime_approval,
+        fail_runtime_approval,
+        finalize_runtime_cancellation,
+        finalize_runtime_execution,
+        recover_completed_runtime_execution,
+    )
+
+    stored_fingerprint = str(draft.get("approvalFingerprint") or "").strip()
+    args = draft.get("args") if isinstance(draft.get("args"), dict) else {}
+    fingerprint = tool_request_fingerprint(
+        str(draft.get("skillName") or ""),
+        args,
+    )
+    if not stored_fingerprint or stored_fingerprint != fingerprint:
+        raise ValueError("stored draft fingerprint does not match its arguments")
+    recovered = recover_completed_runtime_execution(
+        draft,
+        fingerprint=fingerprint,
+        runtime_context=runtime_context,
+    )
+    if recovered is not None:
+        execution, receipt = recovered
+        return execution, fingerprint, receipt, None
+    binding = begin_runtime_approval(
+        draft,
+        fingerprint=fingerprint,
+        runtime_context=runtime_context,
+    )
+    if binding is None:
+        raise ValueError("stored runtime contract is invalid")
+    token = runtime_context.cancellations.token(binding.run_id)
+    try:
+        try:
+            execution = _run_approved_draft(draft, cancellation_token=token)
+        except Exception as exc:
+            fail_runtime_approval(
+                draft,
+                runtime_context=runtime_context,
+                summary=str(exc),
+                error_code="obsidian_write_exception",
+            )
+            raise
+        with token.finalization_guard() as cancellation_requested:
+            if cancellation_requested:
+                cancellation = finalize_runtime_cancellation(
+                    draft,
+                    execution,
+                    token,
+                    fingerprint=fingerprint,
+                    event_id=event_id,
+                    runtime_context=runtime_context,
+                )
+                return execution, fingerprint, None, cancellation
+            receipt = finalize_runtime_execution(
+                draft,
+                execution,
+                fingerprint=fingerprint,
+                event_id=event_id,
+                runtime_context=runtime_context,
+            )
+            return execution, fingerprint, receipt, None
+    finally:
+        runtime_context.cancellations.release(binding.run_id)
+
+
 def _retry_tool_outbox(item_id: str, runtime_context) -> dict:
     if runtime_context is None:
         return {"ok": False, "error": "runtime_context_required"}
@@ -279,21 +506,56 @@ def _retry_tool_outbox(item_id: str, runtime_context) -> dict:
         )
         return {"ok": False, "error": "stored_draft_missing", "outbox": _outbox_receipt(failed)}
     event_id = str(draft.get("eventId") or item_id)
+    fingerprint = ""
+    verification_receipt = None
+    cancellation = None
     try:
-        execution = _run_approved_draft(draft)
+        if "runtimeContract" in draft:
+            execution, fingerprint, verification_receipt, cancellation = (
+                _run_runtime_bound_outbox_draft(
+                    draft,
+                    event_id=event_id,
+                    runtime_context=runtime_context,
+                )
+            )
+        else:
+            execution = _run_approved_draft(draft)
     except Exception as exc:
         failed = mark_failed(
             runtime_context.db_path, item_id, str(exc), now=runtime_context.now(),
         )
         return {"ok": False, "error": str(exc), "outbox": _outbox_receipt(failed)}
+    if cancellation is not None:
+        response = {
+            "ok": True,
+            "eventId": event_id,
+            "decision": "approved",
+            "executed": False,
+            "runtimeContract": draft.get("runtimeContract"),
+            **cancellation,
+        }
+        final_item = mark_failed(
+            runtime_context.db_path,
+            item_id,
+            str(response.get("message") or "runtime cancelled"),
+            now=runtime_context.now(),
+        )
+        response["outbox"] = _outbox_receipt(final_item)
+        return response
     response = _finalize_approval(
         event_id, "approved", draft,
         ApprovalExecution(
             execution.executed, execution.output, execution.message,
             execution.work_receipt, execution.raw_result,
         ),
-        "",
+        fingerprint,
+        verification_receipt,
     )
+    if (
+        isinstance(execution.raw_result, dict)
+        and execution.raw_result.get("runtimeReused") is True
+    ):
+        response["reused"] = True
     if execution.executed:
         final_item = mark_sent(
             runtime_context.db_path, item_id, response, now=runtime_context.now(),

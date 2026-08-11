@@ -63,6 +63,16 @@ current_expert = "default"                      # default | developer | video-co
 covenant_dir = "~/.archer/history/covenant/"    # proposed covenant revisions
 presence_dir = "~/.archer/history/presence/"    # presence change history
 
+[runtime.migration_modes]
+# Runtime Closure domains default to shadow; authoritative requires a passed gate.
+task_plan = "shadow"
+
+[runtime.command_migration_modes.background_job.vault_reflection]
+# Domain authoritative never bypasses these per-command fail-closed modes.
+create = "shadow"
+start = "shadow"
+retry = "shadow"
+
 [persona.modes.mirror]
 name   = "Mirror"
 prompt = "Current mode: mirror. Your only job is to ask questions and clarify. No advice."

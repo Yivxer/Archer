@@ -1,6 +1,6 @@
 import React from 'react'
 import { useShadowFeedback } from '../lib/useShadowFeedback'
-import type { BackgroundJob, ExpertStarter, MemoryContextMode, ObsidianContextMode, Route } from '../types'
+import type { BackgroundJob, ExpertStarter, MemoryContextMode, ObsidianContextMode, Route, RuntimeRun } from '../types'
 import { ShadowCandidateCard } from './ShadowCandidateCard'
 
 export type WorkspaceJobSummary = {
@@ -21,6 +21,7 @@ export function WorkspaceContextPanel({
   sidebarJobs,
   workspaceJobsState,
   activeSidebarJobCount,
+  runtimeRuns,
   homeStarters,
   onUseStarter,
   onNavigate,
@@ -36,6 +37,7 @@ export function WorkspaceContextPanel({
   sidebarJobs: WorkspaceJobSummary[]
   workspaceJobsState: 'idle' | 'loading' | 'error'
   activeSidebarJobCount: number
+  runtimeRuns: RuntimeRun[]
   homeStarters: ExpertStarter[]
   onUseStarter: (starter: ExpertStarter) => void
   onNavigate?: (route: Route) => void
@@ -74,8 +76,8 @@ export function WorkspaceContextPanel({
           <strong>{obsidianMode}</strong>
         </div>
         <div>
-          <span>任务</span>
-          <strong>{sidebarJobs.length}</strong>
+          <span>Run / 任务</span>
+          <strong>{runtimeRuns.length} / {sidebarJobs.length}</strong>
         </div>
       </div>
       {candidate && (
@@ -88,6 +90,27 @@ export function WorkspaceContextPanel({
           onMute={() => void shadowFeedback.togglePresence()}
           onViewAll={() => onNavigate?.('Today')}
         />
+      )}
+      {runtimeRuns.length > 0 && (
+        <div className="workspace-jobs-panel">
+          <div className="workspace-panel-head">
+            <span>Runtime</span>
+            <button type="button" onClick={() => onNavigate?.('Tasks')}>查看</button>
+          </div>
+          <div className="workspace-job-list">
+            {runtimeRuns.slice(0, 2).map((run) => (
+              <button
+                className={`workspace-job-card run-${run.state}`}
+                key={run.id}
+                type="button"
+                onClick={() => onNavigate?.('Tasks')}
+              >
+                <strong>{run.objective}</strong>
+                <span>{workspaceRunDisplayLabel(run)}</span>
+              </button>
+            ))}
+          </div>
+        </div>
       )}
       <div className="workspace-jobs-panel">
         <div className="workspace-panel-head">
@@ -131,6 +154,24 @@ export function WorkspaceContextPanel({
       </div>
     </aside>
   )
+}
+
+function workspaceRunStateLabel(state: RuntimeRun['state']): string {
+  if (state === 'waiting_approval') return '等待确认'
+  if (state === 'waiting_user') return '等待用户'
+  if (state === 'executing') return '执行中'
+  if (state === 'verifying') return '验证中'
+  if (state === 'uncertain') return '结果待确认'
+  if (state === 'interrupted') return '已中断'
+  if (state === 'cancelling') return '取消中'
+  return '准备中'
+}
+
+function workspaceRunDisplayLabel(run: RuntimeRun): string {
+  if (run.recovery?.classification === 'invalid') return '恢复信息异常'
+  if (run.recovery?.classification === 'manual') return '等待人工继续'
+  if (run.recovery?.classification === 'recoverable') return '可安全重新验证'
+  return workspaceRunStateLabel(run.state)
 }
 
 function workspaceJobStatusLabel(status: BackgroundJob['status']): string {

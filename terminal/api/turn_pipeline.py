@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from typing import Callable
 from uuid import uuid4
 
-
 IntentClassifier = Callable[..., dict]
 
 
@@ -75,6 +74,7 @@ def _plan_event(plan, query: str) -> dict | None:
         "status": "proposed",
         "detail": "先按计划处理；涉及写入、保存或发布的步骤需要用户确认。",
         "prompt": query.strip(),
+        "execution": getattr(plan, "execution", None),
         "steps": [
             {
                 "id": step.id,

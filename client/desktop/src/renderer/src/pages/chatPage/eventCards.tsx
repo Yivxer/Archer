@@ -83,6 +83,11 @@ export function PlanEventCard({
         <em>{plan.status === 'proposed' ? '待确认' : plan.status === 'accepted' ? '已确认' : '已忽略'}</em>
       </div>
       {plan.detail && <div className="plan-event-detail">{plan.detail}</div>}
+      {plan.shadowProjection && ['drifted', 'error'].includes(plan.shadowProjection.status) && (
+        <div className="plan-event-detail">
+          Runtime 影子对比：{plan.shadowProjection.status === 'drifted' ? '发现状态差异' : '当前不可用'}
+        </div>
+      )}
       <ol className="plan-event-steps">
         {plan.steps.map((step: PlanStep) => (
           <li key={step.id}>

@@ -91,4 +91,29 @@ describe('task router', () => {
 
     expect(isForegroundOnlyWritingFeedbackPlan(plan)).toBe(true)
   })
+
+  it('keeps explicit vault reflection plans visible when the note path contains writing keywords', () => {
+    const notePath = '/Users/Yivxer/Vault/月度复盘写作方法：七月复盘后的整理.md'
+    const plan: PlanEvent = {
+      type: 'plan.event',
+      id: 'plan-vault-reflection',
+      sessionId: 's1',
+      createdAt: '2026-07-31T00:00:00Z',
+      title: '结晶笔记：月度复盘写作方法：七月复盘后的整理.md',
+      status: 'proposed',
+      detail: '读取笔记并生成结构化反思。',
+      prompt: `请结晶 \`${notePath}\``,
+      execution: {
+        jobKind: 'vault_reflection',
+        vaultArgs: { notePath, force: false },
+        timeoutSeconds: 600,
+      },
+      steps: [
+        { id: 1, action: 'read_source', tool: 'input_context', requiresApproval: false },
+        { id: 2, action: 'write_obsidian', tool: 'obsidian_write', requiresApproval: true },
+      ],
+    }
+
+    expect(isForegroundOnlyWritingFeedbackPlan(plan)).toBe(false)
+  })
 })

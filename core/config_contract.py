@@ -1,20 +1,20 @@
 """Versioned validation contract for ``archer.toml``."""
 from __future__ import annotations
 
-from copy import deepcopy
 import os
-from pathlib import Path
 import tomllib
+from copy import deepcopy
+from pathlib import Path
 
 import tomli_w
 
 from core.secret_store import migrate_plaintext_api_keys
 
-
 CURRENT_CONFIG_VERSION = 2
 KNOWN_TOP_LEVEL_FIELDS = frozenset({
     "config_version", "api", "model_profiles", "persona", "memory", "paths",
     "context", "ui", "obsidian", "critique", "security", "mcp",
+    "runtime",
 })
 
 
@@ -79,6 +79,68 @@ def _validate_mcp_config(mcp: dict) -> None:
                 )
 
 
+def _validate_runtime_config(runtime: dict) -> None:
+    modes = runtime.get("migration_modes", {})
+    if not isinstance(modes, dict):
+        raise ConfigValidationError("runtime.migration_modes must be a TOML table")
+    from core.authority_migration import REGISTERED_AUTHORITY_DOMAINS
+
+    unknown = sorted(set(modes) - REGISTERED_AUTHORITY_DOMAINS)
+    if unknown:
+        raise ConfigValidationError(
+            f"unknown runtime migration domain(s): {', '.join(unknown)}"
+        )
+    invalid = sorted(
+        domain for domain, mode in modes.items()
+        if mode not in {"shadow", "authoritative"}
+    )
+    if invalid:
+        raise ConfigValidationError(
+            f"invalid runtime migration mode for: {', '.join(invalid)}"
+        )
+    command_modes = runtime.get("command_migration_modes", {})
+    if not isinstance(command_modes, dict):
+        raise ConfigValidationError(
+            "runtime.command_migration_modes must be a TOML table"
+        )
+    unknown_command_domains = sorted(
+        set(command_modes) - {"background_job"}
+    )
+    if unknown_command_domains:
+        raise ConfigValidationError(
+            "unknown command migration domain(s): "
+            f"{', '.join(unknown_command_domains)}"
+        )
+    from core.job_execution_adapter import JobCommand
+
+    background_job = command_modes.get("background_job", {})
+    if not isinstance(background_job, dict):
+        raise ConfigValidationError(
+            "runtime.command_migration_modes.background_job must be a TOML table"
+        )
+    known_commands = {command.value for command in JobCommand}
+    for job_kind, scoped_modes in background_job.items():
+        if not str(job_kind).strip() or not isinstance(scoped_modes, dict):
+            raise ConfigValidationError(
+                "command migration Job kind must be a non-empty TOML table"
+            )
+        unknown_commands = sorted(set(scoped_modes) - known_commands)
+        if unknown_commands:
+            raise ConfigValidationError(
+                f"unknown Job command(s) for {job_kind}: "
+                f"{', '.join(unknown_commands)}"
+            )
+        invalid_commands = sorted(
+            command for command, mode in scoped_modes.items()
+            if mode not in {"shadow", "authoritative"}
+        )
+        if invalid_commands:
+            raise ConfigValidationError(
+                f"invalid Job command migration mode for {job_kind}: "
+                f"{', '.join(invalid_commands)}"
+            )
+
+
 def validate_config(raw: object) -> dict:
     if not isinstance(raw, dict):
         raise ConfigValidationError("archer.toml root must be a TOML table")
@@ -97,7 +159,10 @@ def validate_config(raw: object) -> dict:
             f"config_version {version} is newer than supported version {CURRENT_CONFIG_VERSION}"
         )
 
-    for section in ("api", "model_profiles", "memory", "paths", "persona", "security", "mcp"):
+    for section in (
+        "api", "model_profiles", "memory", "paths", "persona", "security",
+        "mcp", "runtime",
+    ):
         value = cfg.get(section)
         if value is not None and not isinstance(value, dict):
             raise ConfigValidationError(f"[{section}] must be a TOML table")
@@ -125,6 +190,10 @@ def validate_config(raw: object) -> dict:
     mcp = cfg.get("mcp", {})
     if isinstance(mcp, dict):
         _validate_mcp_config(mcp)
+
+    runtime = cfg.get("runtime", {})
+    if isinstance(runtime, dict):
+        _validate_runtime_config(runtime)
 
     cfg["config_version"] = CURRENT_CONFIG_VERSION
     return cfg

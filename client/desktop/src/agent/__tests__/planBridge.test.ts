@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildPlanChildJobSpecs, buildPlanCoordinatorPrompt, buildPlanExecutionPrompt, planWithStatus } from '../planBridge'
+import { buildConfirmedPlanJobPayload, buildPlanChildJobSpecs, buildPlanCoordinatorPrompt, buildPlanExecutionPrompt, buildPlanResultSessionMessages, planWithStatus } from '../planBridge'
 import type { PlanEvent } from '../contracts'
 
 const samplePlan: PlanEvent = {
@@ -36,10 +36,25 @@ describe('plan bridge', () => {
   })
 
   it('updates plan status while preserving id', () => {
-    const accepted = planWithStatus(samplePlan, 'accepted')
+    const accepted = planWithStatus({
+      ...samplePlan,
+      shadowProjection: {
+        adapter: 'shadow.task_plan',
+        planId: 'plan-1',
+        traceId: 'trace-plan-1',
+        runId: 'run-task-plan-1',
+        legacyStatus: 'proposed',
+        shadowState: 'waiting_user',
+        status: 'aligned',
+        created: true,
+        differences: [],
+      },
+    }, 'accepted')
 
     expect(accepted.id).toBe('plan-1')
     expect(accepted.status).toBe('accepted')
+    expect(accepted.shadowProjection?.status).toBe('unsupported')
+    expect(accepted.shadowProjection?.differences[0]?.field).toBe('legacy.status')
   })
 
   it('builds child job specs with approval gating', () => {
@@ -56,5 +71,56 @@ describe('plan bridge', () => {
 
     expect(prompt).toContain('[计划协调任务]')
     expect(prompt).toContain('write_obsidian')
+  })
+
+  it('builds an accepted vault reflection job with shadow correlation', () => {
+    const payload = buildConfirmedPlanJobPayload({
+      ...samplePlan,
+      execution: {
+        jobKind: 'vault_reflection',
+        vaultArgs: { notePath: '/Users/example/Vault/note.md', force: false },
+        timeoutSeconds: 600,
+      },
+      shadowProjection: {
+        adapter: 'shadow.task_plan',
+        planId: 'plan-1',
+        traceId: 'trace-1',
+        runId: 'run-1',
+        legacyStatus: 'proposed',
+        shadowState: 'waiting_user',
+        status: 'aligned',
+        created: true,
+        differences: [],
+      },
+    })
+
+    expect(payload.kind).toBe('vault_reflection')
+    expect(payload.runtimeShadowRunId).toBe('run-1')
+    expect(payload.vaultArgs).toEqual({
+      note_path: '/Users/example/Vault/note.md',
+      force: false,
+    })
+  })
+
+  it('preserves the plan request when saving a recovered result-only session', () => {
+    const messages = buildPlanResultSessionMessages(samplePlan, [], '结晶完成')
+
+    expect(messages).toEqual([
+      { role: 'user', content: samplePlan.prompt },
+      { role: 'assistant', content: '结晶完成' },
+    ])
+  })
+
+  it('does not duplicate an existing user turn when saving a plan result', () => {
+    const messages = buildPlanResultSessionMessages(
+      samplePlan,
+      [{ role: 'user', content: '已有请求' }],
+      '结晶完成',
+    )
+
+    expect(messages).toEqual([
+      { role: 'user', content: '已有请求' },
+      { role: 'assistant', content: '结晶完成' },
+    ])
   })
 })

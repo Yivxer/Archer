@@ -18,6 +18,10 @@ export function isHugoBlogPublishPlan(plan: PlanEvent, contextText = ''): boolea
 }
 
 export function isForegroundOnlyWritingFeedbackPlan(plan: PlanEvent): boolean {
+  // A structured execution contract is an explicit background handoff. Do not let
+  // path/title keywords (for example a note named "写作方法") override it.
+  if (plan.execution?.jobKind === 'vault_reflection') return false
+
   const requestText = (plan.prompt || '').toLowerCase()
   const planText = [
     plan.prompt,

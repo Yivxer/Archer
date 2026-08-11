@@ -214,7 +214,157 @@ export type ToolApprovalResult = {
   workReceipt?: WorkReceipt
 }
 
+export type RuntimeRunState =
+  | 'received'
+  | 'understanding'
+  | 'planning'
+  | 'waiting_user'
+  | 'waiting_approval'
+  | 'executing'
+  | 'verifying'
+  | 'uncertain'
+  | 'interrupted'
+  | 'cancelling'
+  | 'completed'
+  | 'failed'
+  | 'cancelled'
+
+export type RuntimeRecoveryClassification =
+  | 'recoverable'
+  | 'waiting'
+  | 'manual'
+  | 'invalid'
+
+export type RuntimeRecoveryItem = {
+  runId: string
+  originalState: RuntimeRunState
+  classification: RuntimeRecoveryClassification
+  reason: string
+  adapter?: string
+  checkpointId?: string
+  attempted: boolean
+  resultingState?: RuntimeRunState
+  verificationStatus?: 'verified' | 'failed' | 'uncertain'
+}
+
+export type RuntimeRun = {
+  id: string
+  objective: string
+  source: string
+  state: RuntimeRunState
+  currentStepId?: string
+  recovery?: RuntimeRecoveryItem
+  createdAt: string
+  updatedAt: string
+}
+
+export type RuntimeRunListResult = {
+  ok: boolean
+  runContractVersion: number
+  scope: 'non_terminal'
+  runs: RuntimeRun[]
+  recovery: {
+    counts: Record<RuntimeRecoveryClassification, number>
+    items: RuntimeRecoveryItem[]
+  }
+  shadowRunCount?: number
+}
+
+export type RuntimeVerificationRetryResult = {
+  ok: boolean
+  runContractVersion: number
+  run: RuntimeRun
+  verificationReceipt: {
+    id: string
+    status: 'verified' | 'failed' | 'uncertain'
+    summary: string
+  }
+}
+
+export type RuntimeCancellationResult = {
+  ok: boolean
+  runContractVersion: number
+  run: RuntimeRun
+  cancellationRequested: boolean
+}
+
+export type TaskPlanLifecycleStatus = 'accepted' | 'dismissed'
+
+export type TaskPlanLifecycleObservation = {
+  id: string
+  run_id: string
+  plan_id: string
+  trace_id: string
+  legacy_status: TaskPlanLifecycleStatus
+  handoff: 'legacy_job_unmigrated' | 'none'
+  runtime_execution_claimed: false
+  observed_at: string
+}
+
+export type TaskPlanObservationResult = {
+  ok: boolean
+  runContractVersion: number
+  run: RuntimeRun
+  observation: TaskPlanLifecycleObservation
+}
+
 export type BackgroundJobStatus = 'queued' | 'running' | 'waiting_approval' | 'complete' | 'failed' | 'cancelled'
+
+export type TaskPlanJobEvidenceSummary = {
+  createCommandId?: string
+  startCommandId?: string
+  artifactId?: string
+  contentFingerprint?: string
+  attemptId?: string
+  attemptIdentitySource?: string
+  verificationId?: string
+  verificationArtifactId?: string
+  verificationExpectedFingerprint?: string
+  verificationObservedFingerprint?: string
+  verificationStatus?: 'verified' | 'failed' | 'uncertain'
+  verifier?: string
+  verificationReason?: string
+  outcomeVerificationId?: string
+  outcomeStatus?: 'verified' | 'failed' | 'uncertain'
+  outcomeVerifier?: string
+  outcomeReason?: string
+}
+
+export type TaskPlanJobBinding = {
+  id: string
+  run_id: string
+  plan_id: string
+  legacy_job_id: string
+  job_kind: string
+  runtime_execution_claimed: false
+  bound_at: string
+}
+
+export type TaskPlanJobObservation = {
+  id: string
+  binding_id: string
+  run_id: string
+  legacy_job_id: string
+  legacy_status: BackgroundJobStatus
+  job_updated_at: string
+  observed_at: string
+  verification_receipt_id: string
+  evidence_summary: TaskPlanJobEvidenceSummary
+  runtime_state_changed: false
+}
+
+export type TaskPlanJobBindingResult = {
+  ok: boolean
+  runContractVersion: number
+  run: RuntimeRun
+  binding: TaskPlanJobBinding
+}
+
+export type TaskPlanJobObservationResult = {
+  ok: boolean
+  runContractVersion: number
+  observation: TaskPlanJobObservation
+}
 
 export type BackgroundJob = {
   id: string
@@ -225,9 +375,32 @@ export type BackgroundJob = {
   result: string
   createdAt: string
   updatedAt: string
+  createCommandId?: string
+  startCommandId?: string
   timeoutSeconds?: number
   error?: string
   stale?: boolean
+  resultArtifact?: {
+    id: string
+    contentFingerprint: string
+    attemptId: string
+    attemptIdentitySource: string
+  }
+  resultVerification?: {
+    id: string
+    artifactId: string
+    expectedFingerprint?: string | null
+    observedFingerprint?: string | null
+    status: 'verified' | 'failed' | 'uncertain'
+    verifier: string
+    reason: string
+  }
+  outcomeVerification?: {
+    id: string
+    status: 'verified' | 'failed' | 'uncertain'
+    verifier: string
+    reason: string
+  }
   /** Isolated subagent context (P5.4) */
   isolated?: boolean
   /** Pending tool approval context when status is 'waiting_approval' */

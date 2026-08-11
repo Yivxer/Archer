@@ -31,6 +31,60 @@ def test_invalid_section_and_profile_are_rejected():
         validate_config({"surprise": {}})
 
 
+def test_runtime_migration_modes_are_allowlisted_and_fail_closed():
+    config = validate_config({
+        "runtime": {"migration_modes": {"task_plan": "shadow"}},
+    })
+    assert config["runtime"]["migration_modes"]["task_plan"] == "shadow"
+    with pytest.raises(ConfigValidationError, match="unknown runtime migration"):
+        validate_config({
+            "runtime": {"migration_modes": {"unknown": "shadow"}},
+        })
+    with pytest.raises(ConfigValidationError, match="invalid runtime migration"):
+        validate_config({
+            "runtime": {"migration_modes": {"task_plan": "live"}},
+        })
+
+
+def test_background_job_command_migration_modes_are_explicit_and_scoped():
+    config = validate_config({
+        "runtime": {
+            "migration_modes": {"background_job": "authoritative"},
+            "command_migration_modes": {
+                "background_job": {
+                    "vault_reflection": {
+                        "create": "authoritative",
+                        "start": "shadow",
+                    },
+                },
+            },
+        },
+    })
+
+    scoped = config["runtime"]["command_migration_modes"]["background_job"]
+    assert scoped["vault_reflection"]["create"] == "authoritative"
+    with pytest.raises(ConfigValidationError, match="unknown Job command"):
+        validate_config({
+            "runtime": {
+                "command_migration_modes": {
+                    "background_job": {
+                        "vault_reflection": {"launch": "authoritative"},
+                    },
+                },
+            },
+        })
+    with pytest.raises(ConfigValidationError, match="invalid Job command"):
+        validate_config({
+            "runtime": {
+                "command_migration_modes": {
+                    "background_job": {
+                        "vault_reflection": {"create": "live"},
+                    },
+                },
+            },
+        })
+
+
 def test_enabled_mcp_server_requires_explicit_tool_permissions():
     with pytest.raises(ConfigValidationError, match="permissions is required"):
         validate_config({

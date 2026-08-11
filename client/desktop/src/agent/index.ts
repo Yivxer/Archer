@@ -2,12 +2,14 @@ export { agentEventSchema, parseAgentEvent } from './contractSchemas'
 export { createEventLog, createPersistentEventLog } from './eventLog'
 export type { EventLog, EventLogStorage } from './eventLog'
 export {
+  buildConfirmedPlanJobPayload,
   buildPlanChildJobSpecs,
   buildPlanCoordinatorPrompt,
   buildPlanExecutionPrompt,
+  buildPlanResultSessionMessages,
   planWithStatus,
 } from './planBridge'
-export type { PlanChildJobSpec } from './planBridge'
+export type { ConfirmedPlanJobPayload, PlanChildJobSpec, PlanResultSessionMessage } from './planBridge'
 export { jobSnapshotToAgentEvent } from './jobBridge'
 export type { RuntimeJobSnapshot } from './jobBridge'
 export { createJobRunner } from './jobRunner'
@@ -29,6 +31,7 @@ export type {
   JobStatus,
   OrchestrationEvent,
   PlanEvent,
+  PlanExecution,
   PlanStatus,
   PlanStep,
   RiskLevel,

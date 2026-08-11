@@ -772,8 +772,8 @@ def _iter_chat_chunks_impl(
         obsidian_target_path=obsidian_target_path,
         hugo_blog_triggered=hugo_blog_triggered,
         dependencies=_post_reply_draft_dependencies(),
+        runtime_context=runtime_context, trace_id=trace_id,
     )
-
     for event in _yield_memory_compaction_events():
         yield event
 

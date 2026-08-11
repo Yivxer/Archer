@@ -864,19 +864,18 @@ export async function createBackgroundJob(payload: {
   prompt: string
   autoStart?: boolean
   timeoutSeconds?: number
+  runtimeShadowRunId?: string
+  vaultArgs?: {
+    note_path: string
+    force: false
+  }
 }): Promise<BackgroundJobCreateResult> {
   return postJson<BackgroundJobCreateResult>('/jobs', payload)
 }
 
 export async function createBackgroundJobEvent(
   sessionId: string,
-  payload: {
-    title: string
-    kind?: string
-    prompt: string
-    autoStart?: boolean
-    timeoutSeconds?: number
-  }
+  payload: Parameters<typeof createBackgroundJob>[0]
 ): Promise<{ result: BackgroundJobCreateResult; event: AgentEvent }> {
   const result = await createBackgroundJob(payload)
   return {
@@ -986,19 +985,20 @@ export async function pollBackgroundJobEvents(
     intervalMs?: number
     maxAttempts?: number
     signal?: AbortSignal
+    onSnapshot?: (job: BackgroundJob) => void | Promise<void>
   } = {}
 ): Promise<BackgroundJob> {
   const intervalMs = options.intervalMs ?? 1200
   const maxAttempts = options.maxAttempts ?? 120
   let lastEventId = ''
   let latestJob: BackgroundJob | undefined
-
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     if (options.signal?.aborted) {
       throw new DOMException('Background job polling was aborted', 'AbortError')
     }
     const { job, event } = await fetchBackgroundJobEvent(sessionId, jobId)
     latestJob = job
+    await options.onSnapshot?.(job)
     if (event.id !== lastEventId) {
       onAgentEvent(event)
       lastEventId = event.id
@@ -1008,7 +1008,6 @@ export async function pollBackgroundJobEvents(
     }
     await new Promise((resolve) => window.setTimeout(resolve, intervalMs))
   }
-
   if (latestJob) return latestJob
   throw new Error('[job] background job polling ended before receiving a job snapshot')
 }

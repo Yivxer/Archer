@@ -25,7 +25,7 @@ def _messages(count: int) -> list[dict]:
 
 def test_schema_v3_and_context_capsule_round_trip(tmp_path: Path) -> None:
     db_path = tmp_path / "archer.db"
-    assert run_migrations(db_path).version == LATEST_SCHEMA_VERSION == 4
+    assert run_migrations(db_path).version == LATEST_SCHEMA_VERSION
     saved = update_thread_context("thread-1", _messages(40), db_path=db_path)
     register_thread_session("thread-1", "session-1", db_path=db_path)
     loaded = get_thread_context("thread-1", db_path=db_path)

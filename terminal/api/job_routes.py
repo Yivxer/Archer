@@ -6,13 +6,32 @@ import json
 import threading
 from datetime import datetime
 
+from core.job_execution_adapter import (
+    JobCommand,
+    JobCommandCollisionError,
+    claim_legacy_job_start,
+    job_command_id,
+    legacy_create_command_identity,
+    legacy_job_attempt_identity,
+    reconcile_legacy_job_restart,
+    restore_legacy_job_command_metadata,
+)
+from core.job_result_evidence import restore_legacy_job_result_evidence
+from core.job_terminal_finalize import JobTerminalFinalizeStaleError
 from infrastructure.observability import (
     bind_trace_context,
     clear_trace_context,
     get_logger,
 )
+from terminal.api import job_approval, job_cancellation
 from terminal.api._config import ROOT, _load_config
 from terminal.api._tools import _failure_hint_event
+from terminal.api.job_result_evidence import complete_legacy_job_result
+from terminal.api.job_terminal_finalize import (
+    finalize_legacy_job_failure,
+    restore_legacy_job_terminal_finalize,
+    try_rollup_legacy_parent_result as _try_rollup_parent_result,
+)
 
 BACKGROUND_JOBS: dict[str, dict] = {}
 BACKGROUND_JOB_LOCK = threading.Lock()
@@ -61,10 +80,14 @@ def _clean_job_record(raw: object) -> dict | None:
     vault_args = raw.get("vaultArgs")
     if isinstance(vault_args, dict) and vault_args:
         job["vaultArgs"] = vault_args
-    if status in {"running", "waiting_approval"}:
-        job["status"] = "failed"
-        job["error"] = "job interrupted by API restart"
-        job["updatedAt"] = datetime.now().isoformat()
+    restore_legacy_job_command_metadata(raw, job)
+    restore_legacy_job_result_evidence(raw, job)
+    reconcile_legacy_job_restart(raw, job, reconciled_at=datetime.now().isoformat())
+    job_approval.restore_legacy_job_approval(raw, job)
+    restore_legacy_job_terminal_finalize(raw, job)
+    job_cancellation.restore_legacy_job_cancellation(
+        raw, job, reconciled_at=datetime.now().isoformat()
+    )
     return job
 
 
@@ -173,6 +196,11 @@ def _create_job(payload: dict) -> dict:
     timeout_seconds = _clean_job_timeout(payload.get("timeoutSeconds"))
     stale_seconds = _clean_job_stale_seconds(payload.get("staleSeconds"))
     parent_job_id = str(payload.get("parentJobId", "")).strip() or None
+    command_id, payload_fingerprint = legacy_create_command_identity(
+        payload,
+        timeout_seconds=timeout_seconds,
+        stale_seconds=stale_seconds,
+    )
 
     job_id = f"job-{uuid4().hex[:8]}"
     created_at = datetime.now().isoformat()
@@ -192,9 +220,21 @@ def _create_job(payload: dict) -> dict:
     vault_args = payload.get("vaultArgs")
     if isinstance(vault_args, dict) and vault_args:
         job["vaultArgs"] = vault_args
+    if command_id and payload_fingerprint:
+        job["createCommandId"] = command_id
+        job["createPayloadFingerprint"] = payload_fingerprint
 
     with BACKGROUND_JOB_LOCK:
         _load_jobs_locked()
+        if command_id and payload_fingerprint:
+            existing = next((
+                item for item in BACKGROUND_JOBS.values()
+                if item.get("createCommandId") == command_id
+            ), None)
+            if existing is not None:
+                if existing.get("createPayloadFingerprint") != payload_fingerprint:
+                    raise JobCommandCollisionError(command_id)
+                return {"ok": True, "job": dict(existing), "replayed": True}
 
         # Link to parent if specified
         if parent_job_id and parent_job_id in BACKGROUND_JOBS:
@@ -210,8 +250,61 @@ def _create_job(payload: dict) -> dict:
 
     response_job = dict(job)
     if payload.get("autoStart", True) is not False:
-        _start_job(job_id)
-    return {"ok": True, "job": response_job}
+        shadow_run_id = str(payload.get("runtimeShadowRunId", "")).strip()
+        shadow_step_id = str(payload.get("runtimeShadowStepId", "")).strip()
+        start_command_id = (
+            job_command_id(
+                shadow_run_id,
+                shadow_step_id,
+                JobCommand.START,
+                command_id,
+            )
+            if command_id and shadow_run_id and shadow_step_id
+            else None
+        )
+        if start_command_id:
+            _start_job(
+                job_id,
+                command_id=start_command_id,
+                expected_status="queued",
+                expected_updated_at=created_at,
+            )
+            response_job["startCommandId"] = start_command_id
+        else:
+            _start_job(job_id)
+    return {"ok": True, "job": response_job, "replayed": False}
+
+
+def _create_job_response(
+    payload: dict,
+    runtime_context=None,
+) -> tuple[int, dict]:
+    prepared = payload
+    if runtime_context is not None:
+        from terminal.api.job_cutover_shadow import prepare_shadow_create_payload
+
+        try:
+            prepared = prepare_shadow_create_payload(payload, runtime_context)
+        except Exception as exc:
+            if (
+                str(payload.get("kind", "")).strip() == "vault_reflection"
+                and str(payload.get("runtimeShadowRunId", "")).strip()
+            ):
+                return 409, {
+                    "ok": False,
+                    "error": "invalid_vault_reflection_shadow_handoff",
+                    "message": str(exc),
+                }
+            prepared = payload
+    try:
+        return 200, _create_job(prepared)
+    except JobCommandCollisionError as exc:
+        return 409, {
+            "ok": False,
+            "error": "job_command_collision",
+            "message": str(exc),
+            "commandId": exc.command_id,
+        }
 
 
 def _list_jobs() -> dict:
@@ -254,6 +347,8 @@ def _job_detail(job_id: str) -> dict | None:
 
 
 def _update_job(job_id: str, **updates: object) -> None:
+    if updates.get("status") in {"complete", "failed", "cancelled"}:
+        raise ValueError("terminal Job state requires terminal finalize authority")
     with BACKGROUND_JOB_LOCK:
         _load_jobs_locked()
         job = BACKGROUND_JOBS.get(job_id)
@@ -268,6 +363,30 @@ def _job_failure_keyword(error: object, *, stage: str) -> str:
     exc = error if isinstance(error, Exception) else RuntimeError(str(error or "unknown error"))
     hint = _failure_hint_event(exc, stage=stage)
     return str(hint.get("keyword") or "runtime_failure")
+
+
+def _finalize_job_failure_safely(
+    job_id: str,
+    *,
+    attempt_id: str,
+    error: str,
+    failure_keyword: str,
+    source: str,
+) -> None:
+    try:
+        finalize_legacy_job_failure(
+            job_id,
+            error=error,
+            failure_keyword=failure_keyword,
+            source=source,
+            expected_attempt_id=attempt_id,
+        )
+    except JobTerminalFinalizeStaleError:
+        _log.warning(
+            "job_failure_finalize_stale",
+            job_id=job_id,
+            source=source,
+        )
 
 
 def _active_child_job_count_locked() -> int:
@@ -306,41 +425,6 @@ def _kick_queued_children(parent_id: str | None = None) -> None:
     for child_id in to_start:
         worker = threading.Thread(target=_run_job, args=(child_id,), daemon=True)
         worker.start()
-
-
-def _try_rollup_parent_result(parent_id: str) -> bool:
-    """Auto-aggregate child results into parent job when all children are done."""
-    with BACKGROUND_JOB_LOCK:
-        parent = BACKGROUND_JOBS.get(parent_id)
-        if not parent:
-            return False
-        child_ids: list = parent.get("childJobIds") or []
-        if not child_ids:
-            return False
-        for cid in child_ids:
-            child = BACKGROUND_JOBS.get(cid)
-            if child and child.get("status") in ("queued", "running", "waiting_approval"):
-                return False
-        lines: list[str] = []
-        for cid in child_ids:
-            child = BACKGROUND_JOBS.get(cid)
-            if not child:
-                continue
-            title = str(child.get("title", "")).replace("[子] ", "").strip()
-            status = str(child.get("status", "?"))
-            result = str(child.get("result", "") or "").strip()
-            error = str(child.get("error", "") or "").strip()
-            lines.append(f"## {title} [{status}]")
-            if result:
-                lines.append(result)
-            elif error:
-                lines.append(f"错误：{error}")
-            lines.append("")
-        parent["result"] = "\n".join(lines).strip()
-        parent["status"] = "complete"
-        parent["updatedAt"] = datetime.now().isoformat()
-        _persist_jobs_locked()
-        return True
 
 
 def _run_isolated_child_job_chat(prompt: str, job: dict) -> dict:
@@ -413,7 +497,7 @@ def _run_job_chat_with_tools(prompt: str, job_id: str) -> dict:
 
         from core.context import classify_query_intent
         from core.llm import stream_chat
-        from terminal.api._tools import _select_api_skills, _filter_api_skills_for_intent
+        from terminal.api._tools import _filter_api_skills_for_intent, _select_api_skills
 
         config = _load_config()
         intent_info = classify_query_intent(prompt)
@@ -460,7 +544,16 @@ def _run_job(job_id: str) -> None:
         if not job:
             _log.warning("job_run_missing", job_id=job_id)
             return
+        if job_cancellation.job_cancellation_checkpoint(
+            job_id,
+            stage="before_worker",
+            side_effect_started=False,
+        ):
+            return
         _update_job(job_id, status="running")
+        with BACKGROUND_JOB_LOCK:
+            current_job = dict(BACKGROUND_JOBS.get(job_id) or {})
+        attempt_id, _ = legacy_job_attempt_identity(current_job)
         result_holder: dict[str, object] = {}
         cancel_flag = {"cancelled": False}  # 共享标志，超时后置 True，_execute_chat 内部检查
 
@@ -468,7 +561,7 @@ def _run_job(job_id: str) -> None:
             # structlog contextvars 不跨线程继承，子线程内重新 bind
             bind_trace_context(trace_id=trace_id, job_id=job_id, stage="job_chat")
             try:
-                if cancel_flag["cancelled"]:
+                if cancel_flag["cancelled"] or job_cancellation.job_cancellation_checkpoint(job_id, stage="before_model", side_effect_started=False):
                     return  # 超时后不再发起 LLM 调用，避免泄漏 API 配额
                 prompt = str(job.get("prompt", ""))
                 response = _run_job_chat_with_tools(prompt, job_id)
@@ -489,7 +582,7 @@ def _run_job(job_id: str) -> None:
             try:
                 if cancel_flag["cancelled"]:
                     return
-                from workflows.vault_reflection import reflect_on_recent, reflect_on_note
+                from workflows.vault_reflection import reflect_on_note, reflect_on_recent
                 args = job.get("vaultArgs") or {}
                 progress_log: list[dict] = []
                 def _on_progress(p: dict) -> None:
@@ -537,9 +630,16 @@ def _run_job(job_id: str) -> None:
         timeout_seconds = _clean_job_timeout(job.get("timeoutSeconds"))
         chat_thread = threading.Thread(target=execute_fn, daemon=True)
         chat_thread.start()
-        chat_thread.join(timeout=timeout_seconds)
+        wait_outcome = job_cancellation.wait_for_legacy_job_worker(
+            job_id,
+            chat_thread,
+            timeout_seconds=timeout_seconds,
+            cancel_flag=cancel_flag,
+        )
 
-        if chat_thread.is_alive():
+        if wait_outcome == "cancelled":
+            return
+        if wait_outcome == "timeout":
             # 超时：设置取消标志，通知 _execute_chat 不再写入结果
             cancel_flag["cancelled"] = True
             with BACKGROUND_JOB_LOCK:
@@ -547,12 +647,12 @@ def _run_job(job_id: str) -> None:
             if current_status == "cancelled":
                 return
             _log.warning("job_run_timeout", job_id=job_id, timeout_seconds=timeout_seconds)
-            _update_job(
+            _finalize_job_failure_safely(
                 job_id,
-                status="failed",
-                result="",
+                attempt_id=attempt_id,
                 error=f"job timed out after {timeout_seconds}s",
-                failureKeyword="command_timeout",
+                failure_keyword="command_timeout",
+                source="worker_timeout",
             )
             return
 
@@ -566,29 +666,46 @@ def _run_job(job_id: str) -> None:
                     "job_run_complete", job_id=job_id,
                     result_len=len(str(result_holder.get("text", ""))),
                 )
-                _update_job(job_id, status="complete", result=str(result_holder.get("text", "")))
+                complete_legacy_job_result(
+                    job_id,
+                    str(result_holder.get("text", "")),
+                    expected_attempt_id=attempt_id,
+                )
             else:
                 error = str(result_holder.get("error", "unknown error"))
                 _log.warning("job_run_failed", job_id=job_id, error=error)
-                _update_job(
+                _finalize_job_failure_safely(
                     job_id,
-                    status="failed",
-                    result="",
+                    attempt_id=attempt_id,
                     error=error,
-                    failureKeyword=_job_failure_keyword(error, stage="background_job"),
+                    failure_keyword=_job_failure_keyword(
+                        error,
+                        stage="background_job",
+                    ),
+                    source="worker_error",
                 )
+        except JobTerminalFinalizeStaleError:
+            _log.warning(
+                "job_result_finalize_stale",
+                job_id=job_id,
+                attempt_id=attempt_id,
+            )
+            return
         except Exception as exc:
             with BACKGROUND_JOB_LOCK:
                 current_status = str(BACKGROUND_JOBS.get(job_id, {}).get("status", ""))
             if current_status == "cancelled":
                 return
             _log.error("job_run_persist_failed", job_id=job_id, error=str(exc))
-            _update_job(
+            _finalize_job_failure_safely(
                 job_id,
-                status="failed",
-                result="",
+                attempt_id=attempt_id,
                 error=str(exc),
-                failureKeyword=_job_failure_keyword(exc, stage="background_job"),
+                failure_keyword=_job_failure_keyword(
+                    exc,
+                    stage="background_job",
+                ),
+                source="result_finalize_error",
             )
 
         parent_id = job.get("parentJobId")
@@ -599,144 +716,31 @@ def _run_job(job_id: str) -> None:
         clear_trace_context("trace_id", "job_id", "stage")
 
 
-def _start_job(job_id: str) -> None:
+def _start_job(
+    job_id: str,
+    *,
+    command_id: str | None = None,
+    expected_status: str | None = None,
+    expected_updated_at: str | None = None,
+) -> dict:
     with BACKGROUND_JOB_LOCK:
         _load_jobs_locked()
         job = BACKGROUND_JOBS.get(job_id)
         if job and job.get("parentJobId") and not _can_start_child_job_locked():
-            return
-    worker = threading.Thread(target=_run_job, args=(job_id,), daemon=True)
-    worker.start()
-
-
-def _cancel_job(job_id: str) -> dict:
-    with BACKGROUND_JOB_LOCK:
-        _load_jobs_locked()
-        job = BACKGROUND_JOBS.get(job_id)
-        if not job:
-            return {"ok": False, "error": "job_not_found", "id": job_id}
-        if job.get("status") in {"complete", "failed", "cancelled"}:
-            return {"ok": True, "job": dict(job), "message": "job already finished"}
-        job["status"] = "cancelled"
-        job["error"] = "job cancelled by user"
-        job["updatedAt"] = datetime.now().isoformat()
-        _persist_jobs_locked()
-        return {"ok": True, "job": dict(job), "message": "job cancelled"}
-
-
-def _retry_job(job_id: str) -> dict:
-    with BACKGROUND_JOB_LOCK:
-        _load_jobs_locked()
-        job = BACKGROUND_JOBS.get(job_id)
-        if not job:
-            return {"ok": False, "error": "job_not_found", "id": job_id}
-        if job.get("status") in {"queued", "running", "waiting_approval"}:
-            return {"ok": True, "job": dict(job), "message": "job is already active"}
-        job["status"] = "queued"
-        job["result"] = ""
-        job.pop("error", None)
-        job["updatedAt"] = datetime.now().isoformat()
-        _persist_jobs_locked()
-        response_job = dict(job)
-    _start_job(job_id)
-    return {"ok": True, "job": response_job, "message": "job retry queued"}
-
-
-def _approve_job_tool(job_id: str, payload: dict) -> dict:
-    """Approve or deny a pending tool request for a waiting_approval job.
-
-    When approved: execute the tool, update job result with tool output,
-    and set status back to running so the job thread can continue.
-    When denied: set job status to failed with an appropriate error.
-    """
-    event_id = str(payload.get("eventId", "")).strip()
-    decision = str(payload.get("decision", "")).strip()
-    if not event_id:
-        return {"ok": False, "error": "eventId is required", "id": job_id}
-    if decision not in ("approved", "denied"):
-        return {"ok": False, "error": "decision must be approved or denied", "id": job_id}
-
-    # 锁内：读取 pending_tool 并标记为 running，避免长时间持锁阻塞其他任务操作
-    with BACKGROUND_JOB_LOCK:
-        _load_jobs_locked()
-        job = BACKGROUND_JOBS.get(job_id)
-        if not job:
-            return {"ok": False, "error": "job_not_found", "id": job_id}
-        if job.get("status") != "waiting_approval":
-            return {"ok": True, "job": dict(job), "message": f"job status is {job.get('status')}, not waiting_approval"}
-
-        pending_tool = job.get("pendingTool")
-        if not pending_tool or pending_tool.get("eventId") != event_id:
-            return {"ok": False, "error": "pending tool not found or eventId mismatch", "id": job_id}
-
-        if decision == "denied":
-            job["status"] = "failed"
-            job["result"] = ""
-            job["error"] = f"tool {pending_tool.get('displayName', 'unknown')} denied by user"
-            job.pop("pendingTool", None)
-            job["updatedAt"] = datetime.now().isoformat()
+            return {"ok": True, "job": dict(job), "claimed": False, "reason": "child_limit"}
+        claim = claim_legacy_job_start(
+            BACKGROUND_JOBS,
+            job_id,
+            claimed_at=datetime.now().isoformat(),
+            command_id=command_id,
+            expected_status=expected_status,
+            expected_updated_at=expected_updated_at,
+        )
+        if claim.claimed:
             _persist_jobs_locked()
-            return {"ok": True, "job": dict(job), "message": "tool denied, job marked failed"}
-
-        # Approved: 标记为 running，锁外执行工具
-        tool_name = str(pending_tool.get("toolName", ""))
-        draft = pending_tool.get("draft") or {}
-        job["status"] = "running"
-        job["updatedAt"] = datetime.now().isoformat()
-        _persist_jobs_locked()
-
-    # 锁外执行工具：避免 shell/GitHub/Hugo/文件操作长时间阻塞 BACKGROUND_JOB_LOCK
-    result_text = ""
-    error_text = ""
-    try:
-        if tool_name == "shell.execute":
-            from terminal.api._tools import _execute_shell_command
-            output = _execute_shell_command(draft)
-            result_text = f"[shell] {output[:500]}"
-        elif tool_name == "obsidian_write":
-            from terminal.api._tools import _append_obsidian_draft
-            target = _append_obsidian_draft(draft)
-            result_text = f"[obsidian_write] 已写入: {target}"
-        elif tool_name == "github":
-            from terminal.api._tools import _execute_github_operation
-            output = _execute_github_operation(draft)
-            result_text = f"[github] {output[:500]}"
-        elif tool_name == "hugo_blog":
-            # For hugo_blog, execute deploy action
-            action = str((draft.get("args") or {}).get("action", ""))
-            if action == "deploy":
-                from skills.hugo_blog import run as hugo_blog_run
-                output = hugo_blog_run(draft.get("args") or {})
-                result_text = f"[hugo_blog] {str(output)[:500]}"
-            else:
-                result_text = f"[hugo_blog] action={action} approved, check tool output"
-        elif tool_name == "file_ops":
-            # file_ops: write or create file
-            from skills.file_ops import run as file_ops_run
-            output = file_ops_run(draft.get("args") or {})
-            result_text = f"[file_ops] {str(output)[:500]}"
-        else:
-            result_text = f"[{tool_name}] tool approved (no auto-executor for this tool type)"
-    except Exception as exc:
-        error_text = f"tool execution failed: {exc}"
-
-    # 锁内：更新最终结果
-    with BACKGROUND_JOB_LOCK:
-        job = BACKGROUND_JOBS.get(job_id)
-        if job is None:
-            # 任务在执行期间被取消/删除
-            return {"ok": False, "error": "job_not_found", "id": job_id}
-        if error_text:
-            job["status"] = "failed"
-            job["result"] = ""
-            job["error"] = error_text
-        else:
-            job["status"] = "complete"
-            job["result"] = result_text
-        job.pop("pendingTool", None)
-        job["updatedAt"] = datetime.now().isoformat()
-        _persist_jobs_locked()
-        return {"ok": True, "job": dict(job), "message": "tool executed" if decision == "approved" else "tool denied"}
+    if claim.claimed:
+        threading.Thread(target=_run_job, args=(job_id,), daemon=True).start()
+    return claim.to_dict()
 
 
 def _pause_job_for_approval(job_id: str, tool_event: dict) -> None:
@@ -747,7 +751,7 @@ def _pause_job_for_approval(job_id: str, tool_event: dict) -> None:
         if not job:
             return
         job["status"] = "waiting_approval"
-        job["pendingTool"] = {
+        pending_tool = {
             "eventId": str(tool_event.get("id", "")),
             "toolName": str(tool_event.get("name", "")),
             "displayName": str(tool_event.get("draft", {}).get("displayName", tool_event.get("name", ""))),
@@ -757,6 +761,10 @@ def _pause_job_for_approval(job_id: str, tool_event: dict) -> None:
             "draft": tool_event.get("draft") or {},
             "createdAt": datetime.now().isoformat(),
         }
+        pending_tool["fingerprint"] = job_approval.pending_tool_fingerprint(
+            pending_tool
+        )
+        job["pendingTool"] = pending_tool
         job["updatedAt"] = datetime.now().isoformat()
         _persist_jobs_locked()
 
@@ -821,4 +829,3 @@ def _spawn_child_jobs(job_id: str, payload: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
-

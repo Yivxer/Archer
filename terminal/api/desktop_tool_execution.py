@@ -228,6 +228,7 @@ def _iter_obsidian_write_events(query: str, plan):
             "expected_mtime": draft_fields.get("expectedMtime"),
             "expected_size": draft_fields.get("expectedSize"),
             "expected_fingerprint": draft_fields.get("expectedFingerprint"),
+            "expected_exists": draft_fields.get("previewExists"),
         },
         event_id=draft_event_id,
         display_name="obsidian_write",
@@ -544,5 +545,4 @@ def _execute_github_operation(draft: dict) -> str:
         return result
     except Exception as exc:
         return f"GitHub 操作失败：{exc}"
-
 

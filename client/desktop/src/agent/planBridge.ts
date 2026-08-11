@@ -16,11 +16,82 @@ export function buildPlanExecutionPrompt(plan: PlanEvent): string {
   ].join('\n')
 }
 
+export type ConfirmedPlanJobPayload = {
+  title: string
+  kind: string
+  prompt: string
+  timeoutSeconds: number
+  runtimeShadowRunId?: string
+  vaultArgs?: {
+    note_path: string
+    force: false
+  }
+}
+
+export type PlanResultSessionMessage = {
+  role: 'system' | 'user' | 'assistant'
+  content: string
+}
+
+export function buildPlanResultSessionMessages(
+  plan: PlanEvent,
+  messages: PlanResultSessionMessage[],
+  reply: string,
+): PlanResultSessionMessage[] {
+  const source = [...messages]
+  if (!source.some((message) => message.role === 'user')) {
+    source.unshift({
+      role: 'user',
+      content: plan.prompt?.trim() || plan.title,
+    })
+  }
+  return [...source, { role: 'assistant', content: reply }]
+}
+
+export function buildConfirmedPlanJobPayload(plan: PlanEvent): ConfirmedPlanJobPayload {
+  const common = {
+    title: plan.title || '任务计划',
+    prompt: buildPlanExecutionPrompt(plan),
+    runtimeShadowRunId: plan.shadowProjection?.runId,
+  }
+  if (plan.execution?.jobKind === 'vault_reflection') {
+    return {
+      ...common,
+      kind: 'vault_reflection',
+      timeoutSeconds: plan.execution.timeoutSeconds,
+      vaultArgs: {
+        note_path: plan.execution.vaultArgs.notePath,
+        force: false,
+      },
+    }
+  }
+  return {
+    ...common,
+    kind: 'chat',
+    timeoutSeconds: 600,
+  }
+}
+
 export function planWithStatus(plan: PlanEvent, status: PlanStatus): PlanEvent {
+  const shadowProjection = plan.shadowProjection && status !== 'proposed'
+    ? {
+        ...plan.shadowProjection,
+        legacyStatus: status,
+        status: 'unsupported' as const,
+        differences: [
+          {
+            field: 'legacy.status',
+            expected: 'proposed',
+            actual: status,
+          },
+        ],
+      }
+    : plan.shadowProjection
   return {
     ...plan,
     status,
     createdAt: new Date().toISOString(),
+    shadowProjection,
   }
 }
 

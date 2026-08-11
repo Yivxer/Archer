@@ -9,7 +9,6 @@ import pytest
 
 from core.policy import Decision, check
 
-
 ROOT = Path(__file__).resolve().parents[1]
 GOD_FILE_LINE_BASELINE = {
     # Part 10 Wave 4 收尾后收紧（2026-07-17）+ P1 store 拆分（2026-07-18）：
@@ -23,6 +22,204 @@ GOD_FILE_LINE_BASELINE = {
     "client/desktop/src/renderer/src/pages/ChatPage.tsx": 2355,
     "client/desktop/src/renderer/src/adapters/localArcher.ts": 1129,
 }
+
+
+@pytest.mark.contract
+def test_tool_executors_cannot_own_runtime_completion():
+    executor_paths = (
+        "core/tool_runtime.py",
+        "core/api_tool_service.py",
+        "skills/obsidian_write.py",
+    )
+    forbidden_authority = (
+        "core.run_store",
+        "core.step_store",
+        "core.outcome_store",
+        "transition_run(",
+        "transition_step(",
+        "RunState.COMPLETED",
+        "StepState.COMPLETED",
+    )
+
+    for relative_path in executor_paths:
+        source = (ROOT / relative_path).read_text(encoding="utf-8")
+        assert not any(token in source for token in forbidden_authority), relative_path
+
+
+@pytest.mark.contract
+def test_desktop_runtime_state_is_an_http_projection_not_a_fact_store():
+    adapter = (
+        ROOT
+        / "client/desktop/src/renderer/src/adapters/runtimeRunsAdapter.ts"
+    ).read_text(encoding="utf-8")
+    store = (
+        ROOT
+        / "client/desktop/src/renderer/src/lib/runtimeRunStore.ts"
+    ).read_text(encoding="utf-8")
+
+    assert "/runtime/runs" in adapter
+    assert "listRuntimeRuns" in store
+    assert "requestRuntimeCancellation" in store
+    forbidden_local_authority = (
+        "localStorage",
+        "runtime_runs",
+        "runtime_events",
+        "transitionRun",
+        "RunState.COMPLETED",
+        "sqlite",
+    )
+    assert not any(
+        token in adapter or token in store for token in forbidden_local_authority
+    )
+
+
+@pytest.mark.contract
+def test_task_plan_shadow_cannot_execute_or_migrate_legacy_job_authority():
+    source = (ROOT / "core/task_plan_shadow.py").read_text(encoding="utf-8")
+    forbidden_authority = (
+        "tool_runtime",
+        "background_job",
+        "job_routes",
+        "approval_store",
+        "approval_routes",
+        "EXECUTING",
+        "transition_step(",
+        "COMPLETED",
+    )
+
+    assert not any(token in source for token in forbidden_authority)
+
+
+@pytest.mark.contract
+def test_task_plan_observation_can_only_close_or_record_legacy_handoff():
+    source = (ROOT / "core/task_plan_observation.py").read_text(encoding="utf-8")
+    forbidden_authority = (
+        "tool_runtime",
+        "background_job",
+        "job_routes",
+        "approval_store",
+        "approval_routes",
+        "RunState.EXECUTING",
+        "RunState.COMPLETED",
+        "transition_step(",
+    )
+
+    assert "legacy_job_unmigrated" in source
+    assert "runtime_execution_claimed=False" in source
+    assert not any(token in source for token in forbidden_authority)
+
+
+@pytest.mark.contract
+def test_desktop_legacy_plan_status_only_reports_to_shadow_api():
+    chat_page = (
+        ROOT / "client/desktop/src/renderer/src/pages/ChatPage.tsx"
+    ).read_text(encoding="utf-8")
+    adapter = (
+        ROOT
+        / "client/desktop/src/renderer/src/adapters/runtimeRunsAdapter.ts"
+    ).read_text(encoding="utf-8")
+
+    assert "await recordPlanLifecycleStatus(plan, 'accepted')" in chat_page
+    assert "await recordPlanLifecycleStatus(plan, 'dismissed')" in chat_page
+    assert "/runtime/task-plan-shadows/" in adapter
+    assert "Shadow observation must never block" in chat_page
+
+
+@pytest.mark.contract
+def test_task_plan_job_shadow_cannot_claim_runtime_execution():
+    shadow = (ROOT / "core/task_plan_job_shadow.py").read_text(encoding="utf-8")
+
+    assert "runtime_execution_claimed=False" in shadow
+    assert "runtime_state_changed=False" in shadow
+    assert "transition_run" not in shadow
+    assert "transition_step" not in shadow
+    assert "job_routes" not in shadow
+    assert "tool_runtime" not in shadow
+
+
+@pytest.mark.contract
+def test_job_execution_adapter_is_pure_contract_not_an_executor():
+    adapter = (
+        ROOT / "core/job_execution_adapter.py"
+    ).read_text(encoding="utf-8")
+
+    assert "LEGACY_JOB_V0_CAPABILITIES" in adapter
+    assert "RESULT_VERIFICATION" in adapter
+    assert "OUTCOME_VERIFICATION" in adapter
+    assert "transition_run" not in adapter
+    assert "transition_step" not in adapter
+    assert "job_routes" not in adapter
+    assert "BACKGROUND_JOBS" not in adapter
+    assert "threading" not in adapter
+
+
+@pytest.mark.contract
+def test_job_authority_cutover_is_a_decision_contract_not_an_executor():
+    cutover = (
+        ROOT / "core/job_authority_cutover.py"
+    ).read_text(encoding="utf-8")
+    observation = (
+        ROOT / "core/job_cutover_observation.py"
+    ).read_text(encoding="utf-8")
+    evidence_window = (
+        ROOT / "core/job_cutover_evidence_window.py"
+    ).read_text(encoding="utf-8")
+    command_authority = (
+        ROOT / "core/job_command_authority.py"
+    ).read_text(encoding="utf-8")
+    forbidden_authority = (
+        "terminal.api",
+        "job_routes",
+        "tool_runtime",
+        "approval_routes",
+        "transition_run(",
+        "transition_step(",
+        "_start_job(",
+        "_create_job(",
+        "BACKGROUND_JOBS",
+        "threading",
+    )
+
+    assert "record_job_authority_cutover_decision" in cutover
+    assert "authority_enabled=status is JobCutoverStatus.AUTHORITATIVE" in cutover
+    assert "record_job_cutover_observation" in observation
+    assert "review_job_cutover_evidence_window" in evidence_window
+    assert "resolve_job_command_migration_mode" in command_authority
+    assert "authority_enabled: bool = False" in evidence_window
+    assert not any(
+        token in cutover
+        or token in observation
+        or token in evidence_window
+        or token in command_authority
+        for token in forbidden_authority
+    )
+
+
+@pytest.mark.contract
+def test_vault_reflection_worker_does_not_manufacture_approval_reachability():
+    routes = (ROOT / "terminal/api/job_routes.py").read_text(encoding="utf-8")
+    start = routes.index("def _execute_vault_reflection()")
+    end = routes.index("# 按 kind 分派", start)
+    worker = routes[start:end]
+
+    assert "_pause_job_for_approval" not in worker
+    assert "pendingTool" not in worker
+    assert "approve_legacy_job_tool" not in worker
+
+
+@pytest.mark.contract
+def test_job_outcome_verifier_is_pure_and_non_authoritative():
+    verifier = (
+        ROOT / "core/job_outcome_verification.py"
+    ).read_text(encoding="utf-8")
+
+    assert "no_deterministic_verifier_for_kind" in verifier
+    assert "transition_run" not in verifier
+    assert "transition_step" not in verifier
+    assert "terminal.api" not in verifier
+    assert "memory.store" not in verifier
+    assert "workflows." not in verifier
+    assert "BACKGROUND_JOBS" not in verifier
 
 
 def _imports_under(package: str, imported_root: str) -> set[tuple[str, str]]:
@@ -61,7 +258,14 @@ def test_workflows_never_import_terminal_api():
 
 @pytest.mark.contract
 def test_background_jobs_live_in_domain_module_behind_routes_facade():
-    from terminal.api import _routes, job_routes
+    from terminal.api import (
+        _routes,
+        job_approval,
+        job_cancellation,
+        job_retry,
+        job_routes,
+        job_terminal_finalize,
+    )
 
     job_symbols = {
         "BACKGROUND_JOBS",
@@ -71,9 +275,6 @@ def test_background_jobs_live_in_domain_module_behind_routes_facade():
         "_job_detail",
         "_run_job",
         "_start_job",
-        "_cancel_job",
-        "_retry_job",
-        "_approve_job_tool",
         "_pause_job_for_approval",
         "_spawn_child_jobs",
         "_kick_queued_children",
@@ -82,6 +283,22 @@ def test_background_jobs_live_in_domain_module_behind_routes_facade():
 
     for name in job_symbols:
         assert getattr(_routes, name) is getattr(job_routes, name)
+    assert (
+        _routes.retry_legacy_job_response
+        is job_retry.retry_legacy_job_response
+    )
+    assert (
+        _routes.request_legacy_job_cancellation_response
+        is job_cancellation.request_legacy_job_cancellation_response
+    )
+    assert (
+        _routes.approve_legacy_job_tool_response
+        is job_approval.approve_legacy_job_tool_response
+    )
+    assert (
+        job_routes._try_rollup_parent_result
+        is job_terminal_finalize.try_rollup_legacy_parent_result
+    )
 
     routes_tree = ast.parse(
         (ROOT / "terminal/api/_routes.py").read_text(encoding="utf-8")

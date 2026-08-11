@@ -2,12 +2,41 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+from core.orchestrator import build_task_plan
 from terminal.api.turn_pipeline import (
     assemble_model_messages,
     classify_turn,
     orchestrate_turn,
     select_turn_tools,
 )
+
+
+def test_explicit_vault_reflection_builds_confirmable_job_handoff():
+    plan = build_task_plan(
+        "请结晶 `/Users/example/Vault/一篇笔记.md`",
+        SimpleNamespace(needs_job=False, side_effect_level="none"),
+    )
+
+    assert plan is not None
+    assert plan.steps[0].tool == "vault_reflection"
+    assert plan.steps[0].requires_approval is True
+    assert plan.execution == {
+        "jobKind": "vault_reflection",
+        "vaultArgs": {
+            "notePath": "/Users/example/Vault/一篇笔记.md",
+            "force": False,
+        },
+        "timeoutSeconds": 600,
+    }
+
+
+def test_vault_reflection_requires_explicit_quoted_markdown_path():
+    plan = build_task_plan(
+        "帮我结晶最近的笔记",
+        SimpleNamespace(needs_job=False, side_effect_level="none"),
+    )
+
+    assert plan is None
 
 
 def test_classify_turn_separates_current_user_message_from_history():

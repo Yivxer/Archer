@@ -2,7 +2,7 @@ import React from 'react'
 import { Check, ChevronRight, Clock3, Copy, Loader2, Plus, Trash2, X } from 'lucide-react'
 import { EmptyDetail, SearchBox } from '../components/common'
 import { EmptyState } from '../components/EmptyState'
-import type { ArcherAdapter, BackgroundJob, BackgroundJobChildSummary } from '../types'
+import type { ArcherAdapter, BackgroundJob, BackgroundJobChildSummary, RuntimeRun } from '../types'
 import type { SpawnChildSpec } from '../adapters/localArcher'
 import {
   cancelJob as cancelStoredJob,
@@ -12,6 +12,12 @@ import {
   spawnChildren,
   useJobStore,
 } from '../lib/jobStore'
+import {
+  cancelRuntimeRun,
+  loadRuntimeRuns,
+  retryRuntimeRun,
+  useRuntimeRunStore,
+} from '../lib/runtimeRunStore'
 
 type ChildDraft = {
   key: string
@@ -33,17 +39,22 @@ function createChildDraft(): ChildDraft {
 
 export function TasksPage({ data }: { data: ArcherAdapter }) {
   const jobs = useJobStore((state) => state.jobs)
+  const runtimeRuns = useRuntimeRunStore((state) => state.runs)
+  const runtimeLoadState = useRuntimeRunStore((state) => state.loadState)
   const jobDetail = useJobStore((state) => state.currentDetail)
   const loadState = useJobStore((state) => state.loadState)
   const storeError = useJobStore((state) => state.error)
   const [selectedId, setSelectedId] = React.useState('')
   const [query, setQuery] = React.useState('')
   const [notice, setNotice] = React.useState('')
+  const [runtimeNotice, setRuntimeNotice] = React.useState('')
+  const [retryingRunId, setRetryingRunId] = React.useState('')
+  const [cancellingRunId, setCancellingRunId] = React.useState('')
 
   async function refreshJobs() {
     if (data.status.adapter !== 'local') return
     setNotice('')
-    await loadJobList()
+    await Promise.all([loadJobList(), loadRuntimeRuns()])
   }
 
   React.useEffect(() => {
@@ -79,6 +90,36 @@ export function TasksPage({ data }: { data: ArcherAdapter }) {
       setNotice('任务已重新排队')
     } catch (error) {
       setNotice(error instanceof Error ? error.message : '重试失败')
+    }
+  }
+
+  async function retryRunVerification(run: RuntimeRun) {
+    setRetryingRunId(run.id)
+    setRuntimeNotice('')
+    try {
+      await retryRuntimeRun(run.id)
+      setRuntimeNotice('已重新验证现有产物；未重复写入 Obsidian。')
+    } catch (error) {
+      setRuntimeNotice(error instanceof Error ? error.message : '重新验证失败')
+    } finally {
+      setRetryingRunId('')
+    }
+  }
+
+  async function cancelRunExecution(run: RuntimeRun) {
+    setCancellingRunId(run.id)
+    setRuntimeNotice('')
+    try {
+      const current = await cancelRuntimeRun(run.id)
+      setRuntimeNotice(
+        current.state === 'cancelled'
+          ? 'Run 已取消；未产生新的副作用。'
+          : '取消请求已记录；正在抑制迟到结果。',
+      )
+    } catch (error) {
+      setRuntimeNotice(error instanceof Error ? error.message : '取消失败')
+    } finally {
+      setCancellingRunId('')
     }
   }
 
@@ -129,6 +170,40 @@ export function TasksPage({ data }: { data: ArcherAdapter }) {
             刷新
           </button>
         </div>
+        {runtimeNotice && <p className="detail-muted">{runtimeNotice}</p>}
+        {runtimeRuns.length > 0 && (
+          <div className="runtime-run-list" aria-label="Runtime Runs">
+            <span>运行中的 Run · {runtimeLoadState === 'loading' ? '同步中' : runtimeRuns.length}</span>
+            {runtimeRuns.map((run) => (
+              <div className={`list-row runtime-run-row run-${run.state}`} key={run.id}>
+                <div>
+                  <strong>{run.objective}</strong>
+                  <span>{runtimeRunDisplayLabel(run)} · {run.source}</span>
+                </div>
+                {canRetryRuntimeRun(run) && (
+                  <button
+                    className="quiet-button strong"
+                    type="button"
+                    disabled={retryingRunId === run.id}
+                    onClick={() => void retryRunVerification(run)}
+                  >
+                    {retryingRunId === run.id ? '验证中…' : '重新验证'}
+                  </button>
+                )}
+                {canCancelRuntimeRun(run) && (
+                  <button
+                    className="quiet-button"
+                    type="button"
+                    disabled={cancellingRunId === run.id}
+                    onClick={() => void cancelRunExecution(run)}
+                  >
+                    {cancellingRunId === run.id ? '取消中…' : '取消'}
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
         {visibleJobs.length ? visibleJobs.map((job) => (
           <button
             className={`list-row task-row ${selected?.id === job.id ? 'active' : ''}`}
@@ -406,6 +481,38 @@ export function buildChildJobsSummary(children: BackgroundJobChildSummary[]): st
     }
   }
   return lines.join('\n')
+}
+
+function runtimeRunStateLabel(state: RuntimeRun['state']): string {
+  if (state === 'waiting_approval') return '等待确认'
+  if (state === 'waiting_user') return '等待用户'
+  if (state === 'executing') return '执行中'
+  if (state === 'verifying') return '验证中'
+  if (state === 'uncertain') return '结果待确认'
+  if (state === 'interrupted') return '已中断'
+  if (state === 'cancelling') return '取消中'
+  return '准备中'
+}
+
+function runtimeRunDisplayLabel(run: RuntimeRun): string {
+  if (run.recovery?.classification === 'invalid') return '恢复信息异常，等待人工处理'
+  if (run.recovery?.classification === 'manual') return `${runtimeRunStateLabel(run.state)}，需要人工继续`
+  if (run.recovery?.classification === 'recoverable') return '结果待确认，可安全重新验证'
+  return runtimeRunStateLabel(run.state)
+}
+
+function canRetryRuntimeRun(run: RuntimeRun): boolean {
+  return run.state === 'uncertain'
+    && run.recovery?.classification === 'recoverable'
+}
+
+function canCancelRuntimeRun(run: RuntimeRun): boolean {
+  return run.source === 'desktop.obsidian_write' && (
+    run.state === 'waiting_approval'
+    || run.state === 'executing'
+    || run.state === 'uncertain'
+    || run.state === 'interrupted'
+  )
 }
 
 function jobStatusLabel(status: BackgroundJob['status'], stale?: boolean): string {

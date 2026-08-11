@@ -21,6 +21,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.concurrency import run_in_threadpool
 from starlette.responses import Response
 
+from core.runtime_context import RuntimeContext, create_runtime_context
 from terminal.api._config import ALLOWED_DESKTOP_ORIGINS, ROOT, _load_config
 from terminal.api._routes import payload_get, payload_post
 from terminal.api._security import (
@@ -37,10 +38,9 @@ from terminal.api.contract import (
     versioned_dict,
     versioned_payload,
 )
-from core.runtime_context import RuntimeContext, create_runtime_context
 from terminal.api.memory_extraction import (
-    _bg_extract_api,
     MemoryExtractionSubscriber,
+    _bg_extract_api,
     publish_memory_extraction_receipt,
 )
 from terminal.api.turn_context import TurnContext
@@ -215,6 +215,7 @@ def create_app(
             clock=resolved_runtime_context.clock,
             event_bus=resolved_runtime_context.event_bus,
             llm_client=DefaultLLMClient(),
+            cancellations=resolved_runtime_context.cancellations,
         )
     configure_llm_client(resolved_runtime_context.llm_client)
     memory_extraction_subscriber = MemoryExtractionSubscriber(
@@ -246,6 +247,14 @@ def create_app(
             clock=app.state.runtime_context.clock,
         )
         app.state.schema_version = migration_result.version
+        from core.runtime_recovery import coordinate_startup_recovery
+
+        runtime_recovery = coordinate_startup_recovery(
+            app.state.runtime_context.db_path,
+            now=app.state.runtime_context.now().isoformat(),
+        )
+        app.state.runtime_recovery_runs = list(runtime_recovery.scanned_runs)
+        app.state.runtime_recovery_report = runtime_recovery
         from memory.embedder import warmup
 
         embedding_thread = threading.Thread(
@@ -470,6 +479,10 @@ def create_app(
         finally:
             await websocket.close()
 
+    from terminal.api.runtime_run_routes import register_runtime_run_routes
+
+    register_runtime_run_routes(app)
+
     @app.api_route("/{full_path:path}", methods=["GET"])
     async def get_route(full_path: str, request: Request) -> Response:
         if full_path == "health":
@@ -499,6 +512,7 @@ def create_app(
 
 def run_fastapi_server(host: str, port: int, desktop_api_token: str = "") -> None:
     import uvicorn
+
     from core.active_context import ActiveContextManager
 
     active_context_mgr = ActiveContextManager()

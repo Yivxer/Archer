@@ -92,15 +92,33 @@ describe('python bridge', () => {
       title: '提炼内容并写入 Obsidian',
       status: 'proposed',
       detail: '先整理，再请求写入确认',
+      execution: {
+        jobKind: 'vault_reflection',
+        vaultArgs: { notePath: '/Users/example/Vault/note.md', force: false },
+        timeoutSeconds: 600,
+      },
       steps: [
         { id: 1, action: 'read_source', tool: 'input_context', requiresApproval: false },
         { id: 2, action: 'write_obsidian', tool: 'obsidian_write', requiresApproval: true },
       ],
+      shadowProjection: {
+        adapter: 'shadow.task_plan',
+        planId: 'plan-1',
+        traceId: 'trace-plan-1',
+        runId: 'run-task-plan-1',
+        legacyStatus: 'proposed',
+        shadowState: 'waiting_user',
+        status: 'aligned',
+        created: true,
+        differences: [],
+      },
     })
 
     expect(event.type).toBe('plan.event')
     if (event.type === 'plan.event') {
       expect(event.steps[1].requiresApproval).toBe(true)
+      expect(event.execution?.jobKind).toBe('vault_reflection')
+      expect(event.shadowProjection?.runId).toBe('run-task-plan-1')
     }
   })
 

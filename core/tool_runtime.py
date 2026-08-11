@@ -7,6 +7,8 @@ Skill Runtime Wrapper (Step 1)
   - 执行时长追踪
   - 超长结果截断 + artifact 存储
 """
+from __future__ import annotations
+
 import logging
 import queue
 import threading
@@ -17,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from core.artifacts import save_tool_result
+from core.runtime_cancellation import CancellationToken
 
 logger = logging.getLogger(__name__)
 
@@ -57,8 +60,14 @@ class ToolResult:
         return "\n".join(parts)
 
 
-def invoke(skill_name: str, args: dict, skills: Mapping[str, Any],
-           timeout: int | None = None) -> ToolResult:
+def invoke(
+    skill_name: str,
+    args: dict,
+    skills: Mapping[str, Any],
+    timeout: int | None = None,
+    *,
+    cancellation_token: CancellationToken | None = None,
+) -> ToolResult:
     """调用技能并返回 ToolResult，任何情况下都不抛异常。"""
     mod = skills.get(skill_name)
     if mod is None:
@@ -79,14 +88,24 @@ def invoke(skill_name: str, args: dict, skills: Mapping[str, Any],
     started_at = time.time()
     started_str = _fmt_ts(started_at)
 
-    structured_runner = getattr(mod, "run_structured", None)
+    cancelable_runner = (
+        getattr(mod, "run_structured_cancelable", None)
+        if cancellation_token is not None
+        else None
+    )
+    structured_runner = cancelable_runner or getattr(mod, "run_structured", None)
     runner = structured_runner or mod.run
     runner_name = "structured" if structured_runner else "run"
     outcome: queue.Queue[tuple[str, object]] = queue.Queue(maxsize=1)
 
     def _worker() -> None:
         try:
-            outcome.put(("result", runner(args)))
+            raw = (
+                runner(args, cancellation_token)
+                if cancelable_runner is not None
+                else runner(args)
+            )
+            outcome.put(("result", raw))
         except BaseException as exc:
             outcome.put(("error", exc))
 

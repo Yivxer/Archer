@@ -85,11 +85,39 @@ export type JobEvent = AgentEventBase & {
 
 export type PlanStatus = 'proposed' | 'accepted' | 'dismissed'
 
+export type TaskPlanShadowDifference = {
+  field: string
+  expected: unknown
+  actual: unknown
+}
+
+export type TaskPlanShadowProjection = {
+  adapter: 'shadow.task_plan'
+  planId: string
+  traceId: string
+  runId: string
+  legacyStatus: string
+  shadowState: string
+  status: 'aligned' | 'drifted' | 'unsupported' | 'error'
+  created: boolean
+  differences: TaskPlanShadowDifference[]
+  errorCode?: string
+}
+
 export type PlanStep = {
   id: number
   action: string
   tool: string
   requiresApproval: boolean
+}
+
+export type PlanExecution = {
+  jobKind: 'vault_reflection'
+  vaultArgs: {
+    notePath: string
+    force: false
+  }
+  timeoutSeconds: number
 }
 
 export type PlanEvent = AgentEventBase & {
@@ -100,6 +128,10 @@ export type PlanEvent = AgentEventBase & {
   steps: PlanStep[]
   /** Original user request that produced this plan. */
   prompt?: string
+  /** Structured, user-confirmed legacy Job handoff. */
+  execution?: PlanExecution
+  /** Read-only Runtime shadow receipt; the legacy plan remains authoritative. */
+  shadowProjection?: TaskPlanShadowProjection
 }
 
 export type TaskRouteSnapshot = {

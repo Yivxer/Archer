@@ -7,7 +7,7 @@ database paths, configuration, clocks, buses, or model clients at import time.
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -15,7 +15,7 @@ from typing import Any
 from core.event_bus import ArcherEventBus
 from core.llm_client import LLMClient
 from core.paths import memory_db_path
-
+from core.runtime_cancellation import CancellationRegistry
 
 Clock = Callable[[], datetime]
 
@@ -27,6 +27,7 @@ class RuntimeContext:
     clock: Clock
     event_bus: ArcherEventBus
     llm_client: LLMClient | None
+    cancellations: CancellationRegistry = field(default_factory=CancellationRegistry)
 
     def now(self) -> datetime:
         return self.clock()
@@ -39,6 +40,7 @@ def create_runtime_context(
     clock: Clock | None = None,
     event_bus: ArcherEventBus | None = None,
     llm_client: LLMClient | None = None,
+    cancellations: CancellationRegistry | None = None,
 ) -> RuntimeContext:
     """Build dependencies at call time so tests and app roots can isolate state."""
     resolved_db_path = (
@@ -52,4 +54,5 @@ def create_runtime_context(
         clock=clock or datetime.now,
         event_bus=event_bus or ArcherEventBus(),
         llm_client=llm_client,
+        cancellations=cancellations or CancellationRegistry(),
     )

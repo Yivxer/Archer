@@ -1,9 +1,9 @@
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 CHAT_PAGE = ROOT / "client/desktop/src/renderer/src/pages/ChatPage.tsx"
 CHAT_CSS = ROOT / "client/desktop/src/renderer/src/styles/chat.css"
+PLAN_BRIDGE = ROOT / "client/desktop/src/agent/planBridge.ts"
 
 
 def test_chat_page_rotates_home_greetings():
@@ -41,6 +41,7 @@ def test_runtime_activity_prevents_empty_home_state():
     source = CHAT_PAGE.read_text()
 
     assert "hasRuntimeActivity" in source
+    assert "runtimeRuns.length > 0" in source
     assert "runtimePlans.length > 0" in source
     assert "messages.length === 0 && !isTyping && !isSending && !activeSession && !hasRuntimeActivity" in source
 
@@ -81,6 +82,31 @@ def test_conversation_thread_followup_sends_accumulated_history():
     assert "const requestMessages = nextMessages.map" in source
     assert "await streamLocalChat(\n        requestMessages," in source
     assert "saveLocalSession([...requestMessages" in source
+
+
+def test_job_shadow_projects_outcome_summary_without_result_body():
+    source = CHAT_PAGE.read_text()
+
+    assert "const outcome = job.outcomeVerification" in source
+    assert "outcomeVerificationId: outcome?.id" in source
+    assert "outcomeStatus: outcome?.status" in source
+    assert "outcomeVerifier: outcome?.verifier" in source
+    assert "outcomeReason: outcome?.reason" in source
+    assert "result: job.result" not in source[source.index(
+        "const evidenceSummary"
+    ):source.index("await observeTaskPlanShadowJob")]
+
+
+def test_plan_jobs_send_command_identity_into_shadow_observation():
+    source = CHAT_PAGE.read_text()
+    bridge = PLAN_BRIDGE.read_text()
+
+    assert "buildConfirmedPlanJobPayload(plan)" in source
+    assert "runtimeShadowRunId: plan.shadowProjection?.runId" in bridge
+    assert "runtimeShadowRunId: plan.shadowProjection?.runId" in source
+    assert "createCommandId: job.createCommandId" in source
+    assert "startCommandId: job.startCommandId" in source
+    assert "attemptId: artifact?.attemptId || job.startCommandId" in source
 
 
 def test_chat_styles_keep_conversation_chrome_quiet():

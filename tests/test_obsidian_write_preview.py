@@ -398,6 +398,29 @@ def test_run_rejects_destructive_write_without_expected_mtime(tmp_path, monkeypa
     assert note.read_text(encoding="utf-8") == "原始内容"
 
 
+def test_run_rejects_file_created_after_absent_preview(tmp_path, monkeypatch):
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    _patch_vault(monkeypatch, vault)
+    from skills.obsidian_write import compute_preview, run
+
+    preview = compute_preview(
+        {"path": "new-note.md", "content": "archer", "mode": "append"}
+    )
+    note = vault / "new-note.md"
+    note.write_text("external", encoding="utf-8")
+    result = run({
+        "path": "new-note.md",
+        "content": "archer",
+        "mode": "append",
+        "expected_exists": preview["exists"],
+    })
+
+    assert "写入已取消" in result
+    assert "预览后被创建" in result
+    assert note.read_text(encoding="utf-8") == "external"
+
+
 def test_run_backs_up_long_note_before_destructive_write(tmp_path, monkeypatch):
     """超过 30 行的已有笔记，破坏性写入前应自动备份。"""
     vault = tmp_path / "vault"

@@ -198,6 +198,8 @@ command = "echo '{\"continue\": true}'"
 | 段 | 用途 |
 |----|------|
 | `[memory]` | `db_path`、`max_context_memories`（默认 5） |
+| `[runtime.migration_modes]` | Runtime Closure 领域迁移模式。缺失时默认 shadow；`background_job = "authoritative"` 也不能绕过 command gate。 |
+| `[runtime.command_migration_modes.background_job.<job_kind>]` | Background Job 命令级 migration mode；create / start / retry / cancel / approve / deny 默认 shadow，只有显式 command authoritative、真实 workflow 可达且 evidence gate 通过时才可能授权。 |
 | `[context]` | `token_limit`（默认 1000000，压缩阈值） |
 | `[paths]` | `sessions_dir`、`artifacts_dir` |
 | `[ui]` | `stream`（CLI 流式输出） |

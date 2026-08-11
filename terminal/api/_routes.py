@@ -11,48 +11,27 @@ from terminal.api._config import (
     read_tool_approval_audit,
 )
 from terminal.api._tools import _chat
-
-
-# ---------------------------------------------------------------------------
-# Session routes
-# ---------------------------------------------------------------------------
-
-# Compatibility aliases: dispatch keeps the historic private names while the
-# session/thread implementation lives in its own domain module.
-from terminal.api.session_routes import (
-    add_thread_session as _add_thread_session,
-    append_session as _append_session,
-    create_thread as _create_thread,
-    delete_session as _delete_session,
-    session_detail as _session_detail,
-    session_meta_from_payload as _session_meta_from_payload,
-    sessions as _sessions,
-    sessions_search as _sessions_search,
-    save_session as _save_session,
-    thread_detail as _thread_detail,
-    threads as _threads,
-    update_thread as _update_thread,
-)
+from terminal.api.job_approval import approve_legacy_job_tool_response
+from terminal.api.job_cancellation import request_legacy_job_cancellation_response
+from terminal.api.job_retry import retry_legacy_job_response
 
 # ---------------------------------------------------------------------------
 # Background job compatibility facade
 # ---------------------------------------------------------------------------
-
 from terminal.api.job_routes import (
-    BACKGROUND_JOBS,
     BACKGROUND_JOB_LOCK,
+    BACKGROUND_JOB_STALE_SECONDS,
+    BACKGROUND_JOBS,
     BACKGROUND_JOBS_LOADED,
     BACKGROUND_JOBS_PATH,
-    BACKGROUND_JOB_STALE_SECONDS,
     DEFAULT_BACKGROUND_JOB_TIMEOUT_SECONDS,
     _active_child_job_count_locked,
-    _approve_job_tool,
     _can_start_child_job_locked,
-    _cancel_job,
     _clean_job_record,
     _clean_job_stale_seconds,
     _clean_job_timeout,
     _create_job,
+    _create_job_response,
     _job_detail,
     _job_failure_keyword,
     _kick_queued_children,
@@ -62,7 +41,6 @@ from terminal.api.job_routes import (
     _parse_job_datetime,
     _pause_job_for_approval,
     _persist_jobs_locked,
-    _retry_job,
     _run_isolated_child_job_chat,
     _run_job,
     _run_job_chat_with_tools,
@@ -72,11 +50,9 @@ from terminal.api.job_routes import (
     _update_job,
 )
 
-
 # ---------------------------------------------------------------------------
 # Memory, Vault Bridge, and sensor compatibility facade
 # ---------------------------------------------------------------------------
-
 from terminal.api.memory_routes import (
     _archive_memory,
     _batch_resolve_pending,
@@ -95,6 +71,25 @@ from terminal.api.memory_routes import (
     _vault_search_index,
 )
 
+# ---------------------------------------------------------------------------
+# Session routes
+# ---------------------------------------------------------------------------
+# Compatibility aliases: dispatch keeps the historic private names while the
+# session/thread implementation lives in its own domain module.
+from terminal.api.session_routes import (
+    add_thread_session as _add_thread_session,
+    append_session as _append_session,
+    create_thread as _create_thread,
+    delete_session as _delete_session,
+    save_session as _save_session,
+    session_detail as _session_detail,
+    session_meta_from_payload as _session_meta_from_payload,
+    sessions as _sessions,
+    sessions_search as _sessions_search,
+    thread_detail as _thread_detail,
+    threads as _threads,
+    update_thread as _update_thread,
+)
 
 # ---------------------------------------------------------------------------
 # Soul import route
@@ -200,7 +195,6 @@ from terminal.api.profile_routes import (
     _validate_settings_draft,
 )
 
-
 # ---------------------------------------------------------------------------
 # Status route
 # ---------------------------------------------------------------------------
@@ -217,8 +211,8 @@ def _status(cfg: dict) -> dict:
     mode_auto = persona.get("mode_auto", True) is not False
     mode = "auto" if mode_auto else persona.get("current_mode", persona.get("default_mode", "listener"))
     from core.experts import active_expert, active_expert_id
-    from core.model_select import status_model_label
     from core.model_profiles import active_model_profile_id
+    from core.model_select import status_model_label
     from core.token_usage import status_payload
     token_limit = int(cfg.get("context", {}).get("token_limit", 1_000_000))
     expert = active_expert(cfg)
@@ -264,11 +258,9 @@ from terminal.api.initiative_routes import (
     _safe_initiative_shadow,
 )
 
-
 # ---------------------------------------------------------------------------
 # Tool approval compatibility facade
 # ---------------------------------------------------------------------------
-
 from terminal.api.tool_approval_routes import (
     IDEMPOTENT_TOOL_SKILLS,
     _build_hugo_approval_draft,
@@ -281,7 +273,6 @@ from terminal.api.tool_approval_routes import (
     _tool_approval,
     _tool_draft_from_approval_fallback,
 )
-
 
 # ---------------------------------------------------------------------------
 # Route dispatchers
@@ -382,7 +373,7 @@ def payload_get(path: str, runtime_context=None) -> tuple[int, dict | list]:
     if path == "/soul-files":
         return 200, _soul_files(cfg)
     if path == "/memory/stats":
-        from memory.store import DB_PATH, count_pending, count_by_groups, count_contradictions, count_stale
+        from memory.store import DB_PATH, count_by_groups, count_contradictions, count_pending, count_stale
         conn = None
         try:
             import sqlite3
@@ -498,7 +489,7 @@ def payload_post(path: str, payload: dict, runtime_context=None) -> tuple[int, d
     if companion_response:
         return _companion_respond(companion_response.group(1), payload, runtime_context)
     if path == "/jobs":
-        return 200, _create_job(payload)
+        return _create_job_response(payload, runtime_context)
     if path == "/schedules":
         from terminal.api.schedule_routes import add_schedule
         status, body = add_schedule(payload, runtime_context)
@@ -512,16 +503,13 @@ def payload_post(path: str, payload: dict, runtime_context=None) -> tuple[int, d
         return status, body
     job_cancel = re.fullmatch(r"/jobs/([^/]+)/cancel", path)
     if job_cancel:
-        result = _cancel_job(job_cancel.group(1))
-        return (200 if result.get("ok") else 404), result
+        return request_legacy_job_cancellation_response(job_cancel.group(1), payload, runtime_context)
     job_retry = re.fullmatch(r"/jobs/([^/]+)/retry", path)
     if job_retry:
-        result = _retry_job(job_retry.group(1))
-        return (200 if result.get("ok") else 404), result
+        return retry_legacy_job_response(job_retry.group(1), payload, runtime_context)
     job_approve = re.fullmatch(r"/jobs/([^/]+)/approve", path)
     if job_approve:
-        result = _approve_job_tool(job_approve.group(1), payload)
-        return (200 if result.get("ok") else 404), result
+        return approve_legacy_job_tool_response(job_approve.group(1), payload, runtime_context)
     job_spawn = re.fullmatch(r"/jobs/([^/]+)/spawn", path)
     if job_spawn:
         result = _spawn_child_jobs(job_spawn.group(1), payload)

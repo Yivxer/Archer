@@ -75,6 +75,7 @@ class PlanStep:
 class TaskPlan:
     task_title: str
     steps: list[PlanStep]
+    execution: dict[str, object] | None = None
 
 
 @dataclass(frozen=True)
@@ -578,10 +579,24 @@ def build_task_plan(
     MVP scope: return a deterministic plan only when orchestration says a job
     or approval path is needed. Actual execution remains controlled elsewhere.
     """
+    text = user_input.strip()
+    vault_path = _explicit_vault_reflection_path(text)
+    if vault_path is not None:
+        return TaskPlan(
+            task_title=f"结晶笔记：{vault_path.rsplit('/', 1)[-1]}",
+            steps=[
+                PlanStep(1, "reflect_on_note", "vault_reflection", True),
+            ],
+            execution={
+                "jobKind": "vault_reflection",
+                "vaultArgs": {"notePath": vault_path, "force": False},
+                "timeoutSeconds": 600,
+            },
+        )
+
     if not orchestration.needs_job and orchestration.side_effect_level == "none":
         return None
 
-    text = user_input.strip()
     if _is_hugo_publish_turn(text):
         return None
     if _is_readonly_writing_feedback_turn(text):
@@ -615,6 +630,19 @@ def build_task_plan(
             PlanStep(2, "request_approval", "approval", True),
         ],
     )
+
+
+def _explicit_vault_reflection_path(user_input: str) -> str | None:
+    lowered = user_input.lower()
+    if "结晶" not in user_input and "vault reflection" not in lowered:
+        return None
+    candidates = re.findall(r"`(/[^`\n]+\.md)`", user_input)
+    if not candidates:
+        candidates = re.findall(r'["“](/[^"”\n]+\.md)["”]', user_input)
+    if not candidates:
+        return None
+    path = candidates[0].strip()
+    return path if path.startswith("/") and path.lower().endswith(".md") else None
 
 
 def format_task_plan_for_prompt(plan: TaskPlan | None) -> str:

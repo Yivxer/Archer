@@ -9,8 +9,9 @@ from __future__ import annotations
 from collections.abc import Mapping
 from uuid import uuid4
 
-from core.policy import Decision, check as policy_check
 from core.permission_levels import PermissionLevel, permission_level_for_tool
+from core.policy import Decision, check as policy_check
+from core.runtime_cancellation import CancellationToken
 from core.tool_runtime import ToolResult, invoke as runtime_invoke
 
 
@@ -68,7 +69,13 @@ def make_tool_request(
     return request
 
 
-def execute_tool_request(request: dict, skills: Mapping[str, object], cfg: dict | None = None) -> dict:
+def execute_tool_request(
+    request: dict,
+    skills: Mapping[str, object],
+    cfg: dict | None = None,
+    *,
+    cancellation_token: CancellationToken | None = None,
+) -> dict:
     """Execute an approved tool request through the shared policy/runtime path."""
     if request.get("kind") != "tool_request":
         raise ValueError("not a tool request")
@@ -89,7 +96,16 @@ def execute_tool_request(request: dict, skills: Mapping[str, object], cfg: dict 
             "policy": {"decision": pr.decision.value, "risk": pr.risk, "reason": pr.reason},
         }
 
-    tr = runtime_invoke(skill_name, args, skills)
+    tr = (
+        runtime_invoke(
+            skill_name,
+            args,
+            skills,
+            cancellation_token=cancellation_token,
+        )
+        if cancellation_token is not None
+        else runtime_invoke(skill_name, args, skills)
+    )
     return _tool_result_payload(skill_name, args, tr, pr, skills)
 
 

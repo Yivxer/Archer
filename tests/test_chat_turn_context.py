@@ -1,7 +1,11 @@
+from datetime import datetime
 from types import SimpleNamespace
 
+from core.runtime_context import create_runtime_context
+from memory.migrations import run_migrations
 from terminal.api.chat_turn_context import (
     FullTurnDependencies,
+    _attach_task_plan_shadow,
     prepare_full_turn,
 )
 from terminal.api.turn_pipeline import ClassifiedTurn, OrchestratedTurn
@@ -9,6 +13,38 @@ from terminal.api.turn_pipeline import ClassifiedTurn, OrchestratedTurn
 
 def _event(name: str) -> dict:
     return {"type": "tool_event", "toolEvent": {"name": name}}
+
+
+def test_attach_task_plan_shadow_adds_queryable_runtime_receipt(tmp_path):
+    db_path = tmp_path / "archer.db"
+    run_migrations(db_path)
+    runtime = create_runtime_context(
+        db_path=db_path,
+        clock=lambda: datetime(2026, 7, 25, 10, 0, 0),
+    )
+    plan_event = {
+        "id": "plan-1",
+        "title": "检查并整理材料",
+        "status": "proposed",
+        "steps": [
+            {
+                "id": 1,
+                "action": "inspect_context",
+                "tool": "project_context",
+                "requiresApproval": False,
+            }
+        ],
+    }
+
+    projected = _attach_task_plan_shadow(
+        plan_event,
+        runtime_context=runtime,
+        trace_id="trace-plan-1",
+    )
+
+    assert projected is not None
+    assert projected["shadowProjection"]["status"] == "aligned"
+    assert projected["shadowProjection"]["shadowState"] == "waiting_user"
 
 
 def test_prepare_full_turn_preserves_context_event_order_and_trace_id():

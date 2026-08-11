@@ -90,12 +90,36 @@ export const planEventSchema = base.extend({
   status: planStatusSchema,
   detail: z.string(),
   prompt: z.string().optional(),
+  execution: z.object({
+    jobKind: z.literal('vault_reflection'),
+    vaultArgs: z.object({
+      notePath: z.string().startsWith('/').endsWith('.md'),
+      force: z.literal(false),
+    }),
+    timeoutSeconds: z.number().int().positive(),
+  }).optional(),
   steps: z.array(z.object({
     id: z.number().int().positive(),
     action: z.string().min(1),
     tool: z.string().min(1),
     requiresApproval: z.boolean(),
   })),
+  shadowProjection: z.object({
+    adapter: z.literal('shadow.task_plan'),
+    planId: z.string(),
+    traceId: z.string(),
+    runId: z.string(),
+    legacyStatus: z.string(),
+    shadowState: z.string(),
+    status: z.enum(['aligned', 'drifted', 'unsupported', 'error']),
+    created: z.boolean(),
+    differences: z.array(z.object({
+      field: z.string(),
+      expected: z.unknown(),
+      actual: z.unknown(),
+    })),
+    errorCode: z.string().optional(),
+  }).optional(),
 })
 
 export const orchestrationEventSchema = base.extend({

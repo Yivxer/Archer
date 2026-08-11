@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from typing import Any, Callable
+from typing import Callable
 
 
 @dataclass(frozen=True)
@@ -55,6 +55,47 @@ class PreparedFullTurn:
     events: list[dict]
 
 
+def _attach_task_plan_shadow(
+    plan_event: dict | None,
+    *,
+    runtime_context,
+    trace_id: str,
+) -> dict | None:
+    if plan_event is None or runtime_context is None:
+        return plan_event
+    from core.authority_migration import resolve_migration_mode
+    from core.task_plan_shadow import (
+        project_task_plan_shadow,
+        task_plan_shadow_run_id,
+    )
+
+    try:
+        projection = project_task_plan_shadow(
+            runtime_context.db_path,
+            trace_id=trace_id,
+            plan_event=plan_event,
+            now=runtime_context.now().isoformat(),
+            migration_mode=resolve_migration_mode(
+                runtime_context.config,
+                "task_plan",
+            ),
+        ).to_dict()
+    except Exception:
+        projection = {
+            "adapter": "shadow.task_plan",
+            "planId": str(plan_event.get("id", "")),
+            "traceId": trace_id,
+            "runId": task_plan_shadow_run_id(trace_id),
+            "legacyStatus": str(plan_event.get("status", "")),
+            "shadowState": "unknown",
+            "status": "error",
+            "created": False,
+            "differences": [],
+            "errorCode": "task_plan_shadow_unavailable",
+        }
+    return {**plan_event, "shadowProjection": projection}
+
+
 def prepare_full_turn(
     messages: list[dict], *, memory_mode: str, obsidian_mode: str,
     file_refs: list[dict] | None, runtime_context, trace_id: str,
@@ -66,6 +107,11 @@ def prepare_full_turn(
     intent_info = classified.intent_info
     orchestrated = dependencies.orchestrate(
         query, prior_history, dependencies.soul_insight(),
+    )
+    plan_event = _attach_task_plan_shadow(
+        orchestrated.plan_event,
+        runtime_context=runtime_context,
+        trace_id=trace_id,
     )
     orchestration = orchestrated.orchestration
     memory_scope = orchestrated.memory_scope
@@ -134,9 +180,9 @@ def prepare_full_turn(
             "type": "orchestrationEvent",
             "orchestrationEvent": orchestrated.orchestration_event,
         }, trace_id))
-    if orchestrated.plan_event:
+    if plan_event:
         events.append(dependencies.trace_event({
-            "type": "planEvent", "planEvent": orchestrated.plan_event,
+            "type": "planEvent", "planEvent": plan_event,
         }, trace_id))
     if orchestration is not None:
         events.append(dependencies.trace_event({

@@ -10,7 +10,6 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-
 MigrationCallable = Callable[[Path], None]
 
 
@@ -41,7 +40,7 @@ class Migration:
             except (OSError, TypeError):
                 material = repr(apply)
         checksum = hashlib.sha256(
-            f"{version}\0{description}\0{material}".encode("utf-8")
+            f"{version}\0{description}\0{material}".encode()
         ).hexdigest()
         return cls(version, checksum, description, apply)
 
@@ -77,6 +76,42 @@ def _apply_initiative_feedback_schema(db_path: Path) -> None:
     init_initiative_shadow_interactions_table(db_path)
 
 
+def _apply_runtime_run_store_schema(db_path: Path) -> None:
+    from memory.run_schema import init_run_store_schema
+
+    init_run_store_schema(db_path)
+
+
+def _apply_runtime_checkpoint_schema(db_path: Path) -> None:
+    from memory.run_schema import init_run_checkpoint_schema
+
+    init_run_checkpoint_schema(db_path)
+
+
+def _apply_task_plan_observation_schema(db_path: Path) -> None:
+    from memory.run_schema import init_task_plan_observation_schema
+
+    init_task_plan_observation_schema(db_path)
+
+
+def _apply_task_plan_job_shadow_schema(db_path: Path) -> None:
+    from memory.run_schema import init_task_plan_job_shadow_schema
+
+    init_task_plan_job_shadow_schema(db_path)
+
+
+def _apply_task_plan_job_evidence_schema(db_path: Path) -> None:
+    from memory.run_schema import upgrade_task_plan_job_evidence_schema
+
+    upgrade_task_plan_job_evidence_schema(db_path)
+
+
+def _apply_runtime_authority_comparison_schema(db_path: Path) -> None:
+    from memory.run_schema import init_runtime_authority_comparison_schema
+
+    init_runtime_authority_comparison_schema(db_path)
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     Migration.create(
         1,
@@ -101,6 +136,42 @@ MIGRATIONS: tuple[Migration, ...] = (
         "initiative shadow feedback interactions",
         _apply_initiative_feedback_schema,
         checksum_material="archer-initiative-shadow-interactions-v4",
+    ),
+    Migration.create(
+        5,
+        "runtime closure run store and event ledger",
+        _apply_runtime_run_store_schema,
+        checksum_material="archer-runtime-run-store-v5",
+    ),
+    Migration.create(
+        6,
+        "runtime checkpoint and resume cursor ledger",
+        _apply_runtime_checkpoint_schema,
+        checksum_material="archer-runtime-checkpoint-v6",
+    ),
+    Migration.create(
+        7,
+        "task plan lifecycle shadow observations",
+        _apply_task_plan_observation_schema,
+        checksum_material="archer-task-plan-observations-v7",
+    ),
+    Migration.create(
+        8,
+        "task plan legacy job shadow correlation",
+        _apply_task_plan_job_shadow_schema,
+        checksum_material="archer-task-plan-job-shadow-v8",
+    ),
+    Migration.create(
+        9,
+        "task plan legacy job result evidence shadow",
+        _apply_task_plan_job_evidence_schema,
+        checksum_material="archer-task-plan-job-result-evidence-shadow-v9",
+    ),
+    Migration.create(
+        10,
+        "runtime authority comparison receipts",
+        _apply_runtime_authority_comparison_schema,
+        checksum_material="archer-runtime-authority-comparisons-v10",
     ),
 )
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1].version
