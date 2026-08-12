@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -51,7 +51,7 @@ def create_runtime_context(
     return RuntimeContext(
         db_path=resolved_db_path,
         config=dict(config or {}),
-        clock=clock or datetime.now,
+        clock=clock or (lambda: datetime.now(UTC)),
         event_bus=event_bus or ArcherEventBus(),
         llm_client=llm_client,
         cancellations=cancellations or CancellationRegistry(),

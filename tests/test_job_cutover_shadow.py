@@ -9,12 +9,13 @@ from core.runtime_context import create_runtime_context
 from core.step_store import list_steps_for_run
 from core.task_plan_job_shadow import (
     bind_task_plan_job,
+    list_task_plan_job_observations,
     record_task_plan_job_observation,
 )
 from core.task_plan_observation import record_task_plan_observation
 from core.task_plan_shadow import project_task_plan_shadow
 from memory.migrations import run_migrations
-from terminal.api import job_routes
+from terminal.api import _routes as routes, job_routes
 from terminal.api.job_cutover_shadow import (
     observe_bound_job_command,
     prepare_shadow_create_payload,
@@ -244,3 +245,51 @@ def test_retry_candidate_and_cancel_forbidden_are_observed_without_execution(
         ("retry", "candidate"): 1,
     }
     assert get_run(context.db_path, run_id).state.value == "waiting_user"
+
+
+def test_job_detail_poll_records_bound_verified_terminal_snapshot(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    context, run_id = _setup(tmp_path)
+    complete_job = {
+        "id": "job-observed-1",
+        "kind": "vault_reflection",
+        "status": "complete",
+        "updatedAt": "2026-07-31T20:03:00+08:00",
+        "startCommandId": "start-command-observed-1",
+        "resultArtifact": {
+            "id": "artifact-observed-1",
+            "attemptId": "retry-attempt-observed-1",
+            "attemptIdentitySource": "legacy_retry",
+            "contentFingerprint": "a" * 64,
+        },
+        "resultVerification": {
+            "id": "verification-observed-1",
+            "artifactId": "artifact-observed-1",
+            "expectedFingerprint": "a" * 64,
+            "observedFingerprint": "a" * 64,
+            "status": "verified",
+            "verifier": "legacy_job.persisted_result.v1",
+            "reason": "persisted_result_matches",
+        },
+        "outcomeVerification": {
+            "id": "outcome-observed-1",
+            "status": "verified",
+            "verifier": "legacy_job.vault_reflection.record.v1",
+            "reason": "reflection_record_matches",
+        },
+    }
+    monkeypatch.setattr(routes, "_job_detail", lambda _job_id: complete_job)
+
+    status, _response = routes.payload_get(
+        "/jobs/job-observed-1",
+        runtime_context=context,
+    )
+
+    latest = list_task_plan_job_observations(context.db_path, run_id)[-1]
+    assert status == 200
+    assert latest.legacy_status == "complete"
+    assert latest.evidence_summary["attemptId"] == "retry-attempt-observed-1"
+    assert latest.evidence_summary["verificationStatus"] == "verified"
+    assert latest.evidence_summary["outcomeStatus"] == "verified"

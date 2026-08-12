@@ -1,7 +1,7 @@
 """Read-only review gate for real Background Job shadow evidence."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
@@ -21,6 +21,7 @@ from core.job_cutover_observation import (
     JobCutoverObservation,
     list_job_cutover_observations,
 )
+from core.job_evidence_timestamp_repair import audited_timestamp_repairs
 from core.job_execution_adapter import JobCommand
 from core.task_plan_job_shadow import list_task_plan_job_observations
 
@@ -236,14 +237,19 @@ def review_job_cutover_evidence_window(
         mode_value = "invalid"
 
     boundary = _instant(started_at) if started_at else None
+    timestamp_repairs, repair_blockers = audited_timestamp_repairs(db_path)
     observations: list[JobCutoverObservation] = []
     invalid_timestamps: list[str] = []
     for observation in list_job_cutover_observations(db_path):
         try:
             recorded_at = _instant(observation.recorded_at)
         except EvidenceWindowError:
-            invalid_timestamps.append(observation.receipt_id)
-            continue
+            repaired_at = timestamp_repairs.get(observation.receipt_id)
+            if repaired_at is None:
+                invalid_timestamps.append(observation.receipt_id)
+                continue
+            recorded_at = _instant(repaired_at)
+            observation = replace(observation, recorded_at=repaired_at)
         if boundary is None or recorded_at >= boundary:
             observations.append(observation)
 
@@ -267,6 +273,7 @@ def review_job_cutover_evidence_window(
         for command in REVIEWED_COMMANDS
     )
     blockers = _guard_blockers(observations)
+    blockers.extend(repair_blockers)
     blockers.extend(
         f"invalid_observation_timestamp:{receipt_id}"
         for receipt_id in invalid_timestamps

@@ -459,6 +459,9 @@ def payload_get(path: str, runtime_context=None) -> tuple[int, dict | list]:
         job = _job_detail(job_id)
         if job is None:
             return 404, {"error": "job_not_found", "id": job_id}
+        from terminal.api.job_cutover_shadow import observe_legacy_job_result
+
+        observe_legacy_job_result(runtime_context, {"job": job})
         return 200, {"ok": True, "job": job}
     return 404, {"error": "not_found", "path": path}
 def payload_post(path: str, payload: dict, runtime_context=None) -> tuple[int, dict | list]:

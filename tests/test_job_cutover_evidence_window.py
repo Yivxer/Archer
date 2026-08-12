@@ -17,6 +17,7 @@ from core.job_cutover_evidence_window import (
     EvidenceWindowStatus,
     review_job_cutover_evidence_window,
 )
+from core.job_evidence_timestamp_repair import record_timestamp_repair
 from core.job_execution_adapter import JobCommand
 from core.runtime_context import create_runtime_context
 from core.task_plan_job_shadow import (
@@ -295,6 +296,43 @@ def test_explicit_window_boundary_filters_older_receipts(tmp_path) -> None:
             {},
             started_at="2026-07-31T22:00:00",
         )
+
+
+def test_audited_timestamp_repair_preserves_and_recovers_naive_receipt(
+    tmp_path,
+) -> None:
+    db_path = _database(tmp_path)
+    run_id = _run(db_path, 1)
+    _observation_receipt(
+        db_path,
+        run_id,
+        JobCommand.RETRY,
+        recorded_at="2026-08-11T21:44:44.391725",
+    )
+
+    blocked = review_job_cutover_evidence_window(db_path, {})
+    receipt_id = blocked.blockers[0].removeprefix(
+        "invalid_observation_timestamp:"
+    )
+    repair = record_timestamp_repair(
+        db_path,
+        receipt_id=receipt_id,
+        source_timezone="Asia/Shanghai",
+        reason="legacy_runtime_context_naive_local_clock",
+        recorded_at="2026-08-12T00:10:00+08:00",
+    )
+    repaired = review_job_cutover_evidence_window(db_path, {})
+
+    assert repair.legacy_id == receipt_id
+    assert blocked.status is EvidenceWindowStatus.BLOCKED
+    assert repaired.status is EvidenceWindowStatus.COLLECTING
+    assert repaired.blockers == ()
+    retry = next(
+        item for item in repaired.command_reviews
+        if item.command is JobCommand.RETRY
+    )
+    assert retry.candidate_count == 1
+    assert retry.verified_candidate_count == 1
 
 
 def test_evidence_window_api_is_authenticated_and_read_only(tmp_path) -> None:

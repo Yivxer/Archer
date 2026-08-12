@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 
 import pytest
 
-from core.event_bus import ArcherEvent, INITIATIVE_DUE
+from core.event_bus import INITIATIVE_DUE, ArcherEvent
 from core.runtime_context import RuntimeContext, create_runtime_context
 from terminal.api._routes import payload_get, payload_post
 from terminal.api._tools import _record_part8_shadow_material
@@ -12,7 +12,7 @@ from terminal.api._tools import _record_part8_shadow_material
 
 @pytest.mark.unit
 def test_runtime_context_injects_temp_db_fixed_clock_and_dependencies(tmp_path):
-    fixed_now = datetime(2026, 7, 10, 12, 0, tzinfo=timezone.utc)
+    fixed_now = datetime(2026, 7, 10, 12, 0, tzinfo=UTC)
     llm_client = object()
     context = create_runtime_context(
         db_path=tmp_path / "isolated.db",
@@ -26,6 +26,16 @@ def test_runtime_context_injects_temp_db_fixed_clock_and_dependencies(tmp_path):
     assert context.config["api"]["model"] == "test-model"
     assert context.now() is fixed_now
     assert context.llm_client is llm_client
+
+
+@pytest.mark.unit
+def test_runtime_context_default_clock_is_utc_aware(tmp_path):
+    context = create_runtime_context(db_path=tmp_path / "archer.db")
+
+    now = context.now()
+
+    assert now.tzinfo is not None
+    assert now.utcoffset().total_seconds() == 0
 
 
 @pytest.mark.unit
