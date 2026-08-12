@@ -15,6 +15,7 @@ AUTHORITY_COMPARISON_CONTRACT_VERSION = 1
 REGISTERED_AUTHORITY_DOMAINS = frozenset({
     "task_plan",
     "background_job",
+    "background_job_cutover_review",
     "background_job_evidence_repair",
     "child_job",
     "approval",

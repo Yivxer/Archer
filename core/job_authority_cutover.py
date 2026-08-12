@@ -372,6 +372,19 @@ def evaluate_job_authority_cutover(
             receipt=receipt,
             missing=command_decision.missing_capabilities,
         )
+    if mode is MigrationMode.AUTHORITATIVE:
+        from core.job_cutover_human_review import (
+            background_job_cutover_review_approved,
+        )
+
+        if not background_job_cutover_review_approved(db_path, config):
+            return _decision(
+                request,
+                mode=mode,
+                status=JobCutoverStatus.FORBIDDEN,
+                reason="human_cutover_review_missing_or_stale",
+                receipt=receipt,
+            )
     status = (
         JobCutoverStatus.AUTHORITATIVE
         if mode is MigrationMode.AUTHORITATIVE

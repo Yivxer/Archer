@@ -17,6 +17,11 @@ from core.job_cutover_evidence_window import (
     EvidenceWindowStatus,
     review_job_cutover_evidence_window,
 )
+from core.job_cutover_human_review import (
+    HumanCutoverReviewError,
+    background_job_cutover_review_approved,
+    record_background_job_cutover_review,
+)
 from core.job_evidence_timestamp_repair import record_timestamp_repair
 from core.job_execution_adapter import JobCommand
 from core.runtime_context import create_runtime_context
@@ -203,6 +208,62 @@ def test_three_clean_distinct_runs_make_window_reviewable_not_authoritative(
         for item in report.command_reviews
         if item.observable_in_current_workflow
     )
+
+
+def test_human_cutover_review_refuses_blocked_evidence_window(tmp_path) -> None:
+    db_path = _database(tmp_path)
+    run_id = _run(db_path, 1, verified=False)
+    _observation_receipt(db_path, run_id, JobCommand.RETRY)
+
+    with pytest.raises(
+        HumanCutoverReviewError,
+        match="evidence window is not reviewable",
+    ):
+        record_background_job_cutover_review(
+            db_path,
+            {},
+            reviewer_id="user",
+            approved=True,
+            reviewed_at="2026-08-12T13:00:00+08:00",
+        )
+
+
+def test_human_cutover_review_is_append_only_idempotent_and_evidence_bound(
+    tmp_path,
+) -> None:
+    db_path = _database(tmp_path)
+    for index in range(1, 4):
+        run_id = _run(db_path, index)
+        for command in REQUIRED_COMMANDS:
+            _observation_receipt(
+                db_path,
+                run_id,
+                command,
+                recorded_at=f"2026-07-31T22:{index:02d}:00+08:00",
+            )
+
+    first = record_background_job_cutover_review(
+        db_path,
+        {},
+        reviewer_id="user",
+        approved=True,
+        reviewed_at="2026-08-12T13:00:00+08:00",
+    )
+    replay = record_background_job_cutover_review(
+        db_path,
+        {},
+        reviewer_id="user",
+        approved=True,
+        reviewed_at="2026-08-12T13:01:00+08:00",
+    )
+
+    assert replay.id == first.id
+    assert background_job_cutover_review_approved(db_path, {}) is True
+
+    new_run = _run(db_path, 4, verified=False)
+    _observation_receipt(db_path, new_run, JobCommand.RETRY)
+
+    assert background_job_cutover_review_approved(db_path, {}) is False
 
 
 def test_terminal_unverified_run_blocks_and_never_counts_candidate(tmp_path) -> None:

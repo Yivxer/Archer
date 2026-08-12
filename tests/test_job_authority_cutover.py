@@ -477,5 +477,6 @@ def test_authoritative_requires_domain_and_explicit_command_scope(tmp_path) -> N
 
     assert domain_only.status is JobCutoverStatus.CANDIDATE
     assert domain_only.authority_enabled is False
-    assert scoped.status is JobCutoverStatus.AUTHORITATIVE
-    assert scoped.authority_enabled is True
+    assert scoped.status is JobCutoverStatus.FORBIDDEN
+    assert scoped.reason == "human_cutover_review_missing_or_stale"
+    assert scoped.authority_enabled is False
