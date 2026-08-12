@@ -613,6 +613,12 @@ def _run_job(job_id: str) -> None:
                     return
                 result_holder["ok"] = bool(result.get("ok"))
                 result_holder["text"] = json.dumps(result, ensure_ascii=False)
+                if not result_holder["ok"]:
+                    result_holder["error"] = str(
+                        result.get("error")
+                        or result.get("reason")
+                        or "vault reflection failed"
+                    )
             except Exception as exc:
                 if not cancel_flag["cancelled"]:
                     result_holder["ok"] = False

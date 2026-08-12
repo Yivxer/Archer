@@ -661,3 +661,37 @@ def test_run_job_vault_reflection_failure_marks_failed(tmp_path, monkeypatch):
     job = jobs.BACKGROUND_JOBS[job_id]
     assert job["status"] == "failed"
     assert "boom" in str(job.get("error", ""))
+
+
+def test_run_job_vault_reflection_preserves_returned_failure_reason(tmp_path, monkeypatch):
+    """A structured workflow failure must remain explainable on the Job."""
+    _reset_jobs(monkeypatch, tmp_path)
+
+    job_id = "job-run-cooldown"
+    jobs.BACKGROUND_JOBS[job_id] = {
+        "id": job_id,
+        "title": "Vault 结晶：cooldown.md",
+        "kind": "vault_reflection",
+        "prompt": "Vault 结晶：cooldown.md",
+        "status": "queued",
+        "result": "",
+        "createdAt": datetime.now().isoformat(),
+        "updatedAt": datetime.now().isoformat(),
+        "timeoutSeconds": 60,
+        "vaultArgs": {"note_path": "cooldown.md", "force": False},
+    }
+
+    monkeypatch.setattr(
+        "workflows.vault_reflection.reflect_on_note",
+        lambda path, force=False: {
+            "ok": False,
+            "skipped": True,
+            "reason": "cooldown: reflected within 24 hours",
+        },
+    )
+
+    jobs._run_job(job_id)
+
+    job = jobs.BACKGROUND_JOBS[job_id]
+    assert job["status"] == "failed"
+    assert job["error"] == "cooldown: reflected within 24 hours"
