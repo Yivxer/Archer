@@ -5,7 +5,7 @@
 ## 安装与源码
 
 - 安装包构建提交：`5e704ff7f9c69fc9cda07dfeab311ab497c9cc63`，来自独立干净工作树；原未收口的样式/网页/评估文件不在包中。
-- 后续测试隔离：`883b0c6`、`98d1d88`，不改变生产逻辑。实际后端 `/Users/Yivxer/Projects/Archer` 的 268 个生产 Python 文件与构建提交逐文件一致。
+- 首次安装时，后端 `/Users/Yivxer/Projects/Archer` 的 268 个生产 Python 文件与构建提交逐文件一致；`883b0c6`、`98d1d88` 只修复测试隔离。随后后端增量见下节，当前不能再称全部 Python 与首包构建提交一致。
 - 已安装 `/Applications/Archer.app`，版本 1.0.27，app.asar 与干净构建包 SHA-256 相同；DMG 在独立 release 工作树的 `client/desktop/release/Archer-1.0.27-arm64.dmg`。
 - Node 24.19.0 / npm 11.12.1；Python 3.14.6；配置 v2、数据库迁移 v10。配置内容未变，REST/SSE 与 schema 未扩展。
 - ad-hoc 本机签名通过；未公证或面向外部分发。
@@ -44,7 +44,17 @@ Python 检查仍有已有 FastAPI on_event 弃用及测试 AsyncMock warning；�
 
 旧测试只替换部分路径引用，曾污染默认情绪/独白/shadow/线程状态。对照开始前 SQLite backup：既有行逐行未变，清理前再次备份，只删除 12 条情绪、42 条独白、1 条 shadow 发送、8 条线程绑定、7 条线程状态（共 70），恢复原线程 JSON；真实 retry 的数据与 evidence 保留。独立工作树还会使用 HOME 审批审计，另备份并移除 76 条可确认的测试记录，保留 1646 条历史记录。
 
-Reflect 和共享 API 审计路径已补测试隔离。其他旧测试的默认路径没有全面重写，后续全套仍必须使用独立 checkout 和临时配置，不能直接跑生产默认库。五类失败的复现与回归入口见 `docs/foundation-regression-2026-10-01.md`。
+Reflect 和共享 API 审计路径已补测试隔离。现有 `run_tests.sh` 现在自动创建独立 checkout 和临时配置；其他旧测试的默认路径没有全面重写，不能直接在生产配置下运行裸 pytest。五类失败的复现与回归入口见 `docs/foundation-regression-2026-10-01.md`。
+
+## 同日后端增量与离线入口收口
+
+- 后端提交 `b40c7fea0573a91db6505a0d994af0529a9f50e6`；生产差异只有 `core/user_outcome_confirmation.py` 与 `core/desktop_tool_router.py`。已正常退出并重启安装版加载该后端。桌面包继续是 `5e704ff` 的 1.0.27，app.asar 与原干净包一致；本次没有重新构建 Desktop/DMG。
+- `6a27a04`：同一结果确认并发时，Step 已收口而 Run 尚未收口会误报冲突。保留唯一不可变回执，有限次重读/CAS 收敛该中间态；真实状态冲突与取消仍拒绝。8 项确认测试含接受、纠正和取消优先。
+- `cbfcad2` / `b40c7fe`：macOS `/Users/` 路径下润色本地文章被旧规则误判成博客发布，抑制写回预览。补充内容修改识别，原文未写入，确认卡恢复；明确发布指令的既有行为保持通过。扩写/缩写只验证不误触发布，未扩展其写回能力。
+- `e8762c7` / `86a63a8`：默认 smoke、foundation、full 都由一次性源码快照运行，使用公开模板、合成 persona、独立 DB/session/vault；Python audit hooks 拒绝用户状态写入、用户库连接、外部连接及生产 8765 API。该保护针对意外副作用，不是 OS sandbox。
+- 最新验证：smoke 9/9、foundation 90、全量离线 **1967 passed / 65 deselected**（另有 6 subtests）；workflow 原 27 case baseline 由全量套件校验，未改 baseline；改动 Ruff / diff check 通过。没有新增模型调用。
+- 安装版本机检查 9/9；退出后无监听，重启一个新 API PID，cwd 指向上述主库后端；界面就绪且已有历史列表恢复。原 Job attempt/verification receipt 不变，窗口仍 reviewable、16 receipt / 6 distinct Run、shadow、authority=false。
+- 测试及重启前后：真实库 53 张表逐行哈希一致；配置、任务、线程索引、审计文件与 50 个会话文件清单一致。详细记录保存在原备份的 `offline-entry-20261001/`，含最新后端 archive、验收日志与前后比对，不提交私人数据。
 
 ## 本机备份与回滚
 

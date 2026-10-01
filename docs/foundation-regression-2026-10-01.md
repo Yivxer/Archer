@@ -4,7 +4,7 @@
 
 | 失败簇 | 已有证据及复现 | 预期行为 | 固定回归入口 |
 |---|---|---|---|
-| 错误副作用 | 历史内容分析被误当发布；能力询问、否定发布、扩大参数范围 | 分析不执行发布；发布目标和授权证据匹配；拒绝零副作用 | `evals/workflow_cases.json` 的 action_mediation/Hugo cases；`tests/test_obsidian_runtime.py`、`tests/test_outbox.py` |
+| 错误副作用 | 历史内容分析被误当发布；能力询问、否定发布、扩大参数范围；macOS 路径下润色文章被误路由到发布 | 分析/润色不执行发布；编辑先生成确认预览且原文不变；发布目标和授权证据匹配；拒绝零副作用 | `evals/workflow_cases.json` 的 action_mediation/Hugo cases；`tests/test_obsidian_runtime.py`、`tests/test_outbox.py`、`tests/test_obsidian_write_preview.py`、`tests/test_desktop_tool_router.py`；润色修复 `cbfcad2` |
 | Plan 丢失 | `d52a286`：新会话第一次保存后 session ID 切换，计划卡消失 | 会话迁移保留同一 proposed Plan，重放不重复 | Desktop `eventLog.test.ts`、`runtimeHelpers.test.ts`；修复汇回为 `3cffce2` |
 | API 重复启动 | 原现场在慢启动/退出期间重试，旧进程未退出就可能启动新进程 | 等待存活子进程就绪；退出确认前不替换；终止失败保留失败态 | Desktop `apiProcess.test.ts`，安装后单监听进程及重启检查；修复 `25065fe` |
 | 会话隔离错误 | 原 journey 检查 session 文件名而非临时数据根目录；工作树被误算生产代码；旧测试缓存默认情绪库/线程索引路径 | 测试会话进入临时根目录；独立工作树不作为当前生产模块 | `tests/test_journey_smoke_script.py`、`tests/test_session_routes.py`、`tests/test_part8_module_graduation.py`、`tests/test_reflect.py`；修复 `348f1dc` / `3f7348b` |
@@ -35,3 +35,17 @@
 4. 构建日志保留失败、修复、验证等级和回滚点，不用候选数量或模型自评冒充质量指标。
 
 Runtime 后续权威迁移、自由改写语义召回、真实资料全量 J8、自动反馈采收和 Part 8 主动投递仍待后续验收。
+
+## 已收口的离线测试入口
+
+```bash
+bash run_tests.sh                     # 默认 9 项 smoke
+bash run_tests.sh --suite foundation  # 当前 90 项基础回归
+bash run_tests.sh --suite full        # 当前 1967 项离线回归
+```
+
+入口验证已提交 HEAD；未提交修改不会进入测试，可用 `--ref <commit>` 指定提交。`--report <path>` 将提交、选择范围和退出码保存在临时目录之外。全量排除 integration/journey，不触发真实模型。
+
+runner 用 Git archive 建立一次性 checkout，补 Git index 供架构检查，使用公开配置和合成资料。macOS 下临时根位于 `~/.codex/tmp`，让路径相关测试覆盖真实 `/Users/` 路由。Python audit hooks 拦截用户库访问、用户目录写入和外部/生产 API 连接；不是 OS 级隔离，也未全面改造旧测试全局引用。推荐入口替代手工准备隔离配置，仍不要在真实配置下直接跑全量 pytest。
+
+同日补充确定性并发复现：重复结果确认在 Step 终态、Run 尚未终态的窗口仍应返回同一确认结果，只有一份不可变 receipt；接受/纠正均覆盖，取消保持优先。`tests/test_user_outcome_confirmation.py` 8 项通过，修复 `6a27a04`。全量最初失败、根因及最终 1967 passed 日志都保留；没有批量重写 baseline。
