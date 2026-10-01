@@ -6,7 +6,7 @@ import type { ChildProcess } from 'node:child_process'
 import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { randomBytes } from 'node:crypto'
 import { execFile } from 'node:child_process'
-import { apiRetryDelayMs, brainStatusReason, probeExistingApi, probeReadyApi, reclaimApiPort, resolveApiLaunchPaths, verifyApiToken, waitForReadyApi } from './apiProcess'
+import { apiRetryDelayMs, brainStatusReason, probeExistingApi, probeReadyApi, reclaimApiPort, resolveApiLaunchPaths, terminateApiChild, verifyApiToken, waitForReadyApi } from './apiProcess'
 
 const isDev = !app.isPackaged
 
@@ -86,6 +86,7 @@ let ensureApiPromise: Promise<{ ok: boolean; reason: string }> | null = null
 let apiWatchTimer: ReturnType<typeof setInterval> | null = null
 let apiRestartTimer: ReturnType<typeof setTimeout> | null = null
 let apiRestartAttempt = 0
+const API_STARTUP_TIMEOUT_MS = 60000
 
 // L0.4: 上次启动时的崩溃信息 (从 /active-context 读)
 type CrashInfo = {
@@ -331,10 +332,20 @@ async function ensureApiProcess(): Promise<ApiEnsureResult> {
 
     desktopApiToken = desktopApiToken || getOrCreateDesktopApiToken()
 
-    if (apiProcess && apiProcess.pid && !apiProcess.killed) {
+    if (apiProcess && apiProcess.pid && apiProcess.exitCode === null && apiProcess.signalCode === null) {
       if (await verifyApiToken(fetch, desktopApiToken)) {
         return { ok: true, reason: 'owned' }
       }
+      console.warn('[archer_api] Owned API child is still starting; waiting instead of spawning another')
+      const child = apiProcess
+      const ready = await waitForReadyApi(fetch, 'http://127.0.0.1:8765', API_STARTUP_TIMEOUT_MS, 300)
+      if (ready && await verifyApiToken(fetch, desktopApiToken)) {
+        return { ok: true, reason: 'owned' }
+      }
+      console.error('[archer_api] Existing API child did not become ready; stopping it before retry')
+      const stopped = await terminateApiChild(child)
+      if (stopped && apiProcess === child) apiProcess = null
+      return { ok: false, reason: stopped ? 'spawn_failed' : 'port_busy' }
     }
 
     if (await probeExistingApi()) {
@@ -343,9 +354,14 @@ async function ensureApiProcess(): Promise<ApiEnsureResult> {
         return { ok: true, reason: 'reused' }
       }
       console.warn('[archer_api] Port 8765 token mismatch — reclaiming port and restarting')
-      if (apiProcess && apiProcess.pid && !apiProcess.killed) {
-        apiProcess.kill('SIGTERM')
-        apiProcess = null
+      if (apiProcess && apiProcess.pid && apiProcess.exitCode === null && apiProcess.signalCode === null) {
+        const child = apiProcess
+        const stopped = await terminateApiChild(child)
+        if (!stopped) {
+          console.error('[archer_api] Owned API child stayed alive after termination request')
+          return { ok: false, reason: 'port_busy' }
+        }
+        if (apiProcess === child) apiProcess = null
       }
       const portReleased = await reclaimApiPort(8765)
       if (!portReleased) {
@@ -354,19 +370,25 @@ async function ensureApiProcess(): Promise<ApiEnsureResult> {
       }
     }
 
-    apiProcess = spawnApiProcess()
-    if (!apiProcess) {
+    const child = spawnApiProcess()
+    apiProcess = child
+    if (!child) {
       return { ok: false, reason: 'spawn_failed' }
     }
 
-    const ready = await waitForReadyApi(fetch, 'http://127.0.0.1:8765', 15000, 300)
+    const ready = await waitForReadyApi(fetch, 'http://127.0.0.1:8765', API_STARTUP_TIMEOUT_MS, 300)
     if (!ready) {
-      console.error('[archer_api] API did not become ready in time')
-      return { ok: false, reason: 'spawn_failed' }
+      console.error('[archer_api] API did not become ready in time; stopping child before retry')
+      const stopped = await terminateApiChild(child)
+      if (stopped && apiProcess === child) apiProcess = null
+      return { ok: false, reason: stopped ? 'spawn_failed' : 'port_busy' }
     }
 
     if (!(await verifyApiToken(fetch, desktopApiToken))) {
-      return { ok: false, reason: 'token_mismatch' }
+      console.error('[archer_api] Started API rejected the desktop token; stopping child before retry')
+      const stopped = await terminateApiChild(child)
+      if (stopped && apiProcess === child) apiProcess = null
+      return { ok: false, reason: stopped ? 'token_mismatch' : 'port_busy' }
     }
 
     return { ok: true, reason: 'started' }

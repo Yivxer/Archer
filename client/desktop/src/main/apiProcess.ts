@@ -83,6 +83,68 @@ type ReclaimApiPortOptions = {
   sleep?: (delayMs: number) => Promise<void>
 }
 
+export type ApiChildHandle = {
+  exitCode: number | null
+  signalCode: NodeJS.Signals | null
+  kill: (signal?: NodeJS.Signals | number) => boolean
+}
+
+type TerminateApiChildOptions = {
+  timeoutMs?: number
+  forceTimeoutMs?: number
+  intervalMs?: number
+  sleep?: (delayMs: number) => Promise<void>
+}
+
+function apiChildHasExited(child: ApiChildHandle): boolean {
+  return child.exitCode !== null || child.signalCode !== null
+}
+
+async function waitForApiChildExit(
+  child: ApiChildHandle,
+  timeoutMs: number,
+  intervalMs: number,
+  sleep: (delayMs: number) => Promise<void>
+): Promise<boolean> {
+  if (apiChildHasExited(child)) return true
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    await sleep(intervalMs)
+    if (apiChildHasExited(child)) return true
+  }
+  return apiChildHasExited(child)
+}
+
+/**
+ * Stop an API child and wait for the OS to confirm its exit. A caller must not
+ * replace the owned child until this returns true, otherwise slow startup can
+ * turn one retry loop into many concurrent API processes.
+ */
+export async function terminateApiChild(
+  child: ApiChildHandle,
+  options: TerminateApiChildOptions = {}
+): Promise<boolean> {
+  if (apiChildHasExited(child)) return true
+  const sleep = options.sleep || ((delayMs: number) => new Promise<void>((resolve) => setTimeout(resolve, delayMs)))
+  const timeoutMs = Math.max(0, options.timeoutMs ?? 3000)
+  const forceTimeoutMs = Math.max(0, options.forceTimeoutMs ?? 1000)
+  const intervalMs = Math.max(10, options.intervalMs ?? 50)
+
+  try {
+    child.kill('SIGTERM')
+  } catch {
+    return apiChildHasExited(child)
+  }
+  if (await waitForApiChildExit(child, timeoutMs, intervalMs, sleep)) return true
+
+  try {
+    child.kill('SIGKILL')
+  } catch {
+    return apiChildHasExited(child)
+  }
+  return waitForApiChildExit(child, forceTimeoutMs, intervalMs, sleep)
+}
+
 async function listenerPids(port: number): Promise<number[]> {
   try {
     const stdout = await execFileText('lsof', ['-ti', `tcp:${port}`])

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { apiRetryDelayMs, brainStatusReason, probeExistingApi, probeReadyApi, reclaimApiPort, resolveApiLaunchPaths, verifyApiToken, waitForHealthyApi, waitForReadyApi } from './apiProcess'
+import { apiRetryDelayMs, brainStatusReason, probeExistingApi, probeReadyApi, reclaimApiPort, resolveApiLaunchPaths, terminateApiChild, verifyApiToken, waitForHealthyApi, waitForReadyApi } from './apiProcess'
 
 describe('resolveApiLaunchPaths', () => {
   it('uses the self-use defaults when no overrides are set', () => {
@@ -144,6 +144,45 @@ describe('reclaimApiPort', () => {
 
     expect(killProcess).toHaveBeenCalledWith(4312)
     expect(sleep).not.toHaveBeenCalled()
+  })
+})
+
+describe('terminateApiChild', () => {
+  it('does not report success until the owned child has actually exited', async () => {
+    const child = {
+      exitCode: null as number | null,
+      signalCode: null as NodeJS.Signals | null,
+      kill: vi.fn(() => true),
+    }
+    const sleep = vi.fn(async () => {
+      child.signalCode = 'SIGTERM'
+    })
+
+    await expect(terminateApiChild(child, {
+      timeoutMs: 1000,
+      intervalMs: 10,
+      sleep,
+    })).resolves.toBe(true)
+
+    expect(child.kill).toHaveBeenCalledOnce()
+    expect(child.kill).toHaveBeenCalledWith('SIGTERM')
+    expect(sleep).toHaveBeenCalledOnce()
+  })
+
+  it('escalates to SIGKILL and stays failed while the child remains alive', async () => {
+    const child = {
+      exitCode: null,
+      signalCode: null,
+      kill: vi.fn(() => true),
+    }
+
+    await expect(terminateApiChild(child, {
+      timeoutMs: 0,
+      forceTimeoutMs: 0,
+    })).resolves.toBe(false)
+
+    expect(child.kill).toHaveBeenNthCalledWith(1, 'SIGTERM')
+    expect(child.kill).toHaveBeenNthCalledWith(2, 'SIGKILL')
   })
 })
 
