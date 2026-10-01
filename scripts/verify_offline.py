@@ -30,6 +30,7 @@ SUITES = {
         "tests/test_obsidian_write_preview.py",
         "tests/test_desktop_tool_router.py",
         "tests/test_user_outcome_confirmation.py",
+        "tests/test_foundation_api_restart.py",
     ],
     "full": [],
 }
