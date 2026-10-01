@@ -40,8 +40,8 @@ Runtime 后续权威迁移、自由改写语义召回、真实资料全量 J8、
 
 ```bash
 bash run_tests.sh                     # 默认 9 项 smoke
-bash run_tests.sh --suite foundation  # 当前 90 项基础回归
-bash run_tests.sh --suite full        # 当前 1967 项离线回归
+bash run_tests.sh --suite foundation  # 当前 101 项基础回归
+bash run_tests.sh --suite full        # 当前 1974 项离线回归
 ```
 
 入口验证已提交 HEAD；未提交修改不会进入测试，可用 `--ref <commit>` 指定提交。`--report <path>` 将提交、选择范围和退出码保存在临时目录之外。全量排除 integration/journey，不触发真实模型。
@@ -49,3 +49,16 @@ bash run_tests.sh --suite full        # 当前 1967 项离线回归
 runner 用 Git archive 建立一次性 checkout，补 Git index 供架构检查，使用公开配置和合成资料。macOS 下临时根位于 `~/.codex/tmp`，让路径相关测试覆盖真实 `/Users/` 路由。Python audit hooks 拦截用户库访问、用户目录写入和外部/生产 API 连接；不是 OS 级隔离，也未全面改造旧测试全局引用。推荐入口替代手工准备隔离配置，仍不要在真实配置下直接跑全量 pytest。
 
 同日补充确定性并发复现：重复结果确认在 Step 终态、Run 尚未终态的窗口仍应返回同一确认结果，只有一份不可变 receipt；接受/纠正均覆盖，取消保持优先。`tests/test_user_outcome_confirmation.py` 8 项通过，修复 `6a27a04`。全量最初失败、根因及最终 1967 passed 日志都保留；没有批量重写 baseline。
+
+## 跨进程 API 场景补充
+
+`tests/test_foundation_api_restart.py` 在两个独立 Python 进程启动 FastAPI TestClient，使用同一合成持久化目录。检查会话内容和 thread ID、目标/决定/纠正/停点、审阅记忆及重复决定、相同命令只创建一个 Job、取消和重复拒绝审批零执行；身份认证也经过真实 middleware。没有 HTTP 外网或模型请求。只有通过隔离 runner 才运行此场景；裸 pytest 跳过，避免子进程使用生产配置。
+
+该场景发现两个真实问题并保留失败日志：
+
+| 失败簇 | 根因 | 修复与回归 |
+|---|---|---|
+| 记忆/线程连续性 | 默认索引路径解析后被误判为隔离索引，线程 REST 读取缺少已保存 capsule | `ba466a0`；`tests/test_thread_store.py` 验证默认/显式 db_path 投影及隔离索引不读默认 DB；跨进程 API 恢复通过，安装版已有 40 个 capsule 与原数据一致 |
+| 重复请求与审批副作用 | 相同草稿刷新缓存时间戳，被 Outbox 当作业务载荷冲突 | `79f256d`；`tests/test_tool_approval_cache_replay.py` 验证原 cancelled receipt/payload 未变、业务参数或 requiresApproval 改变仍拒绝；跨进程重复拒绝零执行 |
+
+这轮聚焦 33、foundation 101、全量离线 1974 / 65 未选、Desktop 556、安装版 9/9 通过。原 workflow baseline 不变，Runtime shadow 不变；私人全量 J8 与真实模型跨多轮任务仍不据此标为完成。

@@ -46,7 +46,7 @@ Python 检查仍有已有 FastAPI on_event 弃用及测试 AsyncMock warning；�
 
 Reflect 和共享 API 审计路径已补测试隔离。现有 `run_tests.sh` 现在自动创建独立 checkout 和临时配置；其他旧测试的默认路径没有全面重写，不能直接在生产配置下运行裸 pytest。五类失败的复现与回归入口见 `docs/foundation-regression-2026-10-01.md`。
 
-## 同日后端增量与离线入口收口
+## 同日第一次后端增量与离线入口收口（历史快照）
 
 - 后端提交 `b40c7fea0573a91db6505a0d994af0529a9f50e6`；生产差异只有 `core/user_outcome_confirmation.py` 与 `core/desktop_tool_router.py`。已正常退出并重启安装版加载该后端。桌面包继续是 `5e704ff` 的 1.0.27，app.asar 与原干净包一致；本次没有重新构建 Desktop/DMG。
 - `6a27a04`：同一结果确认并发时，Step 已收口而 Run 尚未收口会误报冲突。保留唯一不可变回执，有限次重读/CAS 收敛该中间态；真实状态冲突与取消仍拒绝。8 项确认测试含接受、纠正和取消优先。
@@ -55,6 +55,17 @@ Reflect 和共享 API 审计路径已补测试隔离。现有 `run_tests.sh` 现
 - 最新验证：smoke 9/9、foundation 90、全量离线 **1967 passed / 65 deselected**（另有 6 subtests）；workflow 原 27 case baseline 由全量套件校验，未改 baseline；改动 Ruff / diff check 通过。没有新增模型调用。
 - 安装版本机检查 9/9；退出后无监听，重启一个新 API PID，cwd 指向上述主库后端；界面就绪且已有历史列表恢复。原 Job attempt/verification receipt 不变，窗口仍 reviewable、16 receipt / 6 distinct Run、shadow、authority=false。
 - 测试及重启前后：真实库 53 张表逐行哈希一致；配置、任务、线程索引、审计文件与 50 个会话文件清单一致。详细记录保存在原备份的 `offline-entry-20261001/`，含最新后端 archive、验收日志与前后比对，不提交私人数据。
+
+## 最新：跨进程 API 恢复收口
+
+- 当前后端为 `79f256d189b737378bd37888696a2aa45fbf352f`，已由安装版正常退出/重启加载；桌面仍为 `5e704ff` 的 1.0.27，app.asar 与原干净包一致。本次没有重建 Desktop/DMG。
+- 新增两个独立 Python 进程中的 FastAPI TestClient 流程：会话保存、记忆必须先 pending、接受/拒绝及重复决定、审批拒绝、建 Job 幂等、取消、重启后恢复目标/决定/纠正/停点。它是合成离线 API 验收，不冒充真实模型旅程，也不验收 Desktop Plan 卡本身。
+- `ba466a0`：默认线程索引路径先被解析，随后误判成显式隔离路径，GET 线程漏掉已有 SQLite capsule。保留解析前的路径判断；显式隔离路径继续不访问默认库，显式 db_path 仍可投影上下文。
+- `79f256d`：同一审批草稿重建后仅 `_cacheCreatedAt` 不同，会使 Outbox 报载荷冲突。仅该缓存字段可以忽略；其他业务/审批字段必须完全一致才复用原 immutable payload 与 receipt。旧行未重写，真实参数或授权差异仍拒绝；没有重试真实副作用。
+- 最新：Python 离线 **1974 passed / 65 deselected**，foundation **101**，smoke 9；Desktop 干净源码 **42 files / 556 tests**，workflow 原 27 case baseline 通过全量校验。新增/审批文件 Ruff 通过；thread_store 既有 UP017、outbox 既有 I001 未顺带修改，按原问题忽略后检查通过；diff check 通过。
+- 安装版 9/9；退出后无监听，重启一个新 API PID、cwd 指向当前后端；UI 就绪/历史列表通过。只读 `/threads` 中 40 个已有线程的 capsule 与原数据库完全一致；原 Job attempt/result/outcome receipt 保留，Evidence 仍 reviewable / shadow / authority=false。
+- 测试及重启前后真实库 53 张表逐行哈希一致，配置/任务/线程索引/审计和 50 个会话文件清单一致，9 个原无关修改逐字节未变。本轮模型调用 0。
+- 原备份的 `api-restart-20261001/` 保存前后对照、失败及最终通过日志、后端 archive 和项目文档快照。此增量无需数据库回退；如需回滚，正常退出并备份新增修改后，将后端恢复为上一增量 `b40c7fe` 的匹配源码，保留同一桌面包、配置与新增用户数据。
 
 ## 本机备份与回滚
 
