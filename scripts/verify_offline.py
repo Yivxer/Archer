@@ -27,6 +27,9 @@ SUITES = {
         "tests/test_journey_smoke_script.py",
         "tests/test_reflect.py",
         "tests/test_offline_runner.py",
+        "tests/test_obsidian_write_preview.py",
+        "tests/test_desktop_tool_router.py",
+        "tests/test_user_outcome_confirmation.py",
     ],
     "full": [],
 }

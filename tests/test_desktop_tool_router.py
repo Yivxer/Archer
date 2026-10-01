@@ -75,6 +75,21 @@ class TestToolRouterScoring(unittest.TestCase):
         self.assertEqual(classify_hugo_intent(query), HUGO_INTENT_ASK_CAPABILITY)
         self.assertFalse(wants_hugo_publish(query))
 
+    def test_local_article_revision_keeps_overwrite_preview(self):
+        for action in ("润色", "改写", "扩写", "缩写"):
+            with self.subTest(action=action):
+                query = f"帮我{action}一下/Users/test/vault/文章 初稿.md"
+                self.assertEqual(classify_hugo_intent(query), HUGO_INTENT_CONTENT_REVIEW)
+                self.assertFalse(wants_hugo_publish(query))
+                plan = plan_desktop_tools(query, {}, llm_fallback=False)
+                self.assertTrue(plan.obsidian_write)
+                self.assertEqual(parse_obsidian_write_request(query).mode, "overwrite")
+
+    def test_revision_with_explicit_publish_command_still_publishes(self):
+        query = "帮我润色后发布到博客 /Users/test/vault/文章 初稿.md"
+        self.assertEqual(classify_hugo_intent(query), HUGO_INTENT_EXECUTE_PUBLISH)
+        self.assertTrue(wants_hugo_publish(query))
+
     def test_hugo_image_capability_question_does_not_publish(self):
         query = "枫弋札记里好像没有办法部署图片你这边可以部署图片么？"
         self.assertTrue(is_hugo_capability_question(query))

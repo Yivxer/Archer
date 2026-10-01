@@ -395,6 +395,7 @@ def is_hugo_content_review_request(query: str) -> bool:
     has_review_intent = any(term in lowered for term in (
         "帮我分析", "分析一下", "帮我看看", "看一下", "看看这", "读后感如何",
         "读后感怎么样", "读后感", "如何", "怎么样", "评价", "建议", "优化", "调整",
+        "润色", "改写", "扩写", "缩写",
     ))
     has_local_markdown = bool(re.search(r"/Users/[^\n\r`'\"]+?\.md", query))
     mentions_past_publish = bool(re.search(r"(?:部署|发布|上传|上线)了", query))
