@@ -12,6 +12,8 @@ from typing import Any
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 TOKEN = "foundation-offline-token"
 CONTENT = "青禾项目先核对备份，再安装。"
 REJECTED = "未经确认的虚构习惯，不应成为有效记忆。"
