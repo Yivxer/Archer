@@ -40,8 +40,8 @@ Runtime 后续权威迁移、自由改写语义召回、真实资料全量 J8、
 
 ```bash
 bash run_tests.sh                     # 默认 9 项 smoke
-bash run_tests.sh --suite foundation  # 当前 101 项基础回归
-bash run_tests.sh --suite full        # 当前 1974 项离线回归
+bash run_tests.sh --suite foundation  # 当前 114 项基础回归
+bash run_tests.sh --suite full        # 当前 1987 项离线回归
 ```
 
 入口验证已提交 HEAD；未提交修改不会进入测试，可用 `--ref <commit>` 指定提交。`--report <path>` 将提交、选择范围和退出码保存在临时目录之外。全量排除 integration/journey，不触发真实模型。
@@ -62,3 +62,15 @@ runner 用 Git archive 建立一次性 checkout，补 Git index 供架构检查�
 | 重复请求与审批副作用 | 相同草稿刷新缓存时间戳，被 Outbox 当作业务载荷冲突 | `79f256d`；`tests/test_tool_approval_cache_replay.py` 验证原 cancelled receipt/payload 未变、业务参数或 requiresApproval 改变仍拒绝；跨进程重复拒绝零执行 |
 
 这轮聚焦 33、foundation 101、全量离线 1974 / 65 未选、Desktop 556、安装版 9/9 通过。原 workflow baseline 不变，Runtime shadow 不变；私人全量 J8 与真实模型跨多轮任务仍不据此标为完成。
+
+## J8 真资料副本补充（源码 `5fddf4a`）
+
+| 失败 | 根因与预期 | 固定回归 |
+|---|---|---|
+| 轻量上下文缺少原始事实 | 压缩 persona 与保守 DB 检索不足以覆盖配置中已有 SOUL/MEMORY；相关原文应进入实际 prompt，保留日期、否定和待确认，历史档案不作当前答案 | `tests/test_persona_recall.py`：simple/full、无关/编造问题、旧事实纠正、记忆 off、文件失败降级、缓存及长度限制 |
+| 未知线程串入全局最近线程 | 显式 thread ID 无 capsule 时不应借用另一线程的目标/停点 | 同文件显式未知线程回归；既有 `test_foundation_api_restart.py` 保留 |
+| 助手建议被标成已确认结论 | 现有 capsule 的 decisions 含助手回复；展示为历史回复，决定必须核对用户确认，不改旧数据库 | 同文件未确认助手建议回归 |
+
+真资料 30 问在同一最终判据下，旧源码 7/30、修复后 30/30；只证明实际模型上下文支持事实。人工复核 25 个动态来源片段有 1 个无关（4%）；DB 动态条目为 0，固定人格上下文单列。语义模型离线预热后 30/30，17 次检索 p95 340.72ms，保留真实库时延缺口。实际历史没有两会话线程，用户选择的 10 段真对话拆分回放在新进程 10/10，不替代真实历史跨会话。
+
+聚焦 28、foundation 114、全量离线 1987 / 65 未选通过，原 80 条长对话及 27 case baseline 不变。三条合成模型场景最终通过，累计 5 次尝试；没有用真资料调用 Archer 远程模型。证据整理误将部分私人上下文打印到 Codex 工具结果，违反整轮脱敏约束；事故及停止内容打印的处理已记录，不能据此声称私人上下文从未进入模型。原文件/持久化状态/9 个无关改动未变。完整结果及边界见 `docs/j8-local-acceptance-2026-10-01.md`。
