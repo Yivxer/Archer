@@ -87,6 +87,13 @@ def test_journey_five_checks_production_route_without_publishing():
     assert "curl_stream /chat/stream" not in body
 
 
+def test_journey_one_validates_the_isolated_data_root_not_session_filename():
+    body = _journey_body(1)
+
+    assert 'saved_root="$(basename "$(dirname "$(dirname "$saved_path")")")"' in body
+    assert '[[ "$saved_root" == archer-journey-* ]]' in body
+
+
 def test_journey_six_denies_real_approval_and_requires_same_trace():
     body = _journey_body(6)
 

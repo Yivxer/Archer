@@ -193,8 +193,11 @@ journey_1() {
 
   local saved_path
   saved_path="$(echo "$saved" | python3 -c "import sys,json; print(json.load(sys.stdin).get('path',''))" 2>/dev/null || echo '')"
-  # macOS 的 tempfile.gettempdir() 是 /var/folders/...，只匹配 basename 前缀以兼容两边
-  if [[ "$(basename "$saved_path")" == archer-journey-* ]] && [[ -f "$saved_path" ]]; then
+  # macOS 的 tempfile.gettempdir() 是 /var/folders/...；校验实际数据根目录，
+  # 而不是末尾的 session JSON 文件名。
+  local saved_root
+  saved_root="$(basename "$(dirname "$(dirname "$saved_path")")")"
+  if [[ "$saved_root" == archer-journey-* ]] && [[ -f "$saved_path" ]]; then
     ok "session 已写入隔离测试目录"
   else
     fail "session 未隔离: ${saved}"
