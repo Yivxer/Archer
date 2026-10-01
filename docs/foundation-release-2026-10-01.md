@@ -69,7 +69,7 @@ Reflect 和共享 API 审计路径已补测试隔离。现有 `run_tests.sh` 现
 
 ## 本机备份与回滚
 
-受保护目录：`/Users/Yivxer/Library/Application Support/Archer Foundation Backups/20261001-141144`。含原 1.0.26 app、原后端 archive、配置、SQLite backup、memory 任务/会话、原工作树补丁、清理前状态、项目文档原件、发布 manifest 与验收日志。SQLite backup 的临时副本恢复完整性为 ok。
+受保护目录：`/Users/Yivxer/Library/Application Support/Archer Foundation Backups/20261001-141144`。含原 1.0.26 app、原后端 archive、配置、SQLite backup、memory 任务/会话、原工作树补丁、清理前状态、项目文档原件、发布 manifest 与验收日志。SQLite backup 的临时副本恢复完整性为 ok。 同日补充组合恢复演练：旧 1.0.26 app 的 267 个文件及 14 个符号链接逐项匹配，权限与 codesign 检查通过；原后端 `fec88ba`（760 文件）、当前后端 `79f256d`（772 文件）archive 与对应 Git 提交一致，安全解包后逐文件一致，实际 API 入口存在；配置 TOML 可解析；SQLite 53 张表完整性 ok；memory/journal、任务、线程与 50 个会话副本哈希一致且 JSON 可解析。演练临时目录已删除，证据为备份目录的 `restore-drill-20261001.json`。只验证恢复材料，不启动旧 app、不替换当前安装/数据库，不据此宣称旧版本与当前数据运行兼容。
 
 回滚顺序：正常退出 Archer → 备份此刻新增数据和改动 → 恢复旧 app → 将原后端 archive 解到独立目录，校对并切换到与 app 匹配的后端/必要配置。不要直接覆盖当前工作树或原未提交改动。应用版本回退通常无需恢复数据库；只有实际数据不兼容时才在保留新增用户数据的前提下另行处理数据库。
 
