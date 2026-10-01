@@ -92,12 +92,17 @@ def run(suite: str, ref: str, report: Path | None) -> int:
         ["git", "rev-parse", "--verify", f"{ref}^{{commit}}"], cwd=ROOT, text=True
     ).strip()
     archive = subprocess.check_output(["git", "archive", commit], cwd=ROOT)
-    with tempfile.TemporaryDirectory(prefix="archer-offline-") as temporary:
+    # Legacy macOS Markdown routing deliberately recognizes /Users/ paths.
+    temporary_root = Path.home() / ".codex/tmp"
+    temporary_root.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="archer-offline-", dir=temporary_root) as temporary:
         workspace = Path(temporary)
         checkout = workspace / "source"
         checkout.mkdir()
         with tarfile.open(fileobj=io.BytesIO(archive)) as source:
             source.extractall(checkout, filter="data")
+        subprocess.run(["git", "init", "-q"], cwd=checkout, check=True)
+        subprocess.run(["git", "add", "."], cwd=checkout, check=True)
         prepare_config(checkout)
         bootstrap = workspace / "bootstrap"
         bootstrap.mkdir()
