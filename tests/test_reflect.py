@@ -11,8 +11,23 @@ import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
+
+
+@pytest.fixture(autouse=True)
+def isolated_reflection_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep emotion reads and legacy direct assignments inside temporary state."""
+    import core.artifacts as art_mod
+    import memory.emotion as emotion_mod
+    import memory.store as store_mod
+
+    monkeypatch.setattr(store_mod, "DB_PATH", tmp_path / "memory.db")
+    monkeypatch.setattr(art_mod, "ARTIFACTS_DIR", tmp_path / "artifacts")
+    monkeypatch.setattr(emotion_mod, "DB_PATH", tmp_path / "emotions.db")
+    emotion_mod.init_emotion_table()
 
 
 # ── 1. _reflect_to_text() 纯函数 ──────────────────────────────────────────────
@@ -97,8 +112,8 @@ _SAMPLE_DATA = {
 
 def test_reflect_enters_history():
     """_reflect() 结果写入 session.history，可以追问。"""
-    import memory.store as store_mod
     import core.artifacts as art_mod
+    import memory.store as store_mod
 
     with tempfile.TemporaryDirectory() as tmp:
         store_mod.DB_PATH = Path(tmp) / "test.db"
@@ -118,8 +133,8 @@ def test_reflect_enters_history():
 
 def test_reflect_stages_memory_candidates():
     """memory_candidates 写入 pending_memories。"""
-    import memory.store as store_mod
     import core.artifacts as art_mod
+    import memory.store as store_mod
 
     with tempfile.TemporaryDirectory() as tmp:
         store_mod.DB_PATH = Path(tmp) / "test.db"
@@ -140,8 +155,8 @@ def test_reflect_stages_memory_candidates():
 
 def test_reflect_saves_summary_as_reflection_memory():
     """summary 保存为 type='reflection' 的记忆。"""
-    import memory.store as store_mod
     import core.artifacts as art_mod
+    import memory.store as store_mod
 
     with tempfile.TemporaryDirectory() as tmp:
         store_mod.DB_PATH = Path(tmp) / "test.db"
@@ -161,8 +176,8 @@ def test_reflect_saves_summary_as_reflection_memory():
 
 def test_reflect_saves_artifact():
     """完整 JSON 保存到 .artifacts/reflections/。"""
-    import memory.store as store_mod
     import core.artifacts as art_mod
+    import memory.store as store_mod
 
     with tempfile.TemporaryDirectory() as tmp:
         store_mod.DB_PATH = Path(tmp) / "test.db"
@@ -183,8 +198,8 @@ def test_reflect_saves_artifact():
 
 def test_reflect_short_history_skips():
     """对话太短时直接返回，不调用 LLM。"""
-    import memory.store as store_mod
     import core.artifacts as art_mod
+    import memory.store as store_mod
 
     with tempfile.TemporaryDirectory() as tmp:
         store_mod.DB_PATH = Path(tmp) / "test.db"

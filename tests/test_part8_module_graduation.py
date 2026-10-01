@@ -6,7 +6,6 @@ from pathlib import Path
 
 import pytest
 
-
 ROOT = Path(__file__).resolve().parents[1]
 REGISTRY_PATH = ROOT / "docs" / "part8-module-graduation.json"
 IGNORED_PARTS = {".git", ".venv", ".worktrees", "node_modules", "tests", "__pycache__"}
