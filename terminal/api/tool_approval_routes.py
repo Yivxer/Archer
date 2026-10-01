@@ -12,6 +12,7 @@ from typing import Any
 from core.permission_levels import permission_level_for_tool
 from core.runtime_cancellation import CancellationToken
 from terminal.api._config import (
+    CACHE_CREATED_AT_FIELD,
     _load_config,
     get_tool_draft,
     get_tool_fingerprint_result,
@@ -361,10 +362,41 @@ def _tool_approval(payload: dict, runtime_context: Any = None) -> dict:
     }
 
 
+def _enqueue_tool_outbox(
+    runtime_context: Any, stored_draft: dict, idempotency_key: str,
+) -> dict:
+    from infrastructure.outbox import enqueue, get_by_idempotency_key
+
+    payload = {"draft": stored_draft}
+    try:
+        return enqueue(
+            runtime_context.db_path, kind="tool.execute", payload=payload,
+            idempotency_key=idempotency_key, now=runtime_context.now(),
+        )
+    except ValueError:
+        # Older durable payloads include an ephemeral draft-cache timestamp.
+        # Reuse only if every other field still matches; keep the old row intact.
+        existing = get_by_idempotency_key(runtime_context.db_path, idempotency_key)
+        if existing is None or existing["kind"] != "tool.execute":
+            raise
+        prior_payload = dict(existing["payload"])
+        prior_draft = prior_payload.get("draft")
+        if not isinstance(prior_draft, dict):
+            raise
+        prior_draft = dict(prior_draft)
+        requested_draft = dict(stored_draft)
+        prior_draft.pop(CACHE_CREATED_AT_FIELD, None)
+        requested_draft.pop(CACHE_CREATED_AT_FIELD, None)
+        prior_payload["draft"] = prior_draft
+        if prior_payload != {"draft": requested_draft}:
+            raise
+        return {**existing, "reused": True}
+
+
 def _prepare_tool_outbox(event_id: str, decision: str, draft: dict, fingerprint: str, runtime_context):
     if runtime_context is None or draft.get("kind") != "tool_request":
         return None
-    from infrastructure.outbox import approve, cancel, enqueue
+    from infrastructure.outbox import approve, cancel
 
     idempotency_key = (
         f"tool:{fingerprint}"
@@ -375,13 +407,7 @@ def _prepare_tool_outbox(event_id: str, decision: str, draft: dict, fingerprint:
     if fingerprint:
         stored_draft.pop("eventId", None)
         stored_draft.pop("traceId", None)
-    item = enqueue(
-        runtime_context.db_path,
-        kind="tool.execute",
-        payload={"draft": stored_draft},
-        idempotency_key=idempotency_key,
-        now=runtime_context.now(),
-    )
+    item = _enqueue_tool_outbox(runtime_context, stored_draft, idempotency_key)
     if item["status"] == "pending":
         item = (
             approve(runtime_context.db_path, item["id"], now=runtime_context.now())

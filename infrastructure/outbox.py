@@ -209,6 +209,17 @@ def get_item(db_path: str | Path, item_id: str) -> dict[str, Any] | None:
         conn.close()
 
 
+def get_by_idempotency_key(db_path: str | Path, key: str) -> dict[str, Any] | None:
+    """Read the immutable payload for a caller validating a replay."""
+    conn = _connect(db_path)
+    try:
+        return _decode_row(conn.execute(
+            "SELECT * FROM durable_outbox WHERE idempotency_key = ?", (key,),
+        ).fetchone())
+    finally:
+        conn.close()
+
+
 def list_items(
     db_path: str | Path,
     *,
