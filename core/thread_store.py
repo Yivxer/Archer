@@ -14,6 +14,7 @@ THREADS_PATH = DEFAULT_THREADS_PATH
 
 
 def read_threads(path: Path | None = None, db_path: Path | None = None) -> list[dict[str, Any]]:
+    use_context_db = _uses_context_db(path, db_path)
     path = thread_store_path(path)
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
@@ -22,7 +23,7 @@ def read_threads(path: Path | None = None, db_path: Path | None = None) -> list[
     if not isinstance(raw, list):
         return []
     threads = [thread for item in raw if (thread := normalize_thread(item))]
-    if not _uses_context_db(path, db_path):
+    if not use_context_db:
         return threads
     return [_with_context_state(thread, db_path=db_path) for thread in threads]
 

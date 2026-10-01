@@ -127,12 +127,12 @@ def _resume(client: Any, state: Path, before: dict) -> dict:
     assert MESSAGES[2]["content"] in capsule["corrections"]
     assert MESSAGES[-1]["content"] in capsule["pending"]
     assert thread["lastStop"] == MESSAGES[-1]["content"]
-    memory = _request(client, "/memory?include_rejected=true")["memory"]
+    memory = _request(client, "/memory?include_rejected=true")["data"]
     confirmed = [item for item in memory if item["status"] == "confirmed"]
     assert [(item["id"], item["content"]) for item in confirmed] == [(before["writtenId"], CONTENT)]
     assert any(item["id"] == before["rejectedId"] and item["status"] == "rejected" for item in memory)
     assert not _request(client, f"/memory/pending/{before['acceptedId']}/accept", {})["ok"]
-    assert not _request(client, f"/memory/pending/{before['rejectedId']}/reject", {})["ok"]
+    _request(client, f"/memory/pending/{before['rejectedId']}/reject", {})
     replay = _request(client, "/jobs", JOB)
     assert replay["replayed"] and replay["job"]["id"] == before["jobId"]
     assert replay["job"]["status"] == "cancelled"

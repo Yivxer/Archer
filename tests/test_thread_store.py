@@ -1,4 +1,7 @@
 import json
+from pathlib import Path
+
+import pytest
 
 from core.thread_store import (
     add_session_to_thread,
@@ -14,6 +17,54 @@ def test_thread_store_handles_bad_json(tmp_path):
     path.write_text("{bad json", encoding="utf-8")
 
     assert read_threads(path) == []
+
+
+@pytest.mark.parametrize("explicit_db", [False, True])
+def test_thread_read_restores_context_without_changing_index(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, explicit_db: bool,
+) -> None:
+    import core.thread_store as threads
+    import memory.thread_context as context
+
+    index, db = tmp_path / "threads.json", tmp_path / "context.db"
+    monkeypatch.setattr(threads, "THREADS_PATH", index)
+    monkeypatch.setattr(threads, "DEFAULT_THREADS_PATH", index)
+    monkeypatch.setattr(context, "memory_db_path", lambda: db)
+    messages = [
+        {"role": "user", "content": "目标：检查青禾备份"},
+        {"role": "assistant", "content": "决定：先核对配置"},
+        {"role": "user", "content": "不对，纠正为只看本机"},
+        {"role": "user", "content": "接下来继续检查，尚未完成"},
+    ]
+    created = threads.create_thread(messages, "synthetic-session")
+    before = index.read_bytes()
+    restored = (
+        threads.read_threads(index, db_path=db)[0]
+        if explicit_db else threads.get_thread(created["id"])
+    )
+    assert restored is not None
+    assert restored["contextState"] == created["contextState"]
+    assert restored["lastStop"] == messages[-1]["content"]
+    assert index.read_bytes() == before
+
+
+def test_explicit_isolated_thread_index_does_not_read_default_database(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import core.thread_store as threads
+    import memory.thread_context as context
+
+    def forbidden_read(*args: object, **kwargs: object) -> None:
+        raise AssertionError("explicit isolated index must not read the default DB")
+
+    monkeypatch.setattr(context, "get_thread_context", forbidden_read)
+    index = tmp_path / "isolated-threads.json"
+    created = threads.create_thread(
+        [{"role": "user", "content": "隔离会话"}], "isolated-session", index,
+    )
+    restored = threads.get_thread(created["id"], index)
+    assert restored == created
+    assert "contextState" not in restored
 
 
 def test_thread_store_creates_updates_and_appends_sessions(tmp_path):
