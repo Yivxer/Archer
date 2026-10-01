@@ -1,12 +1,28 @@
+import re
 from datetime import datetime, timedelta
-from memory.a4 import select_context_memories, should_create_reflection_anchor
-from memory.store import search, recent, update_last_used, get_by_ids
+
 from infrastructure.observability import trace_span
+from memory.a4 import select_context_memories, should_create_reflection_anchor
+from memory.store import get_by_ids, recent, search, update_last_used
 
 _LIGHT_INPUTS = {
     "你好", "hi", "hello", "在吗", "早", "早安", "晚安",
     "ok", "嗯", "好", "好的", "谢谢", "继续",
 }
+
+
+def _recall_topic(query: str) -> str | None:
+    """Extract a topic only from an explicit, bounded recall question."""
+    patterns = (
+        r"关于([^，,。？！!?\n]{2,40})[，,]\s*(?:上次|之前)定的是什么[？?]?",
+        r"我(?:之前|上次)说过的([^，,。？！!?\n]{2,40})是什么[？?]?",
+        r"我的([^，,。？！!?\n]{2,40})是怎么安排的[？?]?",
+    )
+    for pattern in patterns:
+        match = re.fullmatch(pattern, query.strip())
+        if match:
+            return match.group(1).strip()
+    return None
 
 def _should_skip_memory(user_input: str) -> bool:
     text = user_input.strip().lower()
@@ -64,6 +80,8 @@ def for_context(user_input: str = "", limit: int = 5, intent: str | None = None,
             related_raw = _hybrid_search(
                 user_input.strip(), limit=total_limit, use_vector=is_warmed(),
             )
+            if not related_raw and (topic := _recall_topic(user_input)):
+                related_raw = _hybrid_search(topic, limit=total_limit, use_vector=False)
         else:
             related_raw = recent(total_limit)
 

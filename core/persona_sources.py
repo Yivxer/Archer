@@ -4,7 +4,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Mapping
 
-
 PERSONA_SOURCE_FIELDS = (
     "soul_path",
     "memory_path",
@@ -34,7 +33,8 @@ def persona_source_status(config: Mapping[str, Any]) -> dict[str, Any]:
     missing = [field for field, item in sources.items() if not item["readable"]]
     return {
         "ready": not missing,
-        "injected": not missing,
+        # Readiness cannot prove that a source reached this turn's prompt.
+        "injected": False,
         "missing": missing,
         "sources": sources,
     }

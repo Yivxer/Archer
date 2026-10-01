@@ -27,6 +27,7 @@ from terminal.api.context_assembly import (
     assemble_web_context,
     file_reference_context,
     build_memory_context_event,
+    finalize_memory_context_event, split_memory_context_events,
 )
 from terminal.api.chat_turn_context import FullTurnDependencies, prepare_full_turn
 from terminal.api.hugo_turn import HugoTurnDependencies, iter_hugo_turn_events
@@ -441,11 +442,10 @@ def _iter_simple_chat_path(
     )
     enriched_messages = memory_result.messages
     yield from memory_result.events
-    from core.persona_sources import persona_source_status
-    yield _with_trace_id(build_memory_context_event(
+    memory_event = _with_trace_id(build_memory_context_event(
         trace_id=trace_id,
         intent="chat",
-        persona_injected=persona_source_status(_cfg)["injected"],
+        persona_injected=False,
         prior_history=prior_history,
         messages=messages,
         retrieval_receipt=memory_result.receipt,
@@ -475,6 +475,7 @@ def _iter_simple_chat_path(
         core_persona=core_persona,
         simple=True,
     )
+    yield finalize_memory_context_event(memory_event, model_messages)
     yield {"type": "_metric", "stage": "context_ready", "traceId": trace_id}
 
     yield from iter_chat_reply_events(
@@ -572,8 +573,8 @@ def _iter_chat_chunks_impl(
     _turn_decision = prepared_turn.turn_decision
     intent = intent_info["intent"]
     enriched_messages = prepared_turn.enriched_messages
-    for event in prepared_turn.events:
-        yield event
+    context_events, memory_event = split_memory_context_events(prepared_turn.events)
+    yield from context_events
     # 动态对话姿态：优先使用 orchestrator 的 mode；手动锁定时让位
     active_stance = orchestration.mode if orchestration else None
     stance_prompt = ""
@@ -739,7 +740,7 @@ def _iter_chat_chunks_impl(
         tool_notes=tool_notes,
         obsidian_hint=obsidian_hint,
     )
-
+    yield finalize_memory_context_event(memory_event, model_messages)
     ai_reply = yield from iter_chat_reply_events(
         model_messages,
         query=query,

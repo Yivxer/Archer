@@ -1,0 +1,245 @@
+{
+  "description": "Synthetic sanitized cases derived from collaboration themes; not private source text and not a full semantic/model evaluation.",
+  "cases": [
+    {
+      "id": "recall-01",
+      "source": "sanitized-persona",
+      "topic": "写作原则",
+      "content": "文章先写具体经历，再给有限判断。",
+      "question": "关于写作原则，上次定的是什么？",
+      "expected": "具体经历"
+    },
+    {
+      "id": "recall-02",
+      "source": "sanitized-persona",
+      "topic": "改稿顺序",
+      "content": "改稿先删重复解释，再检查段落推进。",
+      "question": "关于改稿顺序，上次定的是什么？",
+      "expected": "重复解释"
+    },
+    {
+      "id": "recall-03",
+      "source": "sanitized-persona",
+      "topic": "发布边界",
+      "content": "明确指定的原稿和封面都要核对后发布。",
+      "question": "关于发布边界，上次定的是什么？",
+      "expected": "原稿和封面"
+    },
+    {
+      "id": "recall-04",
+      "source": "sanitized-persona",
+      "topic": "阅读计划",
+      "content": "每周保留两晚读长篇小说。",
+      "question": "关于阅读计划，上次定的是什么？",
+      "expected": "两晚"
+    },
+    {
+      "id": "recall-05",
+      "source": "sanitized-persona",
+      "topic": "读书笔记",
+      "content": "读书笔记保留自己的疑惑和阅读感受。",
+      "question": "关于读书笔记，上次定的是什么？",
+      "expected": "疑惑"
+    },
+    {
+      "id": "recall-06",
+      "source": "sanitized-persona",
+      "topic": "训练频率",
+      "content": "力量训练每周三次，累积疲劳时减量。",
+      "question": "关于训练频率，上次定的是什么？",
+      "expected": "三次"
+    },
+    {
+      "id": "recall-07",
+      "source": "sanitized-persona",
+      "topic": "恢复安排",
+      "content": "恢复日只散步，不补高强度训练。",
+      "question": "关于恢复安排，上次定的是什么？",
+      "expected": "散步"
+    },
+    {
+      "id": "recall-08",
+      "source": "sanitized-persona",
+      "topic": "跑步目标",
+      "content": "跑步目标是持续完成轻松跑。",
+      "question": "关于跑步目标，上次定的是什么？",
+      "expected": "轻松跑"
+    },
+    {
+      "id": "recall-09",
+      "source": "sanitized-persona",
+      "topic": "徒步准备",
+      "content": "徒步前确认天气和补给。",
+      "question": "关于徒步准备，上次定的是什么？",
+      "expected": "补给"
+    },
+    {
+      "id": "recall-10",
+      "source": "sanitized-persona",
+      "topic": "视频风格",
+      "content": "视频记录训练前后的真实状态。",
+      "question": "关于视频风格，上次定的是什么？",
+      "expected": "真实状态"
+    },
+    {
+      "id": "recall-11",
+      "source": "sanitized-persona",
+      "topic": "拍摄素材",
+      "content": "拍摄素材要补出门和训练后的过渡。",
+      "question": "我之前说过的拍摄素材是什么？",
+      "expected": "过渡"
+    },
+    {
+      "id": "recall-12",
+      "source": "sanitized-persona",
+      "topic": "剪辑验收",
+      "content": "剪辑验收要看时间线和边界帧。",
+      "question": "我之前说过的剪辑验收是什么？",
+      "expected": "边界帧"
+    },
+    {
+      "id": "recall-13",
+      "source": "sanitized-persona",
+      "topic": "知识归档",
+      "content": "知识归档以本地 Markdown 为主要入口。",
+      "question": "我之前说过的知识归档是什么？",
+      "expected": "Markdown"
+    },
+    {
+      "id": "recall-14",
+      "source": "sanitized-persona",
+      "topic": "笔记边界",
+      "content": "笔记边界是不代替用户添加分类和反向链接。",
+      "question": "我之前说过的笔记边界是什么？",
+      "expected": "反向链接"
+    },
+    {
+      "id": "recall-15",
+      "source": "sanitized-persona",
+      "topic": "协作方式",
+      "content": "协作方式是指出错误假设并推进小闭环。",
+      "question": "我之前说过的协作方式是什么？",
+      "expected": "小闭环"
+    },
+    {
+      "id": "recall-16",
+      "source": "sanitized-persona",
+      "topic": "决策标准",
+      "content": "决策标准包含维护成本和恢复成本。",
+      "question": "我之前说过的决策标准是什么？",
+      "expected": "恢复成本"
+    },
+    {
+      "id": "recall-17",
+      "source": "sanitized-persona",
+      "topic": "测试顺序",
+      "content": "测试顺序先聚焦检查，再做必要的全量回归。",
+      "question": "我之前说过的测试顺序是什么？",
+      "expected": "聚焦检查"
+    },
+    {
+      "id": "recall-18",
+      "source": "sanitized-persona",
+      "topic": "数据备份",
+      "content": "数据备份使用 SQLite backup 并做完整性检查。",
+      "question": "我之前说过的数据备份是什么？",
+      "expected": "SQLite"
+    },
+    {
+      "id": "recall-19",
+      "source": "sanitized-persona",
+      "topic": "安装验收",
+      "content": "安装验收要核对应用与后端对应的源码。",
+      "question": "我之前说过的安装验收是什么？",
+      "expected": "后端"
+    },
+    {
+      "id": "recall-20",
+      "source": "sanitized-persona",
+      "topic": "模型额度",
+      "content": "模型额度优先留给必要的短请求。",
+      "question": "我之前说过的模型额度是什么？",
+      "expected": "短请求"
+    },
+    {
+      "id": "recall-21",
+      "source": "sanitized-current-memory",
+      "topic": "假期目标",
+      "content": "假期目标是交付稳定基础版本。",
+      "question": "我的假期目标是怎么安排的？",
+      "expected": "稳定基础版本"
+    },
+    {
+      "id": "recall-22",
+      "source": "sanitized-current-memory",
+      "topic": "当前任务",
+      "content": "当前任务是修复首次保存后的计划卡。",
+      "question": "我的当前任务是怎么安排的？",
+      "expected": "计划卡"
+    },
+    {
+      "id": "recall-23",
+      "source": "sanitized-current-memory",
+      "topic": "待办停点",
+      "content": "待办停点是先完成记忆连续性验收。",
+      "question": "我的待办停点是怎么安排的？",
+      "expected": "记忆连续性"
+    },
+    {
+      "id": "recall-24",
+      "source": "sanitized-current-memory",
+      "topic": "发布版本",
+      "content": "发布版本定为本地 1.0.27。",
+      "question": "我的发布版本是怎么安排的？",
+      "expected": "1.0.27"
+    },
+    {
+      "id": "recall-25",
+      "source": "sanitized-current-memory",
+      "topic": "运行态边界",
+      "content": "运行态边界保持 shadow，不进行权威迁移。",
+      "question": "我的运行态边界是怎么安排的？",
+      "expected": "shadow"
+    },
+    {
+      "id": "recall-26",
+      "source": "sanitized-current-memory",
+      "topic": "失败回归",
+      "content": "失败回归覆盖五类有证据的历史故障。",
+      "question": "我的失败回归是怎么安排的？",
+      "expected": "五类"
+    },
+    {
+      "id": "recall-27",
+      "source": "sanitized-current-memory",
+      "topic": "反馈流程",
+      "content": "反馈流程由人工审查后进入固定回归。",
+      "question": "我的反馈流程是怎么安排的？",
+      "expected": "人工审查"
+    },
+    {
+      "id": "recall-28",
+      "source": "sanitized-current-memory",
+      "topic": "部署限制",
+      "content": "部署限制是本轮不推送远端。",
+      "question": "我的部署限制是怎么安排的？",
+      "expected": "不推送"
+    },
+    {
+      "id": "recall-29",
+      "source": "sanitized-current-memory",
+      "topic": "主动提醒",
+      "content": "主动提醒要在明确开启后才投递。",
+      "question": "我的主动提醒是怎么安排的？",
+      "expected": "明确开启"
+    },
+    {
+      "id": "recall-30",
+      "source": "sanitized-current-memory",
+      "topic": "下一阶段",
+      "content": "下一阶段逐域迁移统一任务状态。",
+      "question": "我的下一阶段是怎么安排的？",
+      "expected": "逐域迁移"
+    }
+  ]
+}

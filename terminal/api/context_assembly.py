@@ -2,14 +2,38 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
-import re
 from typing import Callable
 from uuid import uuid4
 
-
 MAX_FILE_REF_BYTES = 1_000_000
+
+
+def split_memory_context_events(events: list[dict]) -> tuple[list[dict], dict]:
+    """Hold the memory receipt until the actual model prompt is assembled."""
+    other_events = []
+    memory_event = {}
+    for event in events:
+        if event.get("runtimeContextEvent", {}).get("task") == "memory_context":
+            memory_event = event
+        else:
+            other_events.append(event)
+    return other_events, memory_event
+
+
+def finalize_memory_context_event(event: dict, model_messages: list[dict]) -> dict:
+    """Report source injection from the outgoing core system prompt, not disk."""
+    prompt = str(model_messages[0].get("content", "")) if model_messages and model_messages[0].get("role") == "system" else ""
+    markers = ("[context:soul_md]", "[context:soul_profile]", "[context:memory_md]",
+               "[根契约摘要]", "[在场方式]", "[ARCHER.persona override]")
+    context = event["runtimeContextEvent"]
+    receipt = context["contextReceipt"]
+    injected = {**receipt["sources"], "persona": any(marker in prompt for marker in markers)}
+    return {**event, "runtimeContextEvent": {
+        **context, "contextReceipt": {**receipt, "sources": injected},
+    }}
 
 
 @dataclass(frozen=True, slots=True)

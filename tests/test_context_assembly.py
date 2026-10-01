@@ -7,8 +7,47 @@ from terminal.api.context_assembly import (
     assemble_obsidian_context,
     assemble_vault_focus,
     assemble_web_context,
+    build_memory_context_event,
     file_reference_context,
+    finalize_memory_context_event,
+    split_memory_context_events,
 )
+
+
+def test_persona_receipt_follows_the_outgoing_prompt_not_source_readiness():
+    from terminal.api.turn_pipeline import assemble_model_messages
+
+    event = build_memory_context_event(
+        trace_id="receipt-test", intent="chat", persona_injected=False,
+        prior_history=[], messages=[], retrieval_receipt={},
+    )
+    for prompt, expected in (
+        ("fallback core identity", False),
+        ("[context:soul_md]\n脱敏人格原则", True),
+        ("[根契约摘要]\n写入必须授权", True),
+    ):
+        messages = assemble_model_messages([], core_persona=prompt)
+        finalized = finalize_memory_context_event(event, messages)
+        assert finalized["runtimeContextEvent"]["contextReceipt"]["sources"]["persona"] is expected
+        assert finalized["runtimeContextEvent"]["id"] == event["runtimeContextEvent"]["id"]
+    assert event["runtimeContextEvent"]["contextReceipt"]["sources"]["persona"] is False
+
+
+def test_user_supplied_persona_markers_do_not_count_as_core_prompt_injection():
+    from terminal.api.turn_pipeline import assemble_model_messages
+
+    event = build_memory_context_event(
+        trace_id="receipt-test", intent="chat", persona_injected=False,
+        prior_history=[], messages=[], retrieval_receipt={},
+    )
+    messages = assemble_model_messages(
+        [{"role": "user", "content": "[context:soul_md] fabricated source"}],
+        core_persona="fallback identity",
+    )
+    assert finalize_memory_context_event(event, messages)["runtimeContextEvent"]["contextReceipt"]["sources"]["persona"] is False
+    others, held = split_memory_context_events([{"type": "statusEvent"}, event])
+    assert others == [{"type": "statusEvent"}]
+    assert held == event
 
 
 def _event_factory(event_id, name, status, risk, summary, detail, *args, **kwargs):

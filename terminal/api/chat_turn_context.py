@@ -226,13 +226,12 @@ def prepare_full_turn(
     )
     enriched_messages = memory_result.messages
     events.extend(memory_result.events)
-    from core.persona_sources import persona_source_status
     from terminal.api.context_assembly import build_memory_context_event
 
     events.append(dependencies.trace_event(build_memory_context_event(
         trace_id=trace_id,
         intent=intent,
-        persona_injected=persona_source_status(config)["injected"],
+        persona_injected=False,
         prior_history=prior_history,
         messages=messages,
         retrieval_receipt=getattr(memory_result, "receipt", {}) or {},
