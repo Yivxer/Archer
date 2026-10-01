@@ -9,7 +9,6 @@ if [ ! -d ".venv" ]; then
   exit 1
 fi
 
-source .venv/bin/activate
-
-echo "=== Archer Smoke Tests ==="
-python tests/test_smoke.py
+# Defaults to the same nine smoke tests, with disposable configuration/state.
+# Full offline regression: bash run_tests.sh --suite full
+exec .venv/bin/python scripts/verify_offline.py "$@"
