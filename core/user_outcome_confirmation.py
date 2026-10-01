@@ -232,6 +232,43 @@ def _finish_confirmation(
     return run, step
 
 
+def _finish_with_conflict_recovery(
+    db_path: str | Path,
+    *,
+    decision: OutcomeDecision,
+    run: RunRecord,
+    step: StepRecord,
+    confirmed_at: str,
+) -> tuple[RunRecord, StepRecord]:
+    expected = (
+        (RunState.COMPLETED, StepState.COMPLETED)
+        if decision == "accepted"
+        else (RunState.WAITING_USER, StepState.WAITING_USER)
+    )
+    for attempt in range(3):
+        try:
+            return _finish_confirmation(
+                db_path, decision=decision, run=run, step=step,
+                confirmed_at=confirmed_at,
+            )
+        except (RunVersionConflict, StepStateConflict) as exc:
+            current_run = get_run(db_path, run.id)
+            current_step = get_step(db_path, step.id)
+            if current_run is not None and current_step is not None:
+                run, step = current_run, current_step
+                if (run.state, step.state) == expected:
+                    return run, step
+                # The same immutable receipt can finish the Run after another
+                # request finished its Step. Cancellation/different states fail closed.
+                if (attempt < 2 and run.state in {RunState.VERIFYING, RunState.UNCERTAIN}
+                        and step.state is expected[1]):
+                    continue
+            raise UserOutcomeConfirmationConflict(
+                "outcome confirmation state changed concurrently"
+            ) from exc
+    raise AssertionError("confirmation recovery exhausted without a result")
+
+
 def confirm_user_outcome(
     db_path: str | Path,
     *,
@@ -294,26 +331,13 @@ def confirm_user_outcome(
     current_step = get_step(db_path, step_id)
     if current_run is None or current_step is None:
         raise UserOutcomeConfirmationUnavailable("confirmation target disappeared")
-    try:
-        run, step = _finish_confirmation(
-            db_path,
-            decision=decision,
-            run=current_run,
-            step=current_step,
-            confirmed_at=confirmed_at,
-        )
-    except (RunVersionConflict, StepStateConflict) as exc:
-        run = get_run(db_path, run_id)
-        step = get_step(db_path, step_id)
-        expected = (
-            (RunState.COMPLETED, StepState.COMPLETED)
-            if decision == "accepted"
-            else (RunState.WAITING_USER, StepState.WAITING_USER)
-        )
-        if run is None or step is None or (run.state, step.state) != expected:
-            raise UserOutcomeConfirmationConflict(
-                "outcome confirmation state changed concurrently"
-            ) from exc
+    run, step = _finish_with_conflict_recovery(
+        db_path,
+        decision=decision,
+        run=current_run,
+        step=current_step,
+        confirmed_at=confirmed_at,
+    )
     return UserOutcomeConfirmation(
         decision=decision,
         receipt=existing or requested,

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
+from threading import Event
 
 import pytest
 from fastapi.testclient import TestClient
@@ -172,6 +173,87 @@ def test_concurrent_confirmation_replays_one_receipt_and_terminal_state(
     assert sum(item.replayed for item in results) == 1
     assert len(list_verifications(db_path, "step-confirm-1")) == 1
     assert get_run(db_path, "run-confirm-1").state is RunState.COMPLETED
+
+
+@pytest.mark.parametrize("decision", ["accepted", "correction"])
+def test_concurrent_confirmation_converges_after_step_before_run(
+    tmp_path, monkeypatch, decision,
+) -> None:
+    """A losing Step CAS must converge the same receipt's partial completion."""
+    import core.user_outcome_confirmation as confirmation
+
+    db_path = tmp_path / "archer.db"
+    _setup(db_path)
+    winner_paused, loser_finished = Event(), Event()
+    actual_step_transition = confirmation.transition_step
+
+    def paused_transition(*args, **kwargs):
+        step = actual_step_transition(*args, **kwargs)
+        winner_paused.set()
+        assert loser_finished.wait(5), "replay did not finish"
+        return step
+
+    monkeypatch.setattr(confirmation, "transition_step", paused_transition)
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        winner = executor.submit(_confirm, db_path, decision)
+        assert winner_paused.wait(5), "winner did not complete Step"
+        # Replay with a deliberately stale verifying snapshot, as a second
+        # request can read the Step immediately before the winner writes it.
+        def stale_step_transition(*args, **kwargs):
+            from core.step_store import StepStateConflict
+            raise StepStateConflict("stale verifying snapshot")
+
+        original_finish = confirmation._finish_confirmation
+
+        def conflicting_finish(*args, **kwargs):
+            monkeypatch.setattr(confirmation, "transition_step", stale_step_transition)
+            from dataclasses import replace
+            kwargs["step"] = replace(kwargs["step"], state=StepState.VERIFYING)
+            try:
+                return original_finish(*args, **kwargs)
+            finally:
+                monkeypatch.setattr(confirmation, "_finish_confirmation", original_finish)
+
+        monkeypatch.setattr(confirmation, "_finish_confirmation", conflicting_finish)
+        try:
+            replay = _confirm(db_path, decision)
+        finally:
+            loser_finished.set()
+        first = winner.result(timeout=5)
+    assert replay.replayed and not first.replayed
+    assert len(list_verifications(db_path, "step-confirm-1")) == 1
+    expected_run = RunState.COMPLETED if decision == "accepted" else RunState.WAITING_USER
+    expected_step = StepState.COMPLETED if decision == "accepted" else StepState.WAITING_USER
+    assert replay.run.state is first.run.state is expected_run
+    assert replay.step.state is first.step.state is expected_step
+
+
+def test_partial_confirmation_does_not_override_concurrent_cancellation(tmp_path, monkeypatch) -> None:
+    import core.user_outcome_confirmation as confirmation
+    from core.step_store import StepStateConflict
+
+    db_path = tmp_path / "archer.db"
+    _setup(db_path)
+
+    def cancellation_wins(*args, **kwargs):
+        transition_step(
+            db_path, "step-confirm-1", StepState.COMPLETED,
+            expected_state=StepState.VERIFYING,
+            event_id="event-partial-step", transitioned_at=NOW,
+        )
+        run = get_run(db_path, "run-confirm-1")
+        for state in (RunState.CANCELLING, RunState.CANCELLED):
+            run = transition_run(
+                db_path, run.id, state, expected_version=run.version,
+                event_id=f"event-concurrent-{state.value}", updated_at=NOW,
+            )
+        raise StepStateConflict("another request changed state")
+
+    monkeypatch.setattr(confirmation, "_finish_confirmation", cancellation_wins)
+    with pytest.raises(UserOutcomeConfirmationConflict):
+        _confirm(db_path)
+    assert get_run(db_path, "run-confirm-1").state is RunState.CANCELLED
+    assert len(list_verifications(db_path, "step-confirm-1")) == 1
 
 
 def test_outcome_confirmation_api_validates_and_returns_runtime_state(
