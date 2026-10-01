@@ -9,7 +9,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 REGISTRY_PATH = ROOT / "docs" / "part8-module-graduation.json"
-IGNORED_PARTS = {".git", ".venv", "tests", "__pycache__"}
+IGNORED_PARTS = {".git", ".venv", ".worktrees", "node_modules", "tests", "__pycache__"}
 
 
 def _registry() -> dict:
@@ -55,6 +55,16 @@ def _external_calls(module_names: set[str], entrypoints: set[str], owner_files: 
             ):
                 calls.add(f"{relative}:{node.func.attr}")
     return calls
+
+
+def test_production_scan_excludes_independent_worktrees(tmp_path, monkeypatch):
+    monkeypatch.setattr(__import__(__name__, fromlist=["ROOT"]), "ROOT", tmp_path)
+    live = tmp_path / "core" / "live.py"
+    archived = tmp_path / ".worktrees" / "old" / "core" / "live.py"
+    for path in (live, archived):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("pass\n", encoding="utf-8")
+    assert _production_python_files() == [live]
 
 
 @pytest.mark.contract
