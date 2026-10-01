@@ -375,15 +375,7 @@ def _iter_simple_chat_path(
     obsidian_mode: str,
     runtime_context=None,
 ):
-    """B5.1 simple path：轻量闲聊跳过 orchestration/router/memory/vault/tool_loop。
-
-    只做：
-    1. yield ready + 最小化 statusEvent
-    2. 构建 enriched_messages（messages + file_context + vault focus）
-    3. 构建简化 model_messages（core_persona + stance，无 task_plan/mode_constraint/matched_skills）
-    4. 主模型 stream + heartbeat + DSML 救援 + fallback
-    5. yield done
-    """
+    """Light chat with bounded memory/source context, without planning or tool execution."""
     _cfg = _load_config()
     from core.experts import active_expert, format_expert_block, active_expert_id
     _expert = active_expert(_cfg)
@@ -454,7 +446,9 @@ def _iter_simple_chat_path(
     # 构建 system prompt（简化版：core_persona + stance + expert_block，无 task_plan）
     try:
         from core.context import build_desktop_core_prompt, _get_mode_prompt
-        core_persona = build_desktop_core_prompt()
+        core_persona = build_desktop_core_prompt(
+            _cfg, query=query if memory_mode != "off" else "",
+        )
         stance_prompt = ""
         if _cfg["persona"].get("mode_auto", True):
             # simple path 不跑 orchestration，stance 用默认
@@ -717,6 +711,7 @@ def _iter_chat_chunks_impl(
                 orchestration.needs_project_context if orchestration else None
             ),
             context_limits=context_limits,
+            allow_persona_recall=memory_mode != "off",
         )
     except Exception:
         try:

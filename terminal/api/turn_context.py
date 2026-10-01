@@ -24,7 +24,7 @@ def _inject_stored_thread_context(messages: list[dict], thread_id: str) -> list[
     latest_user = next((str(item.get("content", "")) for item in reversed(messages) if item.get("role") == "user"), "")
     resume_query = any(marker in latest_user for marker in ("上次聊到", "之前聊到", "继续之前", "接着上次"))
     state = get_thread_context(thread_id) if thread_id else None
-    if state is None and resume_query:
+    if state is None and resume_query and not thread_id:
         state = latest_thread_context()
     if state is None:
         return messages

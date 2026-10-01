@@ -186,7 +186,7 @@ def format_context_capsule(state: dict[str, Any]) -> str:
     capsule = state.get("contextState", state)
     version = int(state.get("summaryVersion") or 0)
     lines = [f"[线程情境胶囊] version={version}" if version else "[线程情境胶囊]"]
-    labels = (("goal", "目标"), ("decisions", "已确认结论"), ("pending", "未完成"), ("corrections", "用户纠正"), ("lastStop", "最近停点"))
+    labels = (("goal", "目标"), ("decisions", "历史回复（决定须核对用户确认）"), ("pending", "未完成"), ("corrections", "用户纠正"), ("lastStop", "最近停点"))
     for key, label in labels:
         value = capsule.get(key)
         if isinstance(value, list):

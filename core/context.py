@@ -272,6 +272,7 @@ def build_system_prompt(
     expert_block: str = "",
     needs_project_context: bool | None = None,
     context_limits: ContextLimits | None = None,
+    allow_persona_recall: bool = True,
 ) -> str:
     """
     按灵魂三层注入顺序构建 System Prompt：
@@ -423,6 +424,16 @@ def build_system_prompt(
                 scope in _PROJECT_SCOPES for scope in memory_scope
             )
 
+        if allow_persona_recall and user_input:
+            from core.persona_recall import persona_recall_blocks
+
+            present_sources = set()
+            if needs_soul:
+                present_sources.add("soul_md")
+            if include_memory_md and not limits.memory_md_max_chars:
+                present_sources.add("memory_md")
+            parts.extend(persona_recall_blocks(user_input, cfg, present_sources=present_sources))
+
         # Layer 6: 活跃项目
         if project and inject_project_work:
             proj_ctx = _format_project_context(
@@ -471,19 +482,21 @@ def build_system_prompt(
         return result
 
 
-def build_desktop_core_prompt(cfg: dict | None = None) -> str:
+def build_desktop_core_prompt(cfg: dict | None = None, *, query: str = "") -> str:
     """构建 Desktop API 使用的核心 persona 提示词。
 
-    与 Terminal CLI 的 build_system_prompt() 不同，Desktop 使用精简版——
-    省略 COVENANT/PRESENCE/SOUL/MEMORY.md 等文件系统分层（这些由 Desktop
-    客户端通过 /soul-files 等端点独立管理），只注入核心 persona + 工具态度。
+    保留精简人格；个人回忆问题按相关性追加有界的 SOUL/MEMORY 片段。
+    不因普通闲聊、无关问题或编造请求注入整份私人档案。
     """
     try:
         if cfg is None:
             from core.llm import load_config
 
             cfg = load_config()
-        return f"{build_core_persona(cfg=cfg)}\n\n{_ARCHER_CORE}"
+        from core.persona_recall import persona_recall_blocks
+
+        blocks = persona_recall_blocks(query, cfg) if query else []
+        return "\n\n".join([build_core_persona(cfg=cfg), _ARCHER_CORE, *blocks])
     except Exception:
         return "Archer 的核心身份是长期陪伴型 AI 灵魂伴生体。"
 

@@ -24,6 +24,7 @@ SUITES = {
         "tests/test_memory_continuity_j8.py",
         "tests/test_context_assembly.py",
         "tests/test_persona_sources.py",
+        "tests/test_persona_recall.py",
         "tests/test_journey_smoke_script.py",
         "tests/test_reflect.py",
         "tests/test_offline_runner.py",
