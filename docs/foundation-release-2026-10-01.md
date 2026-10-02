@@ -2,7 +2,7 @@
 
 2026-10-01，验证等级 **installed**。分支 `codex/foundation-20261001`，未推送远端或公开发布。
 
-2026-10-02 已续交付 **1.0.28 installed**，含 J8 源码修复加载、gate 时间格式修复及线索生命周期；最新证据见 `docs/initiative-lifecycle-release-2026-10-02.md`。本文件以下保留 1.0.27 的历史交付边界。
+2026-10-02 已续交付 **1.0.29 installed**，现有桌面字体与侧栏视觉改动已收口，最新证据见 `docs/desktop-visual-release-2026-10-02.md`；1.0.28 的 J8 修复加载、gate 时间格式修复及线索生命周期见 `docs/initiative-lifecycle-release-2026-10-02.md`。本文件以下保留 1.0.27 的历史交付边界。
 
 ## 安装与源码
 
