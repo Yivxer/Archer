@@ -41,6 +41,14 @@ def record_unclosed_thread(
         raise ValueError("topic is required")
     stamp = (last_seen_at or datetime.now()).isoformat(timespec="seconds")
     conn = sqlite3.connect(db_path)
+    # Serialize lookup/insert without a schema change. Match the source text,
+    # not a broad topic keyword; terminal cues must not be reopened by replay.
+    conn.execute("BEGIN IMMEDIATE")
+    key = (" ".join(topic[:160].split()).casefold(), " ".join(prompt.strip()[:500].split()).casefold())
+    for row_id, old_topic, old_prompt in conn.execute("SELECT id, topic, prompt FROM part8_threads"):
+        if key == (" ".join(old_topic.split()).casefold(), " ".join((old_prompt or "").split()).casefold()):
+            conn.close()
+            return int(row_id)
     cur = conn.execute(
         """
         INSERT INTO part8_threads

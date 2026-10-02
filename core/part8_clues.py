@@ -53,7 +53,7 @@ def record_thread_clues_from_messages(
     if not clue:
         return []
     init_table(db_path)
-    if _open_topic_exists(db_path, clue.topic):
+    if _recorded_clue_exists(db_path, clue.topic, clue.prompt):
         return []
     return [
         record_unclosed_thread(
@@ -66,11 +66,11 @@ def record_thread_clues_from_messages(
     ]
 
 
-def _open_topic_exists(db_path: Path, topic: str) -> bool:
+def _recorded_clue_exists(db_path: Path, topic: str, prompt: str) -> bool:
     conn = sqlite3.connect(db_path)
     row = conn.execute(
-        "SELECT 1 FROM part8_threads WHERE status='open' AND topic=? LIMIT 1",
-        (topic,),
+        "SELECT 1 FROM part8_threads WHERE topic=? AND prompt=? LIMIT 1",
+        (topic, prompt),
     ).fetchone()
     conn.close()
     return row is not None

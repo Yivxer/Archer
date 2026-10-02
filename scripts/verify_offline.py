@@ -34,6 +34,8 @@ SUITES = {
         "tests/test_foundation_api_restart.py",
         "tests/test_thread_store.py",
         "tests/test_tool_approval_cache_replay.py",
+        "tests/test_part8_shadow_validation.py",
+        "tests/test_thread_clue_lifecycle.py",
     ],
     "full": [],
 }

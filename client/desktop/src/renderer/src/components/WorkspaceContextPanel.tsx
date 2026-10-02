@@ -89,6 +89,8 @@ export function WorkspaceContextPanel({
           onTooFrequent={() => void shadowFeedback.sendFeedback(candidate.id, 'too_frequent')}
           onMute={() => void shadowFeedback.togglePresence()}
           onViewAll={() => onNavigate?.('Today')}
+          onRefresh={onRefresh}
+          canControl={canControlInitiative}
         />
       )}
       {runtimeRuns.length > 0 && (

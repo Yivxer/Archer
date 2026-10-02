@@ -466,6 +466,15 @@ def payload_get(path: str, runtime_context=None) -> tuple[int, dict | list]:
     return 404, {"error": "not_found", "path": path}
 def payload_post(path: str, payload: dict, runtime_context=None) -> tuple[int, dict | list]:
     """Handle POST request routing."""
+    if path == "/initiative-threads/expire":
+        from terminal.api.thread_clue_routes import thread_clue_expire
+
+        return thread_clue_expire(payload, runtime_context)
+    clue_action = re.fullmatch(r"/initiative-threads/([0-9]+)/status", path)
+    if clue_action:
+        from terminal.api.thread_clue_routes import thread_clue_action
+
+        return thread_clue_action(clue_action.group(1), payload, runtime_context)
     if path == "/exports/portable":
         from memory.portable_export import write_portable_export
         from memory.store import DB_PATH

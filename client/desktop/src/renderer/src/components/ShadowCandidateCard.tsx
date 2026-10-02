@@ -1,6 +1,7 @@
 import React from 'react'
 import { BellOff, Check, LoaderCircle, VolumeX } from 'lucide-react'
 import type { InitiativeShadowItem } from '../types'
+import { ThreadClueActions } from './ThreadClueActions'
 
 export function ShadowCandidateCard({
   item,
@@ -10,6 +11,8 @@ export function ShadowCandidateCard({
   onTooFrequent,
   onMute,
   onViewAll,
+  onRefresh,
+  canControl = false,
 }: {
   item: InitiativeShadowItem
   busy: string
@@ -18,6 +21,8 @@ export function ShadowCandidateCard({
   onTooFrequent: () => void
   onMute: () => void
   onViewAll: () => void
+  onRefresh?: () => Promise<void>
+  canControl?: boolean
 }) {
   return (
     <section className="workspace-shadow-card" aria-label="Archer 观察候选">
@@ -42,6 +47,7 @@ export function ShadowCandidateCard({
           静音
         </button>
       </div>
+      <ThreadClueActions item={item} disabled={!canControl || Boolean(busy)} onRefresh={onRefresh} />
       {notice && <em role="status">{notice}</em>}
     </section>
   )

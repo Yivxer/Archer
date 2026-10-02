@@ -19,6 +19,7 @@ from core.shadow_validation import (
     evaluate_long_term_validation,
     evaluate_shadow_validation,
 )
+from core.thread_clue_lifecycle import thread_clue_allows_delivery
 from infrastructure.observability import trace_span
 from infrastructure.outbox import (
     approve,
@@ -67,6 +68,8 @@ def queue_thread_resume(
         return {"queued": False, "delivered": False, "reason": "not_thread_resume"}
     if log.get("delivered"):
         return {"queued": False, "delivered": True, "reason": "already_delivered"}
+    if not thread_clue_allows_delivery(db_path, log):
+        return {"queued": False, "delivered": False, "reason": "thread_clue_inactive"}
     gate = delivery_gate(
         db_path,
         now=now,
@@ -137,6 +140,9 @@ def process_thread_resume_outbox(
             continue
         log_id = int(item.get("payload", {}).get("initiativeLogId") or 0)
         log = get_shadow_log(db_path, log_id)
+        if log is not None and not thread_clue_allows_delivery(db_path, log):
+            cancel(db_path, item["id"], now=now)
+            continue
         if log is None or log.get("kind") != THREAD_RESUME_KIND:
             claimed = claim_for_sending(db_path, item["id"], now=now)
             if claimed:
@@ -178,6 +184,8 @@ def process_thread_resume_outbox(
             sent += 1
         except Exception as exc:
             mark_failed(db_path, item["id"], str(exc), now=now)
+            if not thread_clue_allows_delivery(db_path, log):
+                cancel(db_path, item["id"], now=now)
     return sent
 
 

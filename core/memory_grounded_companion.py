@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from core.initiative_shadow import get_shadow_log, list_shadow_logs
-
+from core.thread_clue_lifecycle import thread_clue_allows_delivery
 
 MIN_CONFIDENCE = 0.75
 ALLOWED_RESPONSES = {"displayed", "continue", "correct", "suppress"}
@@ -50,6 +50,7 @@ def pending_companion_message(db_path: Path) -> dict[str, Any] | None:
             and source == "episodic"
             and confidence >= MIN_CONFIDENCE
             and trace.get("threadId") is not None
+            and thread_clue_allows_delivery(db_path, log)
         ):
             return {
                 "id": int(log["id"]),

@@ -193,12 +193,14 @@ def mark_initiative_delivered(
     trace = dict(current.get("decision_trace") or {})
     trace["delivery"] = dict(delivery_trace)
     conn = sqlite3.connect(db_path)
-    conn.execute(
-        "UPDATE initiative_sent_log SET delivered=1, decision_trace_json=? WHERE id=?",
+    changed = conn.execute(
+        "UPDATE initiative_sent_log SET delivered=1, decision_trace_json=? WHERE id=? AND archived_at IS NULL",
         (json.dumps(trace, ensure_ascii=False, sort_keys=True), int(log_id)),
     )
     conn.commit()
     conn.close()
+    if not changed.rowcount:
+        return None
     return get_shadow_log(db_path, log_id)
 
 

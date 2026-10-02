@@ -18,6 +18,7 @@ import {
   submitInitiativeFeedback,
 } from '../adapters/localArcher'
 import type { InitiativeShadowReview, InitiativeShadowReviewCandidate } from '../types'
+import { transitionThreadClue, type ThreadClueStatus } from '../adapters/threadClues'
 import { createExternalStore, useExternalStore, type LoadState } from './externalStore'
 import { mergeInitiativeShadowEvent } from './initiativeShadow'
 
@@ -111,6 +112,18 @@ export async function submitInitiativeFeedbackAction(
     }))
     throw err
   }
+}
+
+export async function transitionThreadClueAction(id: number, status: ThreadClueStatus): Promise<void> {
+  await transitionThreadClue(id, status)
+  store.setState((s) => ({
+    ...s,
+    review: s.review ? {
+      ...s.review,
+      items: s.review.items.filter((item) => Number(item.decisionTrace.threadId) !== id),
+    } : null,
+    reviewCandidate: Number(s.reviewCandidate?.item?.decisionTrace.threadId) === id ? null : s.reviewCandidate,
+  }))
 }
 
 /**

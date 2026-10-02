@@ -9,7 +9,6 @@ from typing import Any, Literal
 from core.initiative_shadow import get_shadow_log, normalize_presence_state
 from memory.part8_schema import init_initiative_shadow_interactions_table
 
-
 InteractionEvent = Literal["exposure", "feedback", "mute", "unmute"]
 VALID_SURFACES = {"chat_workspace", "today", "legacy"}
 
@@ -95,11 +94,11 @@ def claim_review_candidate(
         if exposure:
             log_id = int(exposure["initiative_log_id"])
             feedback_row = conn.execute(
-                "SELECT feedback FROM initiative_sent_log WHERE id=?",
+                "SELECT feedback, archived_at FROM initiative_sent_log WHERE id=?",
                 (log_id,),
             ).fetchone()
             conn.commit()
-            if not feedback_row or str(feedback_row["feedback"] or ""):
+            if not feedback_row or feedback_row["archived_at"] or str(feedback_row["feedback"] or ""):
                 return _claim_result(resolved_surface, exposure_date, "already_reviewed_today")
             return _claim_result(
                 resolved_surface,

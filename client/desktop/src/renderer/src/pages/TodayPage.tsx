@@ -3,6 +3,7 @@ import { BellOff, BellRing, Check, Eye, LoaderCircle, RefreshCw, ShieldCheck, Vo
 import { setInitiativeDeliveryOptInAction } from '../lib/initiativeStore'
 import { useShadowFeedback } from '../lib/useShadowFeedback'
 import type { Route } from '../types'
+import { ThreadClueActions } from '../components/ThreadClueActions'
 
 export function TodayPage({
   canControl,
@@ -16,7 +17,7 @@ export function TodayPage({
   const feedback = useShadowFeedback({ canControl, surface: 'today', onRefresh })
   const shadow = feedback.review
   const candidates = (shadow?.items ?? [])
-    .filter((item) => item.kind === 'thread_resume')
+    .filter((item) => item.kind === 'thread_resume' && !item.archivedAt)
     .slice(0, 3)
   const throttleLabel = shadow?.globalThrottleActive ? '降频中' : 'Shadow 观察中'
   const presenceLabel = shadow?.presenceState === 'muted'
@@ -246,6 +247,7 @@ export function TodayPage({
                     </button>
                   </div>
                 )}
+                {canControl && <ThreadClueActions item={item} disabled={Boolean(busy || feedback.busy)} onRefresh={onRefresh} />}
                 <small>{formatCandidateTime(item.createdAt)}</small>
               </article>
             ))}
