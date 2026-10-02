@@ -703,6 +703,10 @@ type InitiativeStoreState = {
 | `setPresence(state, surface?)` | POST /initiative-shadow/presence | refresh review.presenceState；记录 mute/unmute 计数 |
 | `exposureReport` | GET /initiative-shadow/exposure-report?surface=chat_workspace&days=14 | 曝光、反馈转化、认可、太频繁、静音的脱敏聚合 |
 | `setDeliveryOptIn(enabled)` | POST /initiative-shadow/opt-in | refresh review.optIn + deliveryGate；关闭时取消未发送的 `initiative.thread_resume` Outbox 项 |
+| `transitionThreadClueAction(id, status)` | POST /initiative-threads/{id}/status | 仅 Part 8 数字线索 ID；status 为 resolved/closed/dismissed/expired；归档关联候选、取消待发送 Outbox，清除当前候选投影；不关闭普通会话或记录认可 |
+| 显式过期维护 | POST /initiative-threads/expire `{maxIdleDays:30}` | 1–365 整数天，依据 last_seen_at；返回 expiredIds。不会在启动或扫描时自动批量过期用户线索 |
+
+线索状态响应为 `{ok,id,status,closedAt,changed}`，重复同终态返回 changed=false；无效状态/ID 为 400、缺失线索为 404、终态冲突为 409。沿用认证及 contractVersion 封装，无 schema 迁移。线索与 conversation thread/capsule 使用独立命名空间；候选 lifecycle trace 记录前后状态和时间，来源证据与历史投递保留。归档后的候选不再进入新认领、重试或聊天展示；发送过程的更新也拒绝已归档候选。
 | `mergeSseEvent(event)` | （无 API，由 SSE initiative.event 注入） | 合并到 review.items |
 
 **订阅者**：TodayPage、ReviewPage、main.tsx（SSE 合并）

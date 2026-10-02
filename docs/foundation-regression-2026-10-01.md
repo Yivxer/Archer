@@ -40,8 +40,8 @@ Runtime 后续权威迁移、自由改写语义召回、真实资料全量 J8、
 
 ```bash
 bash run_tests.sh                     # 默认 9 项 smoke
-bash run_tests.sh --suite foundation  # 当前 114 项基础回归
-bash run_tests.sh --suite full        # 当前 1987 项离线回归
+bash run_tests.sh --suite foundation  # 当前 137 项基础回归
+bash run_tests.sh --suite full        # 当前 2004 项离线回归
 ```
 
 入口验证已提交 HEAD；未提交修改不会进入测试，可用 `--ref <commit>` 指定提交。`--report <path>` 将提交、选择范围和退出码保存在临时目录之外。全量排除 integration/journey，不触发真实模型。
@@ -74,3 +74,12 @@ runner 用 Git archive 建立一次性 checkout，补 Git index 供架构检查�
 真资料 30 问在同一最终判据下，旧源码 7/30、修复后 30/30；只证明实际模型上下文支持事实。人工复核 25 个动态来源片段有 1 个无关（4%）；DB 动态条目为 0，固定人格上下文单列。语义模型离线预热后 30/30，17 次检索 p95 340.72ms，保留真实库时延缺口。实际历史没有两会话线程，用户选择的 10 段真对话拆分回放在新进程 10/10，不替代真实历史跨会话。
 
 聚焦 28、foundation 114、全量离线 1987 / 65 未选通过，原 80 条长对话及 27 case baseline 不变。三条合成模型场景最终通过，累计 5 次尝试；没有用真资料调用 Archer 远程模型。证据整理误将部分私人上下文打印到 Codex 工具结果，违反整轮脱敏约束；事故及停止内容打印的处理已记录，不能据此声称私人上下文从未进入模型。原文件/持久化状态/9 个无关改动未变。完整结果及边界见 `docs/j8-local-acceptance-2026-10-01.md`。
+
+## 10-02：安装态 gate 与线索状态补充
+
+- `8bdf186`：历史 ISO 时间有无 offset 混用，使 shadow gate 排序失败；`test_part8_shadow_validation.py` 增加 4 个混合格式和本地日期边界回归。真实 gate 接口恢复，反馈不足/未授权仍关闭。
+- `3c318ab`：线索终态、幂等/冲突、来源去重、显式过期、关联候选归档/Outbox 取消；`test_thread_clue_lifecycle.py` 13 项，含关闭发生在发送 claim 之后的确定性复现，旧 capsule 域不变。终态不伪造认可，API/Today/候选卡的入口保持明确。
+- 首轮新线索测试暴露存储字段名误用（接口 `decision_trace` 与数据库 `decision_trace_json`），事务回滚；按实际 schema 修正后通过。相关 45、foundation 137、全量离线 2004 / 65 未选、Desktop 572、build/package/sign/install 及就绪后 installed smoke 9/9；没有模型调用。
+- 当前源码真资料副本 30/30、拆分回放 10/10，原 25 动态来源片段未变；安装版已有 40 个 capsule 与原库一致，正常退出/重启通过。既有导出轮换的四个原文件先保留新输出再恢复，最终原始文件/表/9 个无关修改内容一致。
+
+详细交付与未完成边界见 `docs/initiative-lifecycle-release-2026-10-02.md`。真实反馈、私人回答质量、真实历史跨会话和 300ms 时延缺口继续待验，Part 8 与 Runtime 不切权。
