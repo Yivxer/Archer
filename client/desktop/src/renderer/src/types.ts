@@ -939,8 +939,6 @@ export type ArcherAdapter = {
   experts: ExpertSettings
   proactive: ProactiveTouch
   initiativeShadow: InitiativeShadowReview
-  soulProfile: SoulProfileSummary
-  soulFiles: SoulFiles
   periodReviews: Record<ReviewPeriod, PeriodReview>
   journalReview: JournalReview
   settings: SettingsDraft

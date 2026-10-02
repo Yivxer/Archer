@@ -28,14 +28,9 @@ import type {
   ScheduledTask,
   ScheduleListResult,
   ScheduleMutationResult,
-  SoulFiles,
-  SoulImportResult,
-  SoulProfileSummary,
   ReviewPeriod,
   ToolApprovalResult,
   ToolEvent,
-  VaultReflection,
-  VaultReflectionResult
 } from '../types'
 import { assertSupportedContractVersion, jobSnapshotToAgentEvent, pythonApprovalToAgentEvent, pythonStreamPayloadToAgentEvents } from '../../../agent'
 import type { AgentEvent, PythonStreamPayload } from '../../../agent'
@@ -257,8 +252,6 @@ export async function loadLocalArcher(): Promise<ArcherAdapter> {
     initiativeShadowDeliveryGateRaw,
     initiativeShadowReviewPacketRaw,
     initiativeShadowExposureReportRaw,
-    soulProfile,
-    soulFiles,
     periodReviewsList,
     journalReview,
     configDoctor,
@@ -315,8 +308,6 @@ export async function loadLocalArcher(): Promise<ArcherAdapter> {
       shadow: true,
       report: defaultInitiativeShadowExposureReport(),
     }),
-    safeJson('/soul-profile', { empty: true, sections: [] } as ArcherAdapter['soulProfile']),
-    safeJson('/soul-files', {} as ArcherAdapter['soulFiles']),
     Promise.all(reviewPeriods.map((period) => safeJson(`/reviews?period=${period}`, {
       period,
       title: period,
@@ -390,8 +381,6 @@ export async function loadLocalArcher(): Promise<ArcherAdapter> {
       initiativeShadowReviewPacketRaw,
       initiativeShadowExposureReportRaw,
     ),
-    soulProfile,
-    soulFiles,
     periodReviews,
     journalReview,
     settings,
@@ -722,36 +711,8 @@ export async function fetchMemoryItems(): Promise<MemoryItem[]> {
   return getJson<MemoryItem[]>('/memory?include_rejected=true')
 }
 
-export async function fetchSoulProfile(): Promise<SoulProfileSummary> {
-  return getJson<SoulProfileSummary>('/soul-profile')
-}
-
-export async function fetchSoulFiles(): Promise<SoulFiles> {
-  return getJson<SoulFiles>('/soul-files')
-}
-
-export async function exportPortableData(): Promise<{
-  ok: boolean
-  jsonPath: string
-  markdownPath: string
-}> {
-  return postJson('/exports/portable', {})
-}
-
-export async function importSoul(soulData: Record<string, unknown>): Promise<SoulImportResult> {
-  return postJson<SoulImportResult>('/soul/import', { soulData })
-}
-
 export async function fetchMemoryStats(): Promise<MemoryStats> {
   return getJson<MemoryStats>('/memory/stats')
-}
-
-export async function fetchVaultReflections(limit: number = 20): Promise<{ ok: boolean; reflections: VaultReflection[] }> {
-  return getJson<{ ok: boolean; reflections: VaultReflection[] }>(`/vault/reflection/recent?limit=${limit}`)
-}
-
-export async function triggerVaultReflection(payload: { path?: string; days?: number; maxNotes?: number; force?: boolean }): Promise<VaultReflectionResult> {
-  return postJson<VaultReflectionResult>('/vault/reflection', payload)
 }
 
 export async function fetchMemoryGroups(): Promise<Record<string, MemoryGroup>> {

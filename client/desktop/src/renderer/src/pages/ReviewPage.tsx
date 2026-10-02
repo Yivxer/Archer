@@ -15,6 +15,7 @@ import {
 import type { ArcherAdapter, MemoryItem, Route } from '../types'
 import { clearSessionDetail, loadSessionDetail, searchSessions, useSessionStore } from '../lib/sessionStore'
 import { resolvePendingMemoryAction, useMemoryStore } from '../lib/memoryStore'
+import { useSoulStore } from '../lib/soulStore'
 
 export function ReviewPage({
   data,
@@ -150,7 +151,8 @@ export function ReviewPage({
     data.periodReviews.monthly,
     data.periodReviews.life_stage,
   ].filter((review) => review.highlights.length || review.growth_markers.length || review.suggested_questions.length)
-  const soulSections = data.soulProfile.empty ? [] : data.soulProfile.sections.filter((section) => section.items.length).slice(0, 4)
+  const soulProfile = useSoulStore((state) => state.profile)
+  const soulSections = soulProfile?.sections.filter((section) => section.items.length).slice(0, 4) ?? []
 
   const grouped: { label: string; sessions: typeof sessions }[] = []
   for (const session of visibleSessions) {

@@ -1,3 +1,4 @@
+import { exportPortableData } from '../soulAdapter'
 import { describe, expect, it, beforeEach, vi } from 'vitest'
 
 // Mock localStorage for Node test environment
@@ -18,7 +19,6 @@ import {
   ChatBusyError,
   claimInitiativeReviewCandidate,
   ensureLocalConnection,
-  exportPortableData,
   fetchMemoryItems,
   getDesktopApiToken,
   loadLocalArcher,
@@ -654,6 +654,9 @@ describe('localArcher token management', () => {
     vi.stubGlobal('fetch', fetchSpy)
 
     const data = await loadLocalArcher()
+    expect(data).not.toHaveProperty('soulProfile')
+    expect(data).not.toHaveProperty('soulFiles')
+    expect(fetchSpy.mock.calls.some(([url]) => String(url).includes('/soul-profile') || String(url).includes('/soul-files'))).toBe(false)
 
     expect(data.initiativeShadow.globalThrottleActive).toBe(true)
     expect(data.initiativeShadow.items).toHaveLength(1)

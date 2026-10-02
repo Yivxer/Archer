@@ -1,17 +1,24 @@
 import React from 'react'
 import { BarChart3, BookOpenText, CheckCircle2, Clock3, Compass, Download, FileText, Heart, PenLine, RotateCcw, Sparkles, TrendingUp, Upload, Waves, XCircle } from 'lucide-react'
-import type { ArcherAdapter, HypothesisItem, ReviewPeriod, SoulFileName, SoulProfileSection, VaultReflection } from '../types'
+import type { HypothesisItem, JournalReview, PeriodReview, ReviewPeriod, SoulFileName, SoulProfileSection, VaultReflection } from '../types'
 import { ConfirmDialog, MarkdownMessage } from '../components/common'
 import { EmptyState } from '../components/EmptyState'
 import { LoadingState } from '../components/LoadingState'
 import { exportPortableDataAction, importSoulAction, loadAllSoul, useSoulStore } from '../lib/soulStore'
 
-export function SoulPage({ data }: { data: ArcherAdapter }) {
+export interface SoulPageProps {
+  connected: boolean
+  hypotheses: HypothesisItem[]
+  journalReview: JournalReview
+  periodReviews: Record<ReviewPeriod, PeriodReview>
+}
+
+export function SoulPage({ connected, hypotheses, journalReview, periodReviews }: SoulPageProps): React.JSX.Element {
   const [file, setFile] = React.useState<SoulFileName>('SOUL.md')
   const [refreshing, setRefreshing] = React.useState(false)
   const [exporting, setExporting] = React.useState(false)
   const [exportMessage, setExportMessage] = React.useState('')
-  const soulProfile = useSoulStore((state) => state.profile ?? data.soulProfile)
+  const soulProfile = useSoulStore((state) => state.profile)
   const soulFiles = useSoulStore((state) => state.files)
   const reflections = useSoulStore((state) => state.reflections)
   const reflectionLoadState = useSoulStore((state) => state.loadState)
@@ -22,15 +29,15 @@ export function SoulPage({ data }: { data: ArcherAdapter }) {
   const [confirmImportOpen, setConfirmImportOpen] = React.useState(false)
   const [reviewView, setReviewView] = React.useState<ReviewView | null>(null)
   const sortedHypotheses = React.useMemo(() => {
-    return [...data.hypotheses].sort((a, b) => {
+    return [...hypotheses].sort((a, b) => {
       if (isDueHypothesis(a) !== isDueHypothesis(b)) return isDueHypothesis(a) ? -1 : 1
       return dateMs(b.updatedAt || b.createdAt) - dateMs(a.updatedAt || a.createdAt)
     })
-  }, [data.hypotheses])
+  }, [hypotheses])
   const activeReviewText = reviewView
     ? reviewView === 'journal'
-      ? data.journalReview.markdown
-      : data.periodReviews[reviewView].markdown
+      ? journalReview.markdown
+      : periodReviews[reviewView].markdown
     : ''
 
   async function handleRefresh() {
@@ -127,7 +134,7 @@ export function SoulPage({ data }: { data: ArcherAdapter }) {
         <button
           className="quiet-button"
           type="button"
-          disabled={refreshing}
+          disabled={refreshing || reflectionLoadState === 'loading' || !connected}
           onClick={handleRefresh}
           title="刷新 Soul 文件"
         >
@@ -137,7 +144,7 @@ export function SoulPage({ data }: { data: ArcherAdapter }) {
         <button
           className="quiet-button"
           type="button"
-          disabled={importing || data.status.adapter !== 'local'}
+          disabled={importing || !connected}
           onClick={() => setConfirmImportOpen(true)}
           title="从 JSON 文件导入 Soul 数据"
         >
@@ -147,7 +154,7 @@ export function SoulPage({ data }: { data: ArcherAdapter }) {
         <button
           className="quiet-button"
           type="button"
-          disabled={exporting || data.status.adapter !== 'local'}
+          disabled={exporting || !connected}
           onClick={handleExport}
           title="将 Soul 与 Memory 导出为 JSON + Markdown"
         >
@@ -156,9 +163,13 @@ export function SoulPage({ data }: { data: ArcherAdapter }) {
         </button>
       </div>
       {(fileError || importMessage || exportMessage) && <div className="memory-state">{fileError || importMessage || exportMessage}</div>}
+      {soulError && <div className="memory-state" role="alert">{soulError}</div>}
       <div className="soul-layout">
         <section className="soul-profile-overview">
-          {soulProfile.empty ? (
+          {!soulProfile ? (
+            reflectionLoadState === 'loading' ? <LoadingState stage="fetching" hint="加载档案中…" compact /> :
+              <EmptyState compact title={connected ? '档案尚未加载' : '连接本地 Archer 后加载档案'} />
+          ) : soulProfile.empty ? (
             <EmptyState compact title="暂无结构化 Soul Profile" />
           ) : (
             soulProfile.sections.map((section) => (
@@ -166,20 +177,20 @@ export function SoulPage({ data }: { data: ArcherAdapter }) {
             ))
           )}
           <VaultReflectionsPanel
-            adapterStatus={data.status.adapter}
+            connected={connected}
             reflections={reflections}
             loading={reflectionLoadState === 'loading'}
-            error={soulError}
           />
           <HypothesisPanel hypotheses={sortedHypotheses} />
         </section>
         <div className="markdown-preview soul-markdown-reader">
-          {activeReviewText ? (
-            <MarkdownMessage text={activeReviewText} />
+          {reviewView ? (
+            activeReviewText ? <MarkdownMessage text={activeReviewText} /> : <EmptyState compact title="此周期暂无复盘内容" />
           ) : soulFiles[file]?.trim() ? (
             <MarkdownMessage text={soulFiles[file]} />
           ) : (
-            <EmptyState compact title="此文件未配置路径或为空" />
+            reflectionLoadState === 'loading' ? <LoadingState stage="fetching" hint="加载档案文件中…" compact /> :
+              <EmptyState compact title={reflectionLoadState === 'ready' ? '此文件未配置路径或为空' : '档案文件尚未加载'} />
           )}
         </div>
       </div>
@@ -217,17 +228,12 @@ function SoulProfileBlock({ section }: { section: SoulProfileSection }) {
   )
 }
 
-function VaultReflectionsPanel({ adapterStatus, reflections, loading, error }: {
-  adapterStatus: string
+function VaultReflectionsPanel({ connected, reflections, loading }: {
+  connected: boolean
   reflections: VaultReflection[]
   loading: boolean
-  error: string
 }) {
-  React.useEffect(() => {
-    if (adapterStatus === 'local' && reflections.length === 0) void loadAllSoul()
-  }, [adapterStatus])
-
-  if (adapterStatus !== 'local') return null
+  if (!connected && reflections.length === 0) return null
 
   return (
     <section className="soul-vault-reflections-panel" aria-labelledby="vault-reflections-title">
@@ -236,12 +242,11 @@ function VaultReflectionsPanel({ adapterStatus, reflections, loading, error }: {
           <span>Vault Bridge</span>
           <h2 id="vault-reflections-title">近期笔记结晶</h2>
         </div>
-        <button className="quiet-button" type="button" disabled={loading} onClick={() => void loadAllSoul()} title="刷新">
+        <button className="quiet-button" type="button" disabled={loading || !connected} onClick={() => void loadAllSoul()} title="刷新">
           <RotateCcw size={12} />
           {loading ? '加载中' : '刷新'}
         </button>
       </header>
-      {error && <p className="vault-reflections-error">{error}</p>}
       {reflections.length === 0 ? (
         loading ? (
           <LoadingState stage="fetching" hint="加载中…" compact />

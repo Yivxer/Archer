@@ -356,27 +356,6 @@ export const mockArcher: ArcherAdapter = {
       },
     },
   },
-  soulProfile: {
-    empty: false,
-    sections: [
-      { id: 'current_life_stage', label: '当前阶段', items: ['Archer 进入灵魂伴生体阶段'] },
-      { id: 'core_values', label: '核心价值', items: ['自己能做的事情尽量自己做好'] },
-      { id: 'emotional_patterns', label: '情绪模式', items: ['焦虑时会用规划填充行动前的不确定'] },
-      { id: 'life_themes', label: '人生主题', items: ['从失去旧记忆到重建新系统'] },
-      { id: 'creative_identity', label: '创作身份', items: ['把说不清的东西写清楚'] },
-      { id: 'growth_markers', label: '成长标记', items: ['开始把阶段变化记录为可回看的轨迹'] },
-    ]
-  },
-  soulFiles: {
-    'SOUL.md':
-      '# SOUL.md\n\n这部分用于描述用户是谁、价值观、工作方式，以及 Archer 应该如何理解长期主题。\n\n当前原型只读展示，后续通过本地 API 读取真实文件。',
-    'MEMORY.md':
-      '# MEMORY.md\n\n当前项目：Archer Desktop 静态原型。\n\n开放问题：何时接入本地 API、如何呈现工具确认、如何处理记忆审阅。',
-    'COVENANT.md':
-      '# COVENANT.md\n\n根契约不可由客户端静默修改。任何边界变化都必须显式确认，并保留审阅痕迹。',
-    'PRESENCE.md':
-      '# PRESENCE.md\n\n回应应保持清晰、克制、可执行。桌面端应该帮助用户看见结构，而不是制造噪音。'
-  },
   periodReviews: {
     weekly: {
       period: 'weekly',

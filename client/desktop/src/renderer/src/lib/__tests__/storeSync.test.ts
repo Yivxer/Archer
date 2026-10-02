@@ -1,18 +1,24 @@
 /**
  * L3.9d — storeSync 单元测试
  *
- * 验证 syncStoresFromAdapter 后，6 个领域 store 的 state 与 adapter 一致。
+ * 验证 syncStoresFromAdapter 后，兼容领域与 adapter 一致、Soul 状态不被快照覆盖。
  * 用 mockArcher 作为完整 adapter 夹具。
  */
 
-import { describe, expect, it, beforeEach } from 'vitest'
+import { describe, expect, it, beforeEach, vi } from 'vitest'
 import { mockArcher } from '../../adapters/mockArcher'
-import { projectMemoryStoreToAdapter, projectSoulStoreToAdapter, syncStoresFromAdapter } from '../storeSync'
+import { projectMemoryStoreToAdapter, syncStoresFromAdapter } from '../storeSync'
 import { getMemoryStoreState, resetMemoryStore } from '../memoryStore'
-import { getSoulStoreState, resetSoulStore } from '../soulStore'
+import { getSoulStoreState, loadAllSoul, resetSoulStore } from '../soulStore'
 import { getSessionStoreState, resetSessionStore } from '../sessionStore'
 import { getInitiativeStoreState, resetInitiativeStore } from '../initiativeStore'
 import { getThreadStoreState, resetThreadStore } from '../threadStore'
+
+vi.mock('../../adapters/soulAdapter', () => ({
+  fetchSoulProfile: vi.fn(async () => ({ empty: false, sections: [] })),
+  fetchSoulFiles: vi.fn(async () => ({ 'SOUL.md': '# Current' })),
+  fetchVaultReflections: vi.fn(async () => ({ ok: true, reflections: [] })),
+}))
 
 describe('storeSync — L3.9a syncStoresFromAdapter', () => {
   beforeEach(() => {
@@ -28,14 +34,10 @@ describe('storeSync — L3.9a syncStoresFromAdapter', () => {
     expect(getMemoryStoreState().items).toEqual(mockArcher.memory)
   })
 
-  it('sync 后 soulStore.profile 与 adapter.soulProfile 一致', () => {
+  it('compatibility snapshots do not initialize Soul authority', () => {
     syncStoresFromAdapter(mockArcher)
-    expect(getSoulStoreState().profile).toEqual(mockArcher.soulProfile)
-  })
-
-  it('sync 后 soulStore.files 与 adapter.soulFiles 一致', () => {
-    syncStoresFromAdapter(mockArcher)
-    expect(getSoulStoreState().files).toEqual(mockArcher.soulFiles)
+    expect(getSoulStoreState().profile).toBeNull()
+    expect(getSoulStoreState().loadState).toBe('idle')
   })
 
   it('sync 后 sessionStore.items 与 adapter.sessions 一致', () => {
@@ -53,10 +55,9 @@ describe('storeSync — L3.9a syncStoresFromAdapter', () => {
     expect(getThreadStoreState().items).toEqual(mockArcher.threads)
   })
 
-  it('sync 后所有 store loadState 为 ready', () => {
+  it('sync 后兼容 store loadState 为 ready', () => {
     syncStoresFromAdapter(mockArcher)
     expect(getMemoryStoreState().loadState).toBe('ready')
-    expect(getSoulStoreState().loadState).toBe('ready')
     expect(getSessionStoreState().loadState).toBe('ready')
     expect(getInitiativeStoreState().loadState).toBe('ready')
     expect(getThreadStoreState().loadState).toBe('ready')
@@ -84,20 +85,14 @@ describe('storeSync — L3.9a syncStoresFromAdapter', () => {
     expect(next.status.memoryCount).toBe(memory.filter((item) => item.status === 'confirmed').length)
     expect(next.status.pendingMemoryCount).toBe(memory.filter((item) => item.status === 'pending').length)
     expect(next.sessions).toBe(mockArcher.sessions)
-    expect(next.soulProfile).toBe(mockArcher.soulProfile)
     expect(next.initiativeShadow).toBe(mockArcher.initiativeShadow)
   })
 
-  it('soul 领域事件只投影 profile/files，不替换 memory 与 sessions', () => {
-    const profile = { empty: false, sections: [] }
-    const files = { ...mockArcher.soulFiles, 'SOUL.md': '# Updated Soul' }
-
-    const next = projectSoulStoreToAdapter(mockArcher, { profile, files })
-
-    expect(next.soulProfile).toBe(profile)
-    expect(next.soulFiles).toBe(files)
-    expect(next.memory).toBe(mockArcher.memory)
-    expect(next.sessions).toBe(mockArcher.sessions)
-    expect(next.initiativeShadow).toBe(mockArcher.initiativeShadow)
+  it('ignores legacy Soul fields without overwriting the loaded store', async () => {
+    await loadAllSoul()
+    const previous = getSoulStoreState()
+    const legacy = Object.assign({}, mockArcher, { soulProfile: { empty: true, sections: [] }, soulFiles: {} })
+    syncStoresFromAdapter(legacy)
+    expect(getSoulStoreState()).toBe(previous)
   })
 })

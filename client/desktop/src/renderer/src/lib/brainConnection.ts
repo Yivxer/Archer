@@ -163,7 +163,6 @@ export function createOfflineLocalShell(previous?: ArcherAdapter): ArcherAdapter
         },
       },
     },
-    soulProfile: { empty: true, sections: [] },
     experts: { current: 'default', experts: [] },
   }
 }

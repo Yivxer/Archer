@@ -19,9 +19,9 @@ import { connectionStatusLabel, expertShortLabel, modelProfileShortLabel } from 
 import { mergeInitiativeShadowEvent } from './lib/initiativeShadow'
 import { mergeSseInitiativeEvent } from './lib/initiativeStore'
 import { onStoreEvent } from './lib/storeEventBus'
-import { projectMemoryStoreToAdapter, projectSoulStoreToAdapter, syncStoresFromAdapter } from './lib/storeSync'
+import { projectMemoryStoreToAdapter, syncStoresFromAdapter } from './lib/storeSync'
 import { getMemoryStoreState, loadAllMemory } from './lib/memoryStore'
-import { getSoulStoreState } from './lib/soulStore'
+import { loadAllSoul } from './lib/soulStore'
 import { upsertThreadFromSave } from './lib/threadStore'
 import { deleteSession, getSessionStoreState, loadSessionDetail } from './lib/sessionStore'
 import { createOfflineLocalShell, syncBrainData, wasBrainEverLinked } from './lib/brainConnection'
@@ -241,7 +241,7 @@ function App() {
       const result = await syncBrainData({ previous: data, silent: options.silent })
       if (result.adapter) {
         setData(result.adapter)
-        // L3.9: 连接/重连时初始化 6 个领域 store；后续由领域 action 与事件维护。
+        // 兼容领域初始化；Soul 由独立 HTTP/store 加载。
         syncStoresFromAdapter(result.adapter)
       } else if (!wasBrainEverLinked()) {
         setData(mockArcher)
@@ -249,6 +249,7 @@ function App() {
       setApiState(result.state)
       setApiReason(result.reason || '')
       if (result.state === 'connected') {
+        void loadAllSoul()
         setApiBannerDismissed(false)
         // L0.4: 连接成功后读崩溃信息 (只读一次)
         try {
@@ -404,14 +405,12 @@ function App() {
         setData((current) => projectMemoryStoreToAdapter(current, memory))
       }))
     }
-    const soulProjectionEvents = [
+    const soulMemoryEvents = [
       'soul:imported',
       'soul:reflection-triggered',
     ] as const
-    for (const type of soulProjectionEvents) {
+    for (const type of soulMemoryEvents) {
       unsubs.push(onStoreEvent(type, () => {
-        const soul = getSoulStoreState()
-        setData((current) => projectSoulStoreToAdapter(current, soul))
         void loadAllMemory().then(() => {
           const memory = getMemoryStoreState().items
           setData((current) => projectMemoryStoreToAdapter(current, memory))
@@ -718,7 +717,7 @@ function App() {
               onCreateProject={createProject}
             />
           )}
-          {route === 'Soul' && <SoulPage data={data} />}
+          {route === 'Soul' && <SoulPage connected={apiState === 'connected'} hypotheses={data.hypotheses} periodReviews={data.periodReviews} journalReview={data.journalReview} />}
           {route === 'Settings' && (
             <SettingsPage
               data={data}

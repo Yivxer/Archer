@@ -9,7 +9,7 @@
  * 不覆盖：依赖 API 的 action（loadAll/submit/cancel 等），留给集成测试。
  */
 
-import { describe, expect, it, beforeEach } from 'vitest'
+import { describe, expect, it, beforeEach, vi } from 'vitest'
 import type { InitiativeEvent } from '../../../../agent/contracts'
 import type {
   ConversationThread,
@@ -32,8 +32,7 @@ import {
 } from '../memoryStore'
 import {
   getSoulStoreState,
-  mergeSoulFiles,
-  mergeSoulProfile,
+  loadAllSoul,
   resetSoulStore,
   subscribeSoulStore,
 } from '../soulStore'
@@ -70,6 +69,13 @@ import {
   subscribeThreadStore,
   upsertThreadFromSave,
 } from '../threadStore'
+
+
+vi.mock('../../adapters/soulAdapter', () => ({
+  fetchSoulProfile: vi.fn(async () => soulProfile),
+  fetchSoulFiles: vi.fn(async () => soulFiles),
+  fetchVaultReflections: vi.fn(async () => ({ ok: true, reflections: [] })),
+}))
 
 // ───────────────────────── 测试夹具 ─────────────────────────
 
@@ -331,29 +337,18 @@ describe('soulStore — L3.3', () => {
     expect(state.importMessage).toBe('')
   })
 
-  it('mergeSoulProfile 注入 profile', () => {
-    mergeSoulProfile(soulProfile)
-    expect(getSoulStoreState().profile).toEqual(soulProfile)
-  })
-
-  it('mergeSoulFiles 注入 files', () => {
-    mergeSoulFiles(soulFiles)
-    expect(getSoulStoreState().files).toEqual(soulFiles)
-  })
-
-  it('resetSoulStore 恢复初始 state', () => {
-    mergeSoulProfile(soulProfile)
-    mergeSoulFiles(soulFiles)
+  it('resetSoulStore 恢复初始 state', async () => {
+    await loadAllSoul()
     resetSoulStore()
     expect(getSoulStoreState().profile).toBeNull()
     expect(getSoulStoreState().files).toEqual({})
   })
 
-  it('subscribeSoulStore 在 merge 时通知', () => {
+  it('subscribeSoulStore 在 HTTP 加载时通知', async () => {
     let calls = 0
     const unsub = subscribeSoulStore(() => { calls += 1 })
-    mergeSoulProfile(soulProfile)
-    expect(calls).toBe(1)
+    await loadAllSoul()
+    expect(calls).toBe(2)
     unsub()
   })
 })
@@ -583,9 +578,9 @@ describe('跨 store 隔离', () => {
     resetThreadStore()
   })
 
-  it('5 个 store 重置后互不影响', () => {
+  it('5 个 store 重置后互不影响', async () => {
     mergeMemoryItems([memoryItem])
-    mergeSoulProfile(soulProfile)
+    await loadAllSoul()
     mergeSessionItems([sessionItem])
     mergeInitiativeReview(initiativeReview)
 
