@@ -1,6 +1,12 @@
 /* ── Archer Design Tokens ───────────────────────────────
-   Source of truth: web/public/assets/index.css
-   When updating, keep all three platforms in sync.
+   Desktop runtime typography and brand palette.
+   Generated snapshots: scripts/generate_tokens.py.
+   Desktop surface overrides live in styles.css.
+
+   2026-08-14 收敛（方向：做给自己用，极简、克制、系统字体）
+   - 桌面端不打包文楷（无 @font-face），UI 正文统一系统字体。
+   - 文楷降级为「长文阅读」独立 token（--reading-font），
+     web 端已打包、桌面端回退系统字体。
    ──────────────────────────────────────────────────── */
 
 :root {
@@ -17,9 +23,17 @@
 
   /* Typography */
   --brand-font: "Comfortaa", "Avenir Next", "Trebuchet MS", sans-serif;
-  --brand-script-font: "Snell Roundhand", "Bradley Hand", "Marker Felt", "Segoe Print", cursive;
-  --body-font: "Archer WenKai", "LXGW WenKai", "LXGW WenKai Screen", "霞鹭文楷",
-    "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", system-ui, sans-serif;
+  --brand-script-font: var(--body-font); /* deprecated: was Snell Roundhand */
+
+  /* UI 正文：系统字体，跨平台锐利一致 */
+  --body-font: -apple-system, BlinkMacSystemFont, "SF Pro Text",
+    "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei",
+    system-ui, "Segoe UI", sans-serif;
+
+  /* 长文阅读（markdown 正文）：文楷优先，未打包时回退系统字体 */
+  --reading-font: "Archer WenKai", "LXGW WenKai", "LXGW WenKai Screen",
+    "霞鹭文楷", -apple-system, BlinkMacSystemFont, "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", system-ui, sans-serif;
 }
 
 :root[data-theme="dark"] {

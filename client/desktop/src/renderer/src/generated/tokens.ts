@@ -11,8 +11,9 @@ export const designTokens = {
       "bg-1": "#f8f5ef",
       "bg-2": "#f3eee6",
       "brand-font": "\"Comfortaa\", \"Avenir Next\", \"Trebuchet MS\", sans-serif",
-      "brand-script-font": "\"Snell Roundhand\", \"Bradley Hand\", \"Marker Felt\", \"Segoe Print\", cursive",
-      "body-font": "\"Archer WenKai\", \"LXGW WenKai\", \"LXGW WenKai Screen\", \"霞鹭文楷\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", system-ui, sans-serif"
+      "brand-script-font": "var(--body-font)",
+      "body-font": "-apple-system, BlinkMacSystemFont, \"SF Pro Text\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", system-ui, \"Segoe UI\", sans-serif",
+      "reading-font": "\"Archer WenKai\", \"LXGW WenKai\", \"LXGW WenKai Screen\", \"霞鹭文楷\", -apple-system, BlinkMacSystemFont, \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", system-ui, sans-serif"
     },
     "dark": {
       "cyan": "#4dd9d4",
@@ -23,8 +24,9 @@ export const designTokens = {
       "bg-1": "#0d1219",
       "bg-2": "#0a0f14",
       "brand-font": "\"Comfortaa\", \"Avenir Next\", \"Trebuchet MS\", sans-serif",
-      "brand-script-font": "\"Snell Roundhand\", \"Bradley Hand\", \"Marker Felt\", \"Segoe Print\", cursive",
-      "body-font": "\"Archer WenKai\", \"LXGW WenKai\", \"LXGW WenKai Screen\", \"霞鹭文楷\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", system-ui, sans-serif"
+      "brand-script-font": "var(--body-font)",
+      "body-font": "-apple-system, BlinkMacSystemFont, \"SF Pro Text\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", system-ui, \"Segoe UI\", sans-serif",
+      "reading-font": "\"Archer WenKai\", \"LXGW WenKai\", \"LXGW WenKai Screen\", \"霞鹭文楷\", -apple-system, BlinkMacSystemFont, \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", system-ui, sans-serif"
     }
   },
   "overrides": {

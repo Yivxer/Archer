@@ -680,7 +680,7 @@ input:focus-visible {
   padding: 18px;
   overflow: auto;
   color: var(--ink);
-  font-family: var(--body-font);
+  font-family: var(--reading-font);
   font-size: 14px;
   line-height: 1.85;
 }

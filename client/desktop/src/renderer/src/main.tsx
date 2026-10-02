@@ -559,7 +559,7 @@ function App() {
                   }}
                   title={project.name}
                 >
-                  <Folder size={15} />
+                  <Folder size={16} />
                   <span>{project.name}</span>
                   <em>{project.threadIds.length || project.sessionIds.length}</em>
                 </button>
