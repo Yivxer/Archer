@@ -612,12 +612,16 @@ type SoulStoreState = {
 **Actions**：
 | Action | 调用 API | 副作用 |
 |--------|---------|--------|
-| `loadAll()` | GET /soul-profile + /soul-files + /vault/reflection/recent?limit=10 | 全量替换 |
-| `importSoul(soulData)` | POST /soul/import | refresh profile + files |
-| `triggerReflection(payload)` | POST /vault/reflection | refresh reflections |
-| `mergeProfile(profile)` / `mergeFiles(files)` | （由 loadLocalArcher 注入） | 局部替换 |
+| `loadAllSoul(options?)` | GET /soul-profile + /soul-files + /vault/reflection/recent?limit=10 | 原子替换；并发普通加载复用请求，force 加载淘汰旧响应 |
+| `importSoulAction(soulData)` | POST /soul/import | 成功后 force 刷新 Soul 域，发出 memory 侧作用事件 |
+| `triggerReflectionAction(payload)` | POST /vault/reflection | 成功后 force 刷新 Soul 域，发出 memory 侧作用事件；ok=false 不发成功事件 |
+| `exportPortableDataAction()` | POST /exports/portable | 沿用 JSON + Markdown 导出格式 |
 
 **订阅者**：SoulPage、ReviewPage、VaultReflectionsPanel
+
+2026-10-02，1.0.30：HTTP 操作集中于 `adapters/soulAdapter.ts`，复用既有认证、超时和 REST 解包。`ArcherAdapter` / `loadLocalArcher` / `storeSync` 已删除 Soul profile/files 字段与双向投影；连接/重连成功后独立加载 Soul，页面不从旧快照回退。失败保留上次完整数据并标记 error，初次失败不冒充空档案；reset 和较新的 force 加载使旧成功/错误响应失效。
+
+SoulPage 的 hypotheses、journalReview、periodReviews 仍是其他领域传入的显式 props，本次未迁移这些领域。import POST 成功但后续读取失败时，保留成功导入回执并单独显示读取错误；memory 事件仍有效，不提示重新执行已成功的写入。
 
 ### sessionStore（L3.4）
 
@@ -726,8 +730,8 @@ store 间通过 `lib/storeEventBus.ts` 解耦：store action 成功后 `emitStor
 | `memory:resolved` | `memoryStore.resolvePendingMemoryAction` | `{ id, accepted }` | main.tsx refresh（记忆可能影响会话摘要） |
 | `memory:batch-resolved` | `memoryStore.batchResolvePendingMemoryAction` | `{ accepted, count? }` | main.tsx refresh |
 | `memory:evolved` | `memoryStore.evolveMemoryAction` | `{ id }` | main.tsx refresh |
-| `soul:imported` | `soulStore.importSoulAction` | `{ imported }` | main.tsx refresh（soul 导入可能产生 pending memory） |
-| `soul:reflection-triggered` | `soulStore.triggerReflectionAction` | `{}` | main.tsx refresh |
+| `soul:imported` | `soulStore.importSoulAction` | `{ imported }` | main.tsx 定向加载 memoryStore 并投影计数，不重载整体 adapter |
+| `soul:reflection-triggered` | `soulStore.triggerReflectionAction` | `{}` | main.tsx 定向加载 memoryStore 并投影计数，不重载整体 adapter |
 | `job:created` | `jobStore.createJob` | `{ jobId }` | main.tsx refresh（job 可能产生新会话） |
 | `job:cancelled` | `jobStore.cancelJob` | `{ jobId }` | — |
 | `job:retried` | `jobStore.retryJob` | `{ jobId }` | — |
