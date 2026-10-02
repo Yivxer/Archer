@@ -1,4 +1,6 @@
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta, timezone
+
+import pytest
 
 
 def _candidate(day: int, *, feedback: str = "") -> dict:
@@ -8,6 +10,32 @@ def _candidate(day: int, *, feedback: str = "") -> dict:
         "created_at": (datetime(2026, 6, 1, 9, 0, 0) + timedelta(days=day)).isoformat(),
         "feedback": feedback,
     }
+
+
+@pytest.mark.parametrize("report_name", ["evaluate_shadow_validation", "evaluate_long_term_validation"])
+def test_shadow_reports_accept_mixed_timestamp_formats(report_name: str) -> None:
+    from core import shadow_validation
+
+    logs = [_candidate(0), _candidate(1), _candidate(2)]
+    stamp = datetime.fromisoformat(logs[1]["created_at"])
+    logs[1]["created_at"] = stamp.astimezone(UTC).isoformat().replace("+00:00", "Z")
+    report = getattr(shadow_validation, report_name)(logs, now=datetime(2026, 6, 3, 18))
+
+    assert report.observed_days == 3
+    assert report.candidate_count == 3
+    feedback_count = report.feedback_count if report_name == "evaluate_shadow_validation" else report.relevance.feedback_count
+    assert feedback_count == 0
+
+
+@pytest.mark.parametrize("report_name", ["evaluate_shadow_validation", "evaluate_long_term_validation"])
+def test_shadow_observation_days_use_local_dates_for_aware_clock(report_name: str) -> None:
+    from core import shadow_validation
+
+    local_now = datetime(2026, 6, 2, 0, 15)
+    other_zone_now = local_now.astimezone(timezone(timedelta(hours=-12)))
+    report = getattr(shadow_validation, report_name)([_candidate(0)], now=other_zone_now)
+
+    assert report.observed_days == 2
 
 
 def test_shadow_validation_is_ready_for_manual_review_after_stable_week():

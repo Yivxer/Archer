@@ -257,7 +257,10 @@ def _parse_stamp(value: Any) -> datetime | None:
     if not isinstance(value, str):
         return None
     try:
-        return datetime.fromisoformat(value)
+        stamp = datetime.fromisoformat(value)
+        # Historical naive stamps were written in local time. Compare offset
+        # stamps on that same clock, including observation-day boundaries.
+        return stamp.astimezone().replace(tzinfo=None) if stamp.tzinfo else stamp
     except ValueError:
         return None
 
@@ -265,7 +268,7 @@ def _parse_stamp(value: Any) -> datetime | None:
 def _observed_days(stamps: list[datetime], *, now: datetime | None) -> int:
     if not stamps:
         return 0
-    end = now or max(stamps)
+    end = now.astimezone().replace(tzinfo=None) if now and now.tzinfo else now or max(stamps)
     return max(0, (end.date() - min(stamps).date()).days + 1)
 
 
