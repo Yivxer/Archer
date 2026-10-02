@@ -19,8 +19,8 @@ import { connectionStatusLabel, expertShortLabel, modelProfileShortLabel } from 
 import { mergeInitiativeShadowEvent } from './lib/initiativeShadow'
 import { mergeSseInitiativeEvent } from './lib/initiativeStore'
 import { onStoreEvent } from './lib/storeEventBus'
-import { projectMemoryStoreToAdapter, syncStoresFromAdapter } from './lib/storeSync'
-import { getMemoryStoreState, loadAllMemory } from './lib/memoryStore'
+import { syncStoresFromAdapter } from './lib/storeSync'
+import { useMemoryStore, loadAllMemory } from './lib/memoryStore'
 import { loadAllSoul } from './lib/soulStore'
 import { upsertThreadFromSave } from './lib/threadStore'
 import { deleteSession, getSessionStoreState, loadSessionDetail } from './lib/sessionStore'
@@ -241,7 +241,7 @@ function App() {
       const result = await syncBrainData({ previous: data, silent: options.silent })
       if (result.adapter) {
         setData(result.adapter)
-        // 兼容领域初始化；Soul 由独立 HTTP/store 加载。
+        // 兼容领域初始化；Soul、Memory 由独立 HTTP/store 加载。
         syncStoresFromAdapter(result.adapter)
       } else if (!wasBrainEverLinked()) {
         setData(mockArcher)
@@ -250,6 +250,7 @@ function App() {
       setApiReason(result.reason || '')
       if (result.state === 'connected') {
         void loadAllSoul()
+        void loadAllMemory({ force: true })
         setApiBannerDismissed(false)
         // L0.4: 连接成功后读崩溃信息 (只读一次)
         try {
@@ -305,7 +306,7 @@ function App() {
     mergeSseInitiativeEvent(event)
   }
 
-  const pendingMemoryCount = data.memory.filter((m) => m.status === 'pending').length
+  const pendingMemoryCount = useMemoryStore((state) => state.stats?.pendingCount ?? 0)
   const sidebarTaskGroups = React.useMemo(() => buildSidebarTaskGroups(data.sessions, projects, data.threads), [data.sessions, projects, data.threads])
 
   const sidebarNavItems: Array<{ route: Route; icon: React.ElementType; label: string; touchCount?: number }> = [
@@ -390,31 +391,16 @@ function App() {
     return () => clearInterval(timer)
   }, [apiState])
 
-  // L3.9: 领域事件优先做定向投影；尚未迁移的事件保留 silent refresh。
+  // Soul 写入后定向刷新 Memory；页面直接订阅领域状态。
   React.useEffect(() => {
     const unsubs: Array<() => void> = []
-    const memoryProjectionEvents = [
-      'memory:resolved',
-      'memory:batch-resolved',
-      'memory:evolved',
-      'memory:updated',
-    ] as const
-    for (const type of memoryProjectionEvents) {
-      unsubs.push(onStoreEvent(type, () => {
-        const memory = getMemoryStoreState().items
-        setData((current) => projectMemoryStoreToAdapter(current, memory))
-      }))
-    }
     const soulMemoryEvents = [
       'soul:imported',
       'soul:reflection-triggered',
     ] as const
     for (const type of soulMemoryEvents) {
       unsubs.push(onStoreEvent(type, () => {
-        void loadAllMemory().then(() => {
-          const memory = getMemoryStoreState().items
-          setData((current) => projectMemoryStoreToAdapter(current, memory))
-        })
+        void loadAllMemory({ force: true })
       }))
     }
     return () => { for (const unsub of unsubs) unsub() }
@@ -688,6 +674,7 @@ function App() {
           )}
           {route === 'Review' && (
             <ReviewPage
+              connected={apiState === 'connected'}
               data={data}
               onRefresh={connectLocalApi}
               onOpenSession={openSession}
@@ -703,7 +690,7 @@ function App() {
           )}
           {route === 'Tasks' && <TasksPage data={data} />}
           {route === 'Memory' && <MemoryPage
-            data={data}
+            connected={apiState === 'connected'}
           />}
           {route === 'Skills' && <SkillsPage data={data} onRefresh={connectLocalApi} />}
           {route === 'Projects' && (
@@ -800,6 +787,7 @@ function ProfilePanel({
   onClose: () => void
   onNavigate: (route: Route) => void
 }) {
+  const memoryCount = useMemoryStore((state) => state.stats?.activeCount ?? 0)
   const avatarInputRef = React.useRef<HTMLInputElement>(null)
   const statusText = connectionStatusLabel(apiState, data.status.adapter === 'local')
   const expertText = expertShortLabel(
@@ -887,7 +875,7 @@ function ProfilePanel({
 
       <div className="profile-menu-status">
         <span>{statusText}</span>
-        <span>记忆 {data.status.memoryCount}</span>
+        <span>记忆 {memoryCount}</span>
       </div>
     </aside>
   )

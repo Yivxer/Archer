@@ -561,7 +561,7 @@ function useXxxStore<U>(selector: (state: T) => U): U {
 1. 页面不直接 fetch，只 dispatch action 或读取 store
 2. store 是单一真值，页面只读订阅
 3. action 成功后由 store 自己 refresh 真值，页面不手动 invalidate
-4. 跨 store 联动（L3.7）：memory accept 后 memoryStore 通知 sessionStore refresh
+4. 跨 store 联动（L3.7）：Soul 导入/结晶后只强制刷新 Memory 领域；记忆动作完成后订阅者直接读取 store。
 
 ### memoryStore（L3.2）
 
@@ -583,14 +583,17 @@ type MemoryStoreState = {
 **Actions**：
 | Action | 调用 API | 副作用 |
 |--------|---------|--------|
-| `loadAll()` | GET /memory + /memory/stats + /memory/groups（并发） | 全量替换 items/stats/groups |
-| `resolvePending(id, accepted)` | POST /memory/pending/{id}/{accept\|reject} | 移除/标记 item + refresh stats |
-| `batchResolve(accepted)` | POST /memory/pending/batch/{accept\|reject} | refresh items + stats |
-| `updateMemory(id, content)` | POST /memory/update | 替换 item.content |
-| `evolveMemory(id, content, ...)` | POST /memory/evolve | refresh items |
-| `mergeItems(items)` | （无 API，由 loadLocalArcher 注入） | 仅替换 items |
+| `loadAllMemory({ force? })` | GET /memory + /memory/stats + /memory/groups（并发） | 三项全部成功后一次发布；普通并发加载合并，强制刷新使旧响应失效 |
+| `resolvePendingMemoryAction(id, accepted)` | POST /memory/pending/{id}/{accept\|reject} | 成功后强制刷新三项；接受的记忆仍保留在服务端权威列表 |
+| `batchResolvePendingMemoryAction(accepted)` | POST /memory/pending/batch/{accept\|reject} | 成功后强制刷新三项 |
+| `updateMemoryAction(id, content)` | POST /memory/update | 成功后强制刷新三项，分类文本同步更新 |
+| `evolveMemoryAction(id, content, ...)` | POST /memory/evolve | 成功后强制刷新三项 |
 
-**订阅者**：MemoryPage、ReviewPage、ChatPage Workspace
+**失败边界**：读取失败保留最近完整快照，发布 error；旧请求成功/失败均不能覆盖新状态。POST 成功与后续刷新失败分别呈现，避免误报写入失败；单条动作结束后清除 busy id。重置使在途读取失效。
+
+**订阅者**：MemoryPage、ReviewPage、导航计数、ProfilePanel、SettingsPage。MemoryPage 只接收连接状态，启动/重连由 main 加载；页面刷新不触发整体 adapter。
+
+**领域边界**：`memoryAdapter` 复用共享 HTTP/token/契约处理；ArcherAdapter 不再含 memory，loadLocalArcher 不读取记忆列表，storeSync 不注入或回投影 Memory。REST `/status` 的计数字段保留兼容，界面记忆计数使用 store。单条确认从原来的 POST + stats GET 变为 POST + 三个 GET，编辑从 POST 变为 POST + 三个 GET；无新增模型调用。
 
 ### soulStore（L3.3）
 
@@ -727,11 +730,11 @@ store 间通过 `lib/storeEventBus.ts` 解耦：store action 成功后 `emitStor
 
 | 事件 type | 来源 action | payload | 订阅方动作 |
 |---|---|---|---|
-| `memory:resolved` | `memoryStore.resolvePendingMemoryAction` | `{ id, accepted }` | main.tsx refresh（记忆可能影响会话摘要） |
-| `memory:batch-resolved` | `memoryStore.batchResolvePendingMemoryAction` | `{ accepted, count? }` | main.tsx refresh |
-| `memory:evolved` | `memoryStore.evolveMemoryAction` | `{ id }` | main.tsx refresh |
-| `soul:imported` | `soulStore.importSoulAction` | `{ imported }` | main.tsx 定向加载 memoryStore 并投影计数，不重载整体 adapter |
-| `soul:reflection-triggered` | `soulStore.triggerReflectionAction` | `{}` | main.tsx 定向加载 memoryStore 并投影计数，不重载整体 adapter |
+| `memory:resolved` | `memoryStore.resolvePendingMemoryAction` | `{ id, accepted }` | 页面直接订阅 memoryStore，无整体 refresh |
+| `memory:batch-resolved` | `memoryStore.batchResolvePendingMemoryAction` | `{ accepted, count? }` | 页面直接订阅 memoryStore |
+| `memory:evolved` | `memoryStore.evolveMemoryAction` | `{ id }` | 页面直接订阅 memoryStore |
+| `soul:imported` | `soulStore.importSoulAction` | `{ imported }` | main.tsx 定向加载 memoryStore ，计数由 store 订阅，不重载整体 adapter |
+| `soul:reflection-triggered` | `soulStore.triggerReflectionAction` | `{}` | main.tsx 定向加载 memoryStore ，计数由 store 订阅，不重载整体 adapter |
 | `job:created` | `jobStore.createJob` | `{ jobId }` | main.tsx refresh（job 可能产生新会话） |
 | `job:cancelled` | `jobStore.cancelJob` | `{ jobId }` | — |
 | `job:retried` | `jobStore.retryJob` | `{ jobId }` | — |

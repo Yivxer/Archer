@@ -7,12 +7,18 @@
 
 import { describe, expect, it, beforeEach, vi } from 'vitest'
 import { mockArcher } from '../../adapters/mockArcher'
-import { projectMemoryStoreToAdapter, syncStoresFromAdapter } from '../storeSync'
-import { getMemoryStoreState, resetMemoryStore } from '../memoryStore'
+import { syncStoresFromAdapter } from '../storeSync'
+import { getMemoryStoreState, loadAllMemory, resetMemoryStore } from '../memoryStore'
 import { getSoulStoreState, loadAllSoul, resetSoulStore } from '../soulStore'
 import { getSessionStoreState, resetSessionStore } from '../sessionStore'
 import { getInitiativeStoreState, resetInitiativeStore } from '../initiativeStore'
 import { getThreadStoreState, resetThreadStore } from '../threadStore'
+
+vi.mock('../../adapters/memoryAdapter', () => ({
+  fetchMemoryItems: vi.fn(async () => []),
+  fetchMemoryStats: vi.fn(async () => ({ activeCount: 0, pendingCount: 0 })),
+  fetchMemoryGroups: vi.fn(async () => ({})),
+}))
 
 vi.mock('../../adapters/soulAdapter', () => ({
   fetchSoulProfile: vi.fn(async () => ({ empty: false, sections: [] })),
@@ -29,9 +35,10 @@ describe('storeSync — L3.9a syncStoresFromAdapter', () => {
     resetThreadStore()
   })
 
-  it('sync 后 memoryStore.items 与 adapter.memory 一致', () => {
+  it('compatibility snapshots do not initialize Memory authority', () => {
     syncStoresFromAdapter(mockArcher)
-    expect(getMemoryStoreState().items).toEqual(mockArcher.memory)
+    expect(getMemoryStoreState().items).toEqual([])
+    expect(getMemoryStoreState().loadState).toBe('idle')
   })
 
   it('compatibility snapshots do not initialize Soul authority', () => {
@@ -57,7 +64,6 @@ describe('storeSync — L3.9a syncStoresFromAdapter', () => {
 
   it('sync 后兼容 store loadState 为 ready', () => {
     syncStoresFromAdapter(mockArcher)
-    expect(getMemoryStoreState().loadState).toBe('ready')
     expect(getSessionStoreState().loadState).toBe('ready')
     expect(getInitiativeStoreState().loadState).toBe('ready')
     expect(getThreadStoreState().loadState).toBe('ready')
@@ -66,7 +72,6 @@ describe('storeSync — L3.9a syncStoresFromAdapter', () => {
   it('二次 sync 替换而非追加', () => {
     syncStoresFromAdapter(mockArcher)
     syncStoresFromAdapter(mockArcher)
-    expect(getMemoryStoreState().items).toEqual(mockArcher.memory)
     expect(getThreadStoreState().items).toEqual(mockArcher.threads)
   })
 
@@ -75,17 +80,11 @@ describe('storeSync — L3.9a syncStoresFromAdapter', () => {
     expect(getThreadStoreState().currentThreadId).toBeNull()
   })
 
-  it('memory 领域事件只投影 memory 与计数，不替换其他 adapter 领域', () => {
-    const memory = mockArcher.memory.slice(1)
-
-    const next = projectMemoryStoreToAdapter(mockArcher, memory)
-
-    expect(next).not.toBe(mockArcher)
-    expect(next.memory).toBe(memory)
-    expect(next.status.memoryCount).toBe(memory.filter((item) => item.status === 'confirmed').length)
-    expect(next.status.pendingMemoryCount).toBe(memory.filter((item) => item.status === 'pending').length)
-    expect(next.sessions).toBe(mockArcher.sessions)
-    expect(next.initiativeShadow).toBe(mockArcher.initiativeShadow)
+  it('ignores legacy memory fields without overwriting the loaded store', async () => {
+    await loadAllMemory()
+    const previous = getMemoryStoreState()
+    syncStoresFromAdapter(Object.assign({}, mockArcher, { memory: [{ id: 777, content: 'stale' }] }))
+    expect(getMemoryStoreState()).toBe(previous)
   })
 
   it('ignores legacy Soul fields without overwriting the loaded store', async () => {

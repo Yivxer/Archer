@@ -932,7 +932,6 @@ export type ArcherAdapter = {
   }
   sessions: SessionItem[]
   threads: ConversationThread[]
-  memory: MemoryItem[]
   hypotheses: HypothesisItem[]
   skills: SkillItem[]
   modes: ModeSettings

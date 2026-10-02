@@ -4,9 +4,9 @@
  * 覆盖：
  * - externalStore 共享工具（createExternalStore + subscribe + setState 引用对比）
  * - memoryStore / soulStore / sessionStore / jobStore / initiativeStore
- *   的初始 state shape + merge* 注入 + reset + subscribe 通知
+ *   的初始 state shape、独立 HTTP 加载/兼容注入、reset 与 subscribe 通知
  *
- * 不覆盖：依赖 API 的 action（loadAll/submit/cancel 等），留给集成测试。
+ * HTTP 加载使用合成 adapter；动作和并发另有领域回归。
  */
 
 import { describe, expect, it, beforeEach, vi } from 'vitest'
@@ -26,7 +26,7 @@ import {
 } from '../externalStore'
 import {
   getMemoryStoreState,
-  mergeMemoryItems,
+  loadAllMemory,
   resetMemoryStore,
   subscribeMemoryStore,
 } from '../memoryStore'
@@ -70,6 +70,12 @@ import {
   upsertThreadFromSave,
 } from '../threadStore'
 
+
+vi.mock('../../adapters/memoryAdapter', () => ({
+  fetchMemoryItems: vi.fn(async () => [memoryItem]),
+  fetchMemoryStats: vi.fn(async () => ({ activeCount: 0, pendingCount: 1 })),
+  fetchMemoryGroups: vi.fn(async () => ({})),
+}))
 
 vi.mock('../../adapters/soulAdapter', () => ({
   fetchSoulProfile: vi.fn(async () => soulProfile),
@@ -268,12 +274,12 @@ describe('externalStore — 共享工具', () => {
 
 // ───────────────────────── memoryStore ─────────────────────────
 
-describe('memoryStore — L3.2', () => {
+describe('memoryStore — L3.2', async () => {
   beforeEach(() => {
     resetMemoryStore()
   })
 
-  it('初始 state shape', () => {
+  it('初始 state shape', async () => {
     const state = getMemoryStoreState()
     expect(state.items).toEqual([])
     expect(state.stats).toBeNull()
@@ -284,37 +290,30 @@ describe('memoryStore — L3.2', () => {
     expect(state.busyIds.size).toBe(0)
   })
 
-  it('mergeMemoryItems 注入 items', () => {
-    mergeMemoryItems([memoryItem])
+  it('HTTP 加载 items', async () => {
+    await loadAllMemory()
     expect(getMemoryStoreState().items).toEqual([memoryItem])
   })
 
-  it('mergeMemoryItems 二次注入替换（非追加）', () => {
-    mergeMemoryItems([memoryItem])
-    mergeMemoryItems([{ ...memoryItem, id: 2 }])
-    expect(getMemoryStoreState().items).toHaveLength(1)
-    expect(getMemoryStoreState().items[0].id).toBe(2)
-  })
-
-  it('resetMemoryStore 恢复初始 state', () => {
-    mergeMemoryItems([memoryItem])
+  it('resetMemoryStore 恢复初始 state', async () => {
+    await loadAllMemory()
     resetMemoryStore()
     expect(getMemoryStoreState().items).toEqual([])
   })
 
-  it('subscribeMemoryStore 在 merge 时通知', () => {
+  it('subscribeMemoryStore 在加载时通知', async () => {
     let calls = 0
     const unsub = subscribeMemoryStore(() => { calls += 1 })
-    mergeMemoryItems([memoryItem])
-    expect(calls).toBe(1)
+    await loadAllMemory()
+    expect(calls).toBe(2)
     unsub()
   })
 
-  it('subscribeMemoryStore 取消订阅后不通知', () => {
+  it('subscribeMemoryStore 取消订阅后不通知', async () => {
     let calls = 0
     const unsub = subscribeMemoryStore(() => { calls += 1 })
     unsub()
-    mergeMemoryItems([memoryItem])
+    await loadAllMemory()
     expect(calls).toBe(0)
   })
 })
@@ -579,7 +578,7 @@ describe('跨 store 隔离', () => {
   })
 
   it('5 个 store 重置后互不影响', async () => {
-    mergeMemoryItems([memoryItem])
+    await loadAllMemory()
     await loadAllSoul()
     mergeSessionItems([sessionItem])
     mergeInitiativeReview(initiativeReview)

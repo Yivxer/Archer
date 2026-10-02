@@ -1,4 +1,5 @@
 import React from 'react'
+import { useMemoryStore } from '../lib/memoryStore'
 import { ArrowLeft, CalendarClock, CalendarDays, Clipboard, Database, Eye, KeyRound, Layers, ListChecks, Moon, Palette, Settings2, SlidersHorizontal, Sun, Terminal, X, Activity } from 'lucide-react'
 import type { ArcherAdapter, MemoryContextMode, ObsidianContextMode, Route, ScheduledTask, Theme } from '../types'
 import { FormField } from '../components/common'
@@ -41,6 +42,7 @@ export function SettingsPage({
   onRefresh: () => Promise<void>
   onNavigate?: (route: Route) => void
 }) {
+  const memoryCount = useMemoryStore((state) => state.items.length)
   const [activeTab, setActiveTab] = React.useState<SettingsTab>(() => {
     const stored = sessionStorage.getItem('archer-settings-tab')
     sessionStorage.removeItem('archer-settings-tab')
@@ -809,7 +811,7 @@ export function SettingsPage({
                 </div>
                 <div className="diagnostics-status-row">
                   <span className="diagnostics-status-label">记忆条目</span>
-                  <span className="diagnostics-status-value">{data.memory.length}</span>
+                  <span className="diagnostics-status-value">{memoryCount}</span>
                 </div>
                 <div className="diagnostics-status-row">
                   <span className="diagnostics-status-label">技能数</span>

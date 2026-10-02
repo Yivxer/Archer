@@ -19,11 +19,13 @@ import { useSoulStore } from '../lib/soulStore'
 
 export function ReviewPage({
   data,
+  connected,
   onRefresh,
   onOpenSession,
   onNavigate,
 }: {
   data: ArcherAdapter
+  connected: boolean
   onRefresh: () => Promise<void>
   onOpenSession: (session: ArcherAdapter['sessions'][number]) => void
   onNavigate: (route: Route) => void
@@ -37,6 +39,8 @@ export function ReviewPage({
   const [query, setQuery] = React.useState('')
   const [expertFilter, setExpertFilter] = React.useState('all')
   const memoryItems = useMemoryStore((state) => state.items)
+  const memoryLoadState = useMemoryStore((state) => state.loadState)
+  const memoryError = useMemoryStore((state) => state.error)
   const memoryBusyIds = useMemoryStore((state) => state.busyIds)
   const [memoryNotice, setMemoryNotice] = React.useState('')
   const contentSearching = searchState === 'searching'
@@ -44,7 +48,7 @@ export function ReviewPage({
   const pendingMemoryCount = memoryItems.filter((item) => item.status === 'pending').length
   const pendingReviewMemories = memoryItems.filter((item) => item.status === 'pending').slice(0, 3)
   const memoryGroups = React.useMemo(() => buildReviewMemoryGroups(memoryItems), [memoryItems])
-  const canResolveMemory = data.status.adapter === 'local'
+  const canResolveMemory = connected && memoryLoadState === 'ready'
 
   React.useEffect(() => {
     if (!sessions.length) {
@@ -295,7 +299,7 @@ export function ReviewPage({
           <ReviewPendingMemoryPanel
             pendingMemoryCount={pendingMemoryCount}
             pendingReviewMemories={pendingReviewMemories}
-            memoryNotice={memoryNotice}
+            memoryNotice={memoryNotice || memoryError}
             canResolveMemory={canResolveMemory}
             memoryBusyId={memoryBusyIds.size ? Array.from(memoryBusyIds)[0] : null}
             onResolve={(id, accepted) => void resolveReviewMemory(id, accepted)}

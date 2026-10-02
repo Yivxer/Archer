@@ -1,6 +1,6 @@
 import React from 'react'
 import { Check, Database, Edit3, Heart, Settings, TrendingUp, Waves, Compass, X, Search } from 'lucide-react'
-import type { ArcherAdapter, MemoryBlockType, MemoryItem } from '../types'
+import type { MemoryBlockType, MemoryItem } from '../types'
 import { ConfirmDialog } from '../components/common'
 import { EmptyState } from '../components/EmptyState'
 import { LoadingState } from '../components/LoadingState'
@@ -30,15 +30,16 @@ const groupIcons: Record<string, React.ElementType> = {
 }
 
 export function MemoryPage({
-  data,
+  connected,
 }: {
-  data: ArcherAdapter
+  connected: boolean
 }) {
   const [viewMode, setViewMode] = React.useState<ViewMode>('pending')
   const items = useMemoryStore((state) => state.items)
   const busyIds = useMemoryStore((state) => state.busyIds)
   const stats = useMemoryStore((state) => state.stats)
   const groups = useMemoryStore((state) => state.groups)
+  const memoryError = useMemoryStore((state) => state.error)
   const memoryLoadState = useMemoryStore((state) => state.loadState)
   const [batchBusy, setBatchBusy] = React.useState(false)
   const [memoryMessage, setMemoryMessage] = React.useState('')
@@ -50,13 +51,8 @@ export function MemoryPage({
     title: string; message: string; confirmLabel: string; tone?: 'default' | 'danger'; onConfirm: () => void
   } | null>(null)
 
-  React.useEffect(() => {
-    if (data.status.adapter === 'local') {
-      void loadAllMemory()
-    }
-  }, [data.status.adapter])
-
   async function performResolveMemory(id: number, accepted: boolean) {
+    if (!connected || memoryLoadState !== 'ready') return
     setMemoryMessage('')
     try {
       await resolvePendingMemoryAction(id, accepted)
@@ -67,6 +63,7 @@ export function MemoryPage({
   }
 
   async function performBatchResolve(accepted: boolean) {
+    if (!connected || memoryLoadState !== 'ready') return
     setMemoryMessage('')
     setBatchBusy(true)
     try {
@@ -91,6 +88,7 @@ export function MemoryPage({
   }
 
   async function handleSaveEdit(id: number) {
+    if (!connected || memoryLoadState !== 'ready') return
     if (!editText.trim() || editText.trim().length < 10) return
     try {
       await updateMemoryAction(id, editText.trim())
@@ -107,7 +105,7 @@ export function MemoryPage({
   }
 
   const pending = items.filter((item) => item.status === 'pending')
-  const canResolveMemory = data.status.adapter === 'local'
+  const canResolveMemory = connected && memoryLoadState === 'ready'
   const cleanQuery = query.trim().toLowerCase()
 
   function matchesFilters(item: MemoryItem): boolean {
@@ -122,6 +120,12 @@ export function MemoryPage({
         message={confirmState?.message ?? ''} confirmLabel={confirmState?.confirmLabel ?? '确认'}
         tone={confirmState?.tone ?? 'default'} onConfirm={() => confirmState?.onConfirm()} onCancel={() => setConfirmState(null)} />
 
+      <div className="memory-toolbar">
+        <button className="quiet-button" type="button" disabled={!connected || memoryLoadState === 'loading'} onClick={() => void loadAllMemory({ force: true })}>刷新记忆</button>
+        {!connected && <span>连接后可更新记忆</span>}
+      </div>
+      {memoryError && <div className="memory-state" role="alert">{memoryError}</div>}
+      {memoryLoadState === 'loading' && <LoadingState stage="fetching" hint="加载记忆中…" compact />}
       {/* ── 记忆库信息栏 ── */}
       {stats && (
         <div className="memory-stats-bar">
@@ -194,7 +198,7 @@ export function MemoryPage({
               ) : (
                 <EmptyState
                   compact
-                  title={cleanQuery ? '无匹配记忆' : '暂无待确认记忆'}
+                  title={cleanQuery ? '无匹配记忆' : memoryLoadState === 'ready' ? '暂无待确认记忆' : '等待记忆加载'}
                   hint={cleanQuery ? undefined : '继续对话后会自动提炼'}
                 />
               )}
@@ -207,7 +211,7 @@ export function MemoryPage({
       {viewMode === 'groups' && (
         <section className="memory-groups-view">
           {memoryMessage && <div className="memory-state">{memoryMessage}</div>}
-          {memoryLoadState === 'ready' ? (
+          {groups.length ? (
             groups.map((group) => {
               const Icon = groupIcons[group.icon] || Database
               const filtered = group.memories.filter(matchesFilters)
@@ -224,12 +228,12 @@ export function MemoryPage({
                     <div className="stack">
                       {filtered.map((item) => (
                         <MemoryCard key={`group-${item.id}`} item={{ ...item, status: 'confirmed', confidence: String(item.confidence || 0.8), source: '' }}
-                          busy={false}
+                          busy={!connected || busyIds.has(item.id) || memoryLoadState !== 'ready'}
                           onResolve={undefined}
                           compact
                           editing={editingId === item.id}
                           editText={editingId === item.id ? editText : ''}
-                          onEditStart={() => startEdit(item)}
+                          onEditStart={connected && memoryLoadState === 'ready' ? () => startEdit(item) : undefined}
                           onEditChange={setEditText}
                           onEditSave={() => handleSaveEdit(item.id)}
                           onEditCancel={() => setEditingId(null)}
@@ -243,7 +247,7 @@ export function MemoryPage({
               )
             })
           ) : (
-            <LoadingState stage="fetching" hint="加载中…" compact />
+            <EmptyState compact title={memoryLoadState === 'ready' ? '暂无记忆分类' : memoryLoadState === 'error' ? '记忆加载失败，请刷新重试' : '等待加载记忆'} />
           )}
         </section>
       )}
@@ -269,7 +273,7 @@ function MemoryCard({
             onChange={(e) => onEditChange?.(e.target.value)} rows={3} autoFocus />
           <div className="memory-edit-actions">
             <button className="quiet-button" type="button" onClick={onEditCancel}>取消</button>
-            <button className="quiet-button strong" type="button" onClick={onEditSave} disabled={!editText.trim() || editText.trim().length < 10}>保存</button>
+            <button className="quiet-button strong" type="button" onClick={onEditSave} disabled={busy || !editText.trim() || editText.trim().length < 10}>保存</button>
           </div>
         </div>
       </article>

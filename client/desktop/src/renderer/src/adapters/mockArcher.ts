@@ -117,44 +117,6 @@ export const mockArcher: ArcherAdapter = {
       sessionIds: ['s4'],
     },
   ],
-  memory: [
-    {
-      id: 101,
-      status: 'confirmed',
-      type: 'decision',
-      content: 'Archer Desktop 第一版先做 macOS 静态工作台原型，不接真实后端。',
-      confidence: '0.92',
-      source: 'mock',
-      depth: 3
-    },
-    {
-      id: 102,
-      status: 'confirmed',
-      type: 'preference',
-      content: '界面气质偏安静工作台，继承圆环与五色谱系，但不做营销页。',
-      confidence: '0.88',
-      source: 'mock',
-      depth: 4
-    },
-    {
-      id: 103,
-      status: 'pending',
-      type: 'todo',
-      content: '第二阶段优先为 Archer 增加本地 HTTP API 与 SSE 流式输出。',
-      confidence: '0.81',
-      source: 'mock',
-      depth: 2
-    },
-    {
-      id: 104,
-      status: 'pending',
-      type: 'risk',
-      content: '不要让 renderer 直接接触 API key 或任意本地文件路径。',
-      confidence: '0.86',
-      source: 'mock',
-      depth: 5
-    }
-  ],
   hypotheses: [
     {
       id: 1,

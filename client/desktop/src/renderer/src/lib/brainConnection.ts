@@ -45,7 +45,6 @@ export function createOfflineLocalShell(previous?: ArcherAdapter): ArcherAdapter
     },
     sessions: [],
     threads: [],
-    memory: [],
     hypotheses: [],
     skills: [],
     proactive: { enabled: false, items: [] },

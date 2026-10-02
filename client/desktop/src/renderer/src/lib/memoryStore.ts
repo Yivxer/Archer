@@ -2,7 +2,7 @@
  * L3.2 — memoryStore
  *
  * 真值来源：/memory + /memory/stats + /memory/groups + 审阅动作
- * 订阅者：MemoryPage、ReviewPage、ChatPage Workspace
+ * 订阅者：MemoryPage、ReviewPage、导航计数、ProfilePanel、SettingsPage
  *
  * 契约：docs/api-contract.md §「memoryStore（L3.2）」
  */
@@ -15,7 +15,7 @@ import {
   fetchMemoryStats,
   resolvePendingMemory,
   updateMemory,
-} from '../adapters/localArcher'
+} from '../adapters/memoryAdapter'
 import type { MemoryGroup, MemoryItem, MemoryStats } from '../types'
 import { createExternalStore, useExternalStore, type LoadState } from './externalStore'
 import { emitStoreEvent } from './storeEventBus'
@@ -43,6 +43,8 @@ const initialState: MemoryStoreState = {
 // ───────────────────────── Store 单例 ─────────────────────────
 
 const store = createExternalStore<MemoryStoreState>(initialState)
+let loadGeneration = 0
+let pendingLoad: Promise<void> | null = null
 
 export function getMemoryStoreState(): MemoryStoreState {
   return store.getState()
@@ -57,14 +59,22 @@ export function subscribeMemoryStore(listener: () => void): () => void {
 /**
  * 全量加载 memory 数据（items + stats + groups 并发）。
  */
-export async function loadAllMemory(): Promise<void> {
+export function loadAllMemory(options: { force?: boolean } = {}): Promise<void> {
+  if (pendingLoad && !options.force) return pendingLoad
+  const generation = ++loadGeneration
   store.setState((s) => ({ ...s, loadState: 'loading', error: '' }))
+  pendingLoad = readMemory(generation)
+  return pendingLoad
+}
+
+async function readMemory(generation: number): Promise<void> {
   try {
     const [items, stats, groups] = await Promise.all([
       fetchMemoryItems(),
       fetchMemoryStats(),
       fetchMemoryGroups(),
     ])
+    if (generation !== loadGeneration) return
     store.setState((s) => ({
       ...s,
       items,
@@ -74,11 +84,14 @@ export async function loadAllMemory(): Promise<void> {
       error: '',
     }))
   } catch (err) {
+    if (generation !== loadGeneration) return
     store.setState((s) => ({
       ...s,
       loadState: 'error',
       error: err instanceof Error ? err.message : String(err),
     }))
+  } finally {
+    if (generation === loadGeneration) pendingLoad = null
   }
 }
 
@@ -89,32 +102,26 @@ export async function resolvePendingMemoryAction(
   id: number,
   accepted: boolean,
 ): Promise<void> {
+  if (store.getState().busyIds.has(id)) return
   store.setState((s) => ({
     ...s,
     busyIds: new Set([...s.busyIds, id]),
+    error: '',
   }))
   try {
     const result = await resolvePendingMemory(id, accepted)
     if (!result.ok) throw new Error('无待处理记忆被更新')
-    // 成功后从 items 移除（rejected 也移除，避免重复显示）
-    store.setState((s) => ({
-      ...s,
-      items: s.items.filter((item) => item.id !== id),
-      busyIds: new Set([...s.busyIds].filter((busyId) => busyId !== id)),
-    }))
-    // refresh stats（不阻塞，失败静默）
-    fetchMemoryStats()
-      .then((stats) => store.setState((s) => ({ ...s, stats })))
-      .catch(() => {})
-    // L3.7: main.tsx 只投影 memory 领域，不再触发 loadLocalArcher 全量刷新。
+    // 以服务端状态同步 items、stats、groups，保留确认后的长期记忆。
+    await loadAllMemory({ force: true })
     emitStoreEvent({ type: 'memory:resolved', id, accepted })
   } catch (err) {
     store.setState((s) => ({
       ...s,
-      busyIds: new Set([...s.busyIds].filter((busyId) => busyId !== id)),
       error: err instanceof Error ? err.message : String(err),
     }))
     throw err
+  } finally {
+    store.setState((s) => ({ ...s, busyIds: new Set([...s.busyIds].filter((busyId) => busyId !== id)) }))
   }
 }
 
@@ -128,7 +135,7 @@ export async function batchResolvePendingMemoryAction(
     const result = await batchResolvePendingMemory(accepted)
     if (!result.ok) throw new Error('批量记忆更新失败')
     // 批量操作后全量 refresh
-    await loadAllMemory()
+    await loadAllMemory({ force: true })
     // L3.7: 通知跨 store 联动
     emitStoreEvent({ type: 'memory:batch-resolved', accepted })
   } catch (err) {
@@ -147,13 +154,12 @@ export async function updateMemoryAction(
   id: number,
   content: string,
 ): Promise<void> {
+  if (store.getState().busyIds.has(id)) return
+  store.setState((s) => ({ ...s, busyIds: new Set([...s.busyIds, id]), error: '' }))
   try {
     const result = await updateMemory(id, content)
     if (!result.ok) throw new Error('记忆更新失败')
-    store.setState((s) => ({
-      ...s,
-      items: s.items.map((item) => (item.id === id ? { ...item, content } : item)),
-    }))
+    await loadAllMemory({ force: true })
     emitStoreEvent({ type: 'memory:updated', id })
   } catch (err) {
     store.setState((s) => ({
@@ -161,6 +167,8 @@ export async function updateMemoryAction(
       error: err instanceof Error ? err.message : String(err),
     }))
     throw err
+  } finally {
+    store.setState((s) => ({ ...s, busyIds: new Set([...s.busyIds].filter((busyId) => busyId !== id)) }))
   }
 }
 
@@ -178,8 +186,8 @@ export async function evolveMemoryAction(
     const result = await evolveMemory(id, content, type, importance, depth)
     if (!result.ok) throw new Error('记忆演化失败')
     // 演化可能改变 type/depth，重新加载 memory 领域快照。
-    await loadAllMemory()
-    // L3.7: 通知 main.tsx 投影最新 memory 领域。
+    await loadAllMemory({ force: true })
+    // 通知跨领域订阅者，页面直接读取 store。
     emitStoreEvent({ type: 'memory:evolved', id })
   } catch (err) {
     store.setState((s) => ({
@@ -191,17 +199,11 @@ export async function evolveMemoryAction(
 }
 
 /**
- * 由 loadLocalArcher 注入 items（不触发 API）。
- * 注入后即视为 ready，避免 storeSync 后 loadState 仍为 idle。
- */
-export function mergeMemoryItems(items: MemoryItem[]): void {
-  store.setState((s) => ({ ...s, items, loadState: 'ready' }))
-}
-
-/**
  * 重置 store（用于测试或退出登录）。
  */
 export function resetMemoryStore(): void {
+  loadGeneration += 1
+  pendingLoad = null
   store.setState(() => initialState)
 }
 

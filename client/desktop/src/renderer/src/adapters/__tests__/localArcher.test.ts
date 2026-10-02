@@ -1,3 +1,4 @@
+import { fetchMemoryItems } from '../memoryAdapter'
 import { exportPortableData } from '../soulAdapter'
 import { describe, expect, it, beforeEach, vi } from 'vitest'
 
@@ -19,7 +20,6 @@ import {
   ChatBusyError,
   claimInitiativeReviewCandidate,
   ensureLocalConnection,
-  fetchMemoryItems,
   getDesktopApiToken,
   loadLocalArcher,
   resolveDesktopApiToken,
@@ -654,6 +654,8 @@ describe('localArcher token management', () => {
     vi.stubGlobal('fetch', fetchSpy)
 
     const data = await loadLocalArcher()
+    expect(data).not.toHaveProperty('memory')
+    expect(fetchSpy.mock.calls.map(([url]) => new URL(String(url)).pathname)).not.toContain('/memory')
     expect(data).not.toHaveProperty('soulProfile')
     expect(data).not.toHaveProperty('soulFiles')
     expect(fetchSpy.mock.calls.some(([url]) => String(url).includes('/soul-profile') || String(url).includes('/soul-files'))).toBe(false)

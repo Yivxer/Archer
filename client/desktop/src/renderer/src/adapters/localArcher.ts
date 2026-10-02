@@ -8,15 +8,11 @@ import type {
   ConversationThread,
   FileRef,
   MemoryContextMode,
-  MemoryGroup,
-  MemoryItem,
-  MemoryStats,
   HypothesisItem,
   HypothesisListResult,
   ModeSwitchResult,
   ExpertSettings,
   ExpertSwitchResult,
-  MemoryResolveResult,
   ObsidianContextMode,
   SavedSession,
   SessionDetail,
@@ -242,7 +238,6 @@ export async function loadLocalArcher(): Promise<ArcherAdapter> {
   const [
     sessions,
     threads,
-    memory,
     hypothesisResult,
     skills,
     proactive,
@@ -259,7 +254,6 @@ export async function loadLocalArcher(): Promise<ArcherAdapter> {
   ] = await Promise.all([
     safeJson('/sessions', [] as ArcherAdapter['sessions']),
     safeJson('/threads', [] as ArcherAdapter['threads']),
-    safeJson('/memory?include_rejected=true', [] as ArcherAdapter['memory']),
     safeJson('/hypotheses?status=all', { ok: false, hypotheses: [] } as HypothesisListResult),
     safeJson('/skills', [] as ArcherAdapter['skills']),
     safeJson('/proactive-touch', { enabled: false, items: [] } as ArcherAdapter['proactive']),
@@ -359,7 +353,6 @@ export async function loadLocalArcher(): Promise<ArcherAdapter> {
       initialMessages: [],
       toolProgress: [
         { name: 'GET /status', state: 'ready', active: true },
-        { name: 'GET /memory', state: 'ready' },
         { name: 'POST /chat/stream', state: 'ready' }
       ],
       toolEvents: [],
@@ -367,7 +360,6 @@ export async function loadLocalArcher(): Promise<ArcherAdapter> {
     },
     sessions,
     threads,
-    memory,
     hypotheses: normalizeHypotheses(hypothesisResult.hypotheses),
     skills,
     modes,
@@ -649,10 +641,6 @@ export async function addLocalSessionToThread(threadId: string, sessionId: strin
   return postJson<ConversationThread>(`/threads/${encodeURIComponent(threadId)}/sessions`, { sessionId })
 }
 
-export async function resolvePendingMemory(id: number, accepted: boolean): Promise<MemoryResolveResult> {
-  return postJson<MemoryResolveResult>(`/memory/pending/${id}/${accepted ? 'accept' : 'reject'}`, {})
-}
-
 export async function submitInitiativeFeedback(
   id: number,
   feedback: 'acknowledged' | 'too_frequent',
@@ -703,29 +691,11 @@ export async function setInitiativeDeliveryOptIn(
   })
 }
 
-export async function batchResolvePendingMemory(accepted: boolean): Promise<{ ok: boolean; count?: number; deleted?: number }> {
-  return postJson(`/memory/pending/batch/${accepted ? 'accept' : 'reject'}`, {})
-}
 
-export async function fetchMemoryItems(): Promise<MemoryItem[]> {
-  return getJson<MemoryItem[]>('/memory?include_rejected=true')
-}
 
-export async function fetchMemoryStats(): Promise<MemoryStats> {
-  return getJson<MemoryStats>('/memory/stats')
-}
 
-export async function fetchMemoryGroups(): Promise<Record<string, MemoryGroup>> {
-  return getJson<Record<string, MemoryGroup>>('/memory/groups')
-}
 
-export async function updateMemory(id: number, content: string): Promise<{ ok: boolean; id: number }> {
-  return postJson('/memory/update', { id, content })
-}
 
-export async function evolveMemory(id: number, content: string, type?: string, importance?: number, depth?: number): Promise<{ ok: boolean; id: number }> {
-  return postJson('/memory/evolve', { id, content, type, importance, depth })
-}
 
 export async function toggleSkill(name: string, enabled: boolean): Promise<{ ok: boolean; name: string; enabled: boolean }> {
   return postJson('/skills/toggle', { name, enabled })
