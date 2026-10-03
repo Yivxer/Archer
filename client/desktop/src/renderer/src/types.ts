@@ -930,8 +930,6 @@ export type ArcherAdapter = {
     toolEvents: ToolEvent[]
     mockReply: string
   }
-  sessions: SessionItem[]
-  threads: ConversationThread[]
   hypotheses: HypothesisItem[]
   skills: SkillItem[]
   modes: ModeSettings

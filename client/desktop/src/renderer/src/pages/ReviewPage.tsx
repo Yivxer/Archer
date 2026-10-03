@@ -1,3 +1,4 @@
+import { useThreadStore } from '../lib/threadStore'
 import React from 'react'
 import { Brain, ChevronRight, History, Layers, Search } from 'lucide-react'
 import { EmptyDetail, SearchBox } from '../components/common'
@@ -12,7 +13,7 @@ import {
   ReviewSoulProfilePanel,
   type ReviewMemoryGroup,
 } from '../components/ReviewPanels'
-import type { ArcherAdapter, MemoryItem, Route } from '../types'
+import type { ArcherAdapter, SessionItem, MemoryItem, Route } from '../types'
 import { clearSessionDetail, loadSessionDetail, searchSessions, useSessionStore } from '../lib/sessionStore'
 import { resolvePendingMemoryAction, useMemoryStore } from '../lib/memoryStore'
 import { useSoulStore } from '../lib/soulStore'
@@ -22,16 +23,24 @@ export function ReviewPage({
   connected,
   onRefresh,
   onOpenSession,
+  onContinueThread,
   onNavigate,
 }: {
   data: ArcherAdapter
   connected: boolean
   onRefresh: () => Promise<void>
-  onOpenSession: (session: ArcherAdapter['sessions'][number]) => void
+  onOpenSession: (session: SessionItem) => void
+  onContinueThread?: (threadId: string) => void
   onNavigate: (route: Route) => void
 }) {
-  const [selectedId, setSelectedId] = React.useState(data.sessions[0]?.id ?? '')
+  const threads = useThreadStore((state) => state.items)
+  const threadLoadState = useThreadStore((state) => state.loadState)
+  const [selectedId, setSelectedId] = React.useState('')
   const sessions = useSessionStore((state) => state.items)
+  const listLoadState = useSessionStore((state) => state.loadState)
+  const listError = useSessionStore((state) => state.listError)
+  const searchError = useSessionStore((state) => state.searchError)
+  const detailError = useSessionStore((state) => state.detailError)
   const detail = useSessionStore((state) => state.currentDetail)
   const detailState = useSessionStore((state) => state.detailState)
   const contentResults = useSessionStore((state) => state.searchResults)
@@ -62,12 +71,12 @@ export function ReviewPage({
   }, [sessions, selectedId])
 
   React.useEffect(() => {
-    if (!selectedId || data.status.adapter !== 'local') {
+    if (!selectedId || !connected) {
       clearSessionDetail()
       return
     }
     void loadSessionDetail(selectedId)
-  }, [selectedId, data.status.adapter])
+  }, [selectedId, connected])
 
   const now = new Date()
   const todayStr = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`
@@ -109,7 +118,7 @@ export function ReviewPage({
     }
   }, [selectedId, visibleSessions])
 
-  const contentSearchEnabled = data.status.adapter === 'local'
+  const contentSearchEnabled = connected
   React.useEffect(() => {
     if (!contentSearchEnabled) {
       void searchSessions('')
@@ -191,10 +200,11 @@ export function ReviewPage({
               ))}
             </select>
           )}
-          <button className="quiet-button" type="button" onClick={onRefresh}>
+          <button className="quiet-button" type="button" disabled={!connected || listLoadState === 'loading'} onClick={onRefresh}>
             刷新
           </button>
         </div>
+        {(listError || searchError || detailError) && <p role="alert">{listError || searchError || detailError}</p>}
         {query.trim().length >= 2 && searchState !== 'idle' ? (
           contentResults.length ? (
             <React.Fragment>
@@ -252,7 +262,7 @@ export function ReviewPage({
             ))}
           </React.Fragment>
         )) : (
-          <EmptyState compact title="无匹配会话" />
+          <EmptyState compact title={listLoadState === 'loading' ? '正在读取会话…' : listLoadState === 'ready' ? '无匹配会话' : '会话尚未读取成功'} />
         )}
       </div>
       {selected ? (
@@ -268,6 +278,11 @@ export function ReviewPage({
             </button>
           </div>
           <div className="review-shortcuts" aria-label="复盘相关入口">
+            {onContinueThread && selected.threadId && threads.some((thread) => thread.id === selected.threadId) && (
+              <button type="button" className="quiet-button" disabled={!connected || threadLoadState !== 'ready'} onClick={() => onContinueThread(selected.threadId!)}>
+                在新会话继续这个话题
+              </button>
+            )}
             <button type="button" className="quiet-button" onClick={() => onNavigate('Memory')}>
               <Brain size={15} />
               记忆审阅{pendingMemoryCount ? ` · ${pendingMemoryCount} 待确认` : ''}
@@ -333,7 +348,7 @@ export function ReviewPage({
   )
 }
 
-function scoreMemoryForSession(memory: MemoryItem, session: ArcherAdapter['sessions'][number]): number {
+function scoreMemoryForSession(memory: MemoryItem, session: SessionItem): number {
   let score = 0
   if (memory.sessionId && memory.sessionId === session.id) score += 100
   const haystack = [

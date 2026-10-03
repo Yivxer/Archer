@@ -1,3 +1,5 @@
+import { useSessionStore } from '../lib/sessionStore'
+import { useThreadStore } from '../lib/threadStore'
 import React from 'react'
 import { Folder, FolderPlus, Plus, Trash2, X } from 'lucide-react'
 import { EmptyDetail, SearchBox } from '../components/common'
@@ -15,10 +17,9 @@ import {
   writeSidebarProjects,
   type ProjectRecord,
 } from '../lib/sidebarProjects'
-import type { ArcherAdapter } from '../types'
+import type { SessionItem } from '../types'
 
 export function ProjectsPage({
-  data,
   projects,
   selectedProjectId,
   onProjectsChange,
@@ -26,22 +27,25 @@ export function ProjectsPage({
   onOpenSession,
   onCreateProject,
 }: {
-  data: ArcherAdapter
   projects: ProjectRecord[]
   selectedProjectId: string
   onProjectsChange: (projects: ProjectRecord[]) => void
   onProjectSelect: (projectId: string) => void
-  onOpenSession: (session: ArcherAdapter['sessions'][number]) => void
+  onOpenSession: (session: SessionItem) => void
   onCreateProject: () => void
 }) {
+  const sessions = useSessionStore((state) => state.items)
+  const threads = useThreadStore((state) => state.items)
+  const sessionError = useSessionStore((state) => state.listError)
+  const threadError = useThreadStore((state) => state.error)
   const [query, setQuery] = React.useState('')
   const selectedProject = projects.find((project) => project.id === selectedProjectId) ?? projects[0]
-  const projectThreads = threadsForProject(data.threads, data.sessions, selectedProject)
-  const projectSessions = sessionsForProject(data.sessions, selectedProject)
-  const sidebarGroups = buildSidebarTaskGroups(data.sessions, projects, data.threads)
+  const projectThreads = threadsForProject(threads, sessions, selectedProject)
+  const projectSessions = sessionsForProject(sessions, selectedProject)
+  const sidebarGroups = buildSidebarTaskGroups(sessions, projects, threads)
   const availableThreads = sidebarGroups.unassignedThreads
   const assignedSessionIds = new Set(selectedProject?.sessionIds ?? [])
-  const availableSessions = data.sessions.filter((session) => !session.threadId && !assignedSessionIds.has(session.id))
+  const availableSessions = sessions.filter((session) => !session.threadId && !assignedSessionIds.has(session.id))
   const cleanQuery = query.trim().toLowerCase()
   const visibleAvailableThreads = cleanQuery
     ? availableThreads.filter((thread) => [thread.title, thread.summary, thread.date].filter(Boolean).join(' ').toLowerCase().includes(cleanQuery))
@@ -108,6 +112,7 @@ export function ProjectsPage({
             <FolderPlus size={16} />
           </button>
         </div>
+        {(sessionError || threadError) && <p role="alert">{sessionError || threadError}</p>}
         {projects.length ? projects.map((project) => (
           <button
             className={`list-row project-row ${selectedProject?.id === project.id ? 'active' : ''}`}

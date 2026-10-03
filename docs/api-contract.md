@@ -628,33 +628,18 @@ SoulPage 的 hypotheses、journalReview、periodReviews 仍是其他领域传入
 
 ### sessionStore（L3.4）
 
-**真值来源**：`/sessions` + `/sessions/{id}` + `/sessions/search` + 保存/续写动作
+2026-10-03，1.0.32：`conversationAdapter.ts` 集中会话/线程 HTTP 操作，复用原认证、超时与 REST 格式。GET 保持既有解包，POST 保留原平铺回执。整体 `ArcherAdapter`、mock/offline、loadLocalArcher、storeSync 不再承载 sessions/threads。
 
-**State shape**：
-```ts
-type SessionStoreState = {
-  items: SessionItem[]                          // /sessions（列表摘要）
-  currentDetail: SessionDetail | null           // /sessions/{id}（当前打开的详情）
-  searchResults: SessionSearchResult[]          // /sessions/search?q=
-  searchQuery: string
-  loadState: 'idle' | 'loading' | 'ready' | 'error'
-  detailState: 'idle' | 'loading' | 'ready' | 'error'
-  searchState: 'idle' | 'searching' | 'ready' | 'error'
-  error: string
-}
-```
+**真值来源**：`/sessions`、`/sessions/{id}`、`/sessions/search` 和保存/续写/删除回执。
 
-**Actions**：
-| Action | 调用 API | 副作用 |
-|--------|---------|--------|
-| `loadList()` | GET /sessions | 替换 items |
-| `loadDetail(id)` | GET /sessions/{id} | 替换 currentDetail |
-| `search(query)` | GET /sessions/search?q= | 替换 searchResults（debounce 300ms） |
-| `save(messages, meta)` | POST /sessions | 返回 SavedSession + refresh items |
-| `append(id, messages)` | POST /sessions/{id}/append | 返回 SavedSession |
-| `mergeItems(items)` | （由 loadLocalArcher 注入） | 仅替换 items |
+- `loadSessionList({ force? })` 实际读取服务端；普通并发合并，force/reset 淘汰旧成功与失败响应，失败保留最近列表。列表、详情、搜索分别持有错误信息。
+- `loadSessionDetail(id)` 与 `searchSessions(query)` 只接纳最新请求；删除后淘汰先前详情/搜索响应，避免恢复已删除内容。
+- `saveSessionMessages(messages, meta)` / `appendSessionMessages(id, messages)` 写入后定向刷新 session 和 thread 列表。POST 成功与刷新失败分开，刷新失败不提示重发已成功保存的消息。
+- `deleteSession(id)` 尊重服务端 ok，成功后移除已删列表/详情/搜索内容并刷新两域；拒绝不自行删除。用户入口保持删除确认。
+- `mergeSessionItems` 仅用于提交已经读取的服务端列表和合成测试，不再是旧 adapter 注入入口。
+- 侧栏、ProjectsPage、ReviewPage 直接订阅 sessionStore；ChatPage 保存走 store action。活动聊天消息仍保留组件内状态，不把临时消息推为线程权威摘要。
 
-**订阅者**：ReviewPage、侧边栏、main.tsx、ProjectsPage
+Review 的“在新会话继续这个话题”沿用现有 POST `/sessions` 的 `threadId` 元数据。选择时不写会话，首次实际发送后生成同线程的新 session；普通“恢复”仍续写原 session。没有复制旧对话、合成用户决定或自动标记 J8 样本通过。
 
 ### jobStore（L3.5）
 
@@ -749,7 +734,7 @@ store 间通过 `lib/storeEventBus.ts` 解耦：store action 成功后 `emitStor
 
 ### threadStore（L3.8，ConversationThread 连续性契约）
 
-**真值来源**：loadLocalArcher 注入 items + `createLocalThread` / `updateLocalThread` / `addLocalSessionToThread` 3 个 API 动作 + 前端局部更新（`upsertThreadFromSave`）
+**真值来源**：`conversationAdapter` 读取 `/threads` 和线程动作的服务端回执；失败保留最近列表，普通并发合并，force/reset 淘汰旧读取。
 
 **State shape**：
 ```ts
@@ -764,12 +749,12 @@ type ThreadStoreState = {
 **Actions**：
 | Action | 调用 API | 副作用 |
 |--------|---------|--------|
-| `mergeThreadItems(items)` | （无，由 loadLocalArcher 注入） | 替换 items + 保留 currentThreadId（若仍存在）+ 标记 ready |
+| `loadThreadList({ force? })` | GET /threads | 读取服务端列表，失败保留内容 |
+| `mergeThreadItems(items)` | （提交已确认的服务端列表） | 替换 items + 保留 currentThreadId（若仍存在）+ 标记 ready |
 | `setCurrentThread(id\|null)` | （无） | 设置/清空当前活跃 thread |
 | `createThread(messages, title?)` | POST /threads | upsert items + 设为 current |
 | `updateThread(id, patch)` | POST /threads/{id} | upsert items（持久化 summary/title/projectId/archived） |
 | `linkSessionToThread(threadId, sessionId)` | POST /threads/{id}/sessions | upsert items（thread.sessionIds 追加） |
-| `upsertThreadFromSave(thread)` | （无，前端局部更新） | upsert items（保存会话后立即更新 UI，不调 API） |
 | `getCurrentThread()` | （selector） | 返回当前活跃 thread 或 null |
 
 **连续性契约**（Archer 稳定性框架.md §ConversationThread 连续性契约）：
@@ -780,8 +765,7 @@ type ThreadStoreState = {
 5. 发消息前注入当前 thread summary；该 summary 不写入 session 正文，避免污染历史记录
 6. 旧 session 无 threadId 时允许 fallback 聚合，但不能把 fallback 当成正式迁移
 
-**与 main.tsx 的关系**（接入留 L3.9）：
-- main.tsx 原 `data.threads` 局部更新逻辑（`upsertSavedSessionSnapshot`）迁移到 `threadStore.upsertThreadFromSave`
-- main.tsx 订阅 `useThreadStore(s => s.items)` 替代 `data.threads`
-- 新 session 保存后，若 threadId 存在且是新 thread，调 `threadStore.linkSessionToThread` 持久化关联
-- thread summary 由前端 `summarizeThreadMessages` 生成，通过 `threadStore.updateThread` 持久化
+**与 main.tsx 的关系**（2026-10-03）：
+- main、ProjectsPage、ChatPage 直接订阅 threadStore；删除旧整体快照和 `upsertSavedSessionSnapshot` / `upsertThreadFromSave` 回投影。
+- 新会话的线程创建或关联由现有服务端 POST 完成，随后读取 `/threads`。不再把助手最后一条回复拼成“最近结论”，保留服务端的 capsule/version/停点。
+- Session/Thread 是两个独立投影，各自呈现读取状态；一域读取失败时显示错误，不宣称跨两个端点的事务快照。

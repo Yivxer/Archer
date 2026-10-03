@@ -77,46 +77,6 @@ export const mockArcher: ArcherAdapter = {
       '```'
     ].join('\n')
   },
-  sessions: [
-    { id: 's1', threadId: 'thread-mock-product', title: '桌面端产品范围确认', date: '今天', turns: 18, tone: 'operator' },
-    { id: 's2', threadId: 'thread-mock-soul', title: 'Soul 深度问答输入体验', date: '昨天', turns: 31, tone: 'critic' },
-    { id: 's3', threadId: 'thread-mock-memory', title: '记忆质量与 pending 审阅', date: '本周', turns: 14, tone: 'coach' },
-    { id: 's4', threadId: 'thread-mock-stable', title: 'Archer v1.2 稳定在场版', date: '本周', turns: 27, tone: 'mirror' }
-  ],
-  threads: [
-    {
-      id: 'thread-mock-product',
-      title: '桌面端产品范围确认',
-      summary: '围绕桌面端范围和第一版工作台体验持续讨论。',
-      createdAt: '',
-      updatedAt: '',
-      sessionIds: ['s1'],
-    },
-    {
-      id: 'thread-mock-soul',
-      title: 'Soul 深度问答输入体验',
-      summary: '优化 Soul 页面输入与人格档案交互。',
-      createdAt: '',
-      updatedAt: '',
-      sessionIds: ['s2'],
-    },
-    {
-      id: 'thread-mock-memory',
-      title: '记忆质量与 pending 审阅',
-      summary: '梳理记忆审阅和长期记忆质量。',
-      createdAt: '',
-      updatedAt: '',
-      sessionIds: ['s3'],
-    },
-    {
-      id: 'thread-mock-stable',
-      title: 'Archer v1.2 稳定在场版',
-      summary: '推进 Archer 稳定性和在场感。',
-      createdAt: '',
-      updatedAt: '',
-      sessionIds: ['s4'],
-    },
-  ],
   hypotheses: [
     {
       id: 1,

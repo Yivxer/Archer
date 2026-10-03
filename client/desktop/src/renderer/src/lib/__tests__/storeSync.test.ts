@@ -47,9 +47,9 @@ describe('storeSync — L3.9a syncStoresFromAdapter', () => {
     expect(getSoulStoreState().loadState).toBe('idle')
   })
 
-  it('sync 后 sessionStore.items 与 adapter.sessions 一致', () => {
+  it('compatibility sync cannot initialize session authority', () => {
     syncStoresFromAdapter(mockArcher)
-    expect(getSessionStoreState().items).toEqual(mockArcher.sessions)
+    expect(getSessionStoreState().items).toEqual([])
   })
 
   it('sync 后 initiativeStore.review 与 adapter.initiativeShadow 一致', () => {
@@ -57,22 +57,22 @@ describe('storeSync — L3.9a syncStoresFromAdapter', () => {
     expect(getInitiativeStoreState().review).toEqual(mockArcher.initiativeShadow)
   })
 
-  it('sync 后 threadStore.items 与 adapter.threads 一致', () => {
+  it('compatibility sync cannot initialize thread authority', () => {
     syncStoresFromAdapter(mockArcher)
-    expect(getThreadStoreState().items).toEqual(mockArcher.threads)
+    expect(getThreadStoreState().items).toEqual([])
   })
 
   it('sync 后兼容 store loadState 为 ready', () => {
     syncStoresFromAdapter(mockArcher)
-    expect(getSessionStoreState().loadState).toBe('ready')
+    expect(getSessionStoreState().loadState).toBe('idle')
     expect(getInitiativeStoreState().loadState).toBe('ready')
-    expect(getThreadStoreState().loadState).toBe('ready')
+    expect(getThreadStoreState().loadState).toBe('idle')
   })
 
   it('二次 sync 替换而非追加', () => {
     syncStoresFromAdapter(mockArcher)
     syncStoresFromAdapter(mockArcher)
-    expect(getThreadStoreState().items).toEqual(mockArcher.threads)
+    expect(getThreadStoreState().items).toEqual([])
   })
 
   it('sync 后 threadStore.currentThreadId 仍为 null（未设置活跃 thread）', () => {

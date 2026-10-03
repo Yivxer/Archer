@@ -43,8 +43,6 @@ export function createOfflineLocalShell(previous?: ArcherAdapter): ArcherAdapter
       toolEvents: [],
       mockReply: '大脑暂时离线，恢复连接后会继续走本地 API。',
     },
-    sessions: [],
-    threads: [],
     hypotheses: [],
     skills: [],
     proactive: { enabled: false, items: [] },

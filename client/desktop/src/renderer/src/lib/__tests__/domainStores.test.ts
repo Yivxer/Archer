@@ -67,7 +67,6 @@ import {
   resetThreadStore,
   setCurrentThread,
   subscribeThreadStore,
-  upsertThreadFromSave,
 } from '../threadStore'
 
 
@@ -635,23 +634,6 @@ describe('threadStore — L3.8（ConversationThread 连续性契约）', () => {
     expect(getThreadStoreState().currentThreadId).toBe('thread-1')
     setCurrentThread(null)
     expect(getThreadStoreState().currentThreadId).toBeNull()
-  })
-
-  it('upsertThreadFromSave 新 thread 追加到头部', () => {
-    mergeThreadItems([thread])
-    const newThread = { ...thread, id: 'thread-2', title: '新话题' }
-    upsertThreadFromSave(newThread)
-    expect(getThreadStoreState().items).toHaveLength(2)
-    expect(getThreadStoreState().items[0].id).toBe('thread-2')
-  })
-
-  it('upsertThreadFromSave 已有 thread 替换（更新 summary/sessionIds）', () => {
-    mergeThreadItems([thread])
-    const updated = { ...thread, summary: '更新摘要', sessionIds: ['sess-1', 'sess-2'] }
-    upsertThreadFromSave(updated)
-    expect(getThreadStoreState().items).toHaveLength(1)
-    expect(getThreadStoreState().items[0].summary).toBe('更新摘要')
-    expect(getThreadStoreState().items[0].sessionIds).toEqual(['sess-1', 'sess-2'])
   })
 
   it('getCurrentThread 返回当前活跃 thread', () => {

@@ -144,13 +144,50 @@ def _resume(client: Any, state: Path, before: dict) -> dict:
     return {"processId": os.getpid(), "restored": True, "sideEffects": 0}
 
 
+def _continuation_seed(client: Any, state: Path) -> dict:
+    first = _request(client, "/sessions", {"messages": MESSAGES})
+    second = _request(client, "/sessions", {
+        "messages": [{"role": "user", "content": "从上次停点继续核对本地备份"}],
+        "threadId": first["threadId"],
+    })
+    assert first["id"] != second["id"]
+    assert first["threadId"] == second["threadId"]
+    return {"first": first, "second": second, "processId": os.getpid()}
+
+
+def _continuation_resume(client: Any, state: Path) -> dict:
+    before = json.loads((state / "continuation_seed.json").read_text())
+    first, second = before["first"], before["second"]
+    thread = _request(client, f"/threads/{first['threadId']}")
+    assert set(thread["sessionIds"]) == {first["id"], second["id"]}
+    assert _request(client, f"/sessions/{second['id']}")["threadId"] == first["threadId"]
+    appended = _request(client, f"/sessions/{second['id']}/append", {
+        "messages": [{"role": "assistant", "content": "继续检查备份"}],
+    })
+    assert appended["id"] == second["id"] and appended["threadId"] == first["threadId"]
+    original = _request(client, f"/sessions/{first['id']}")
+    assert [item["text"] for item in original["messages"]] == [item["content"] for item in MESSAGES]
+    deleted = _request(client, f"/sessions/{second['id']}/delete", {})
+    assert deleted["ok"] and not deleted.get("threadRemoved")
+    thread = _request(client, f"/threads/{first['threadId']}")
+    assert thread["sessionIds"] == [first["id"]]
+    deleted = _request(client, f"/sessions/{first['id']}/delete", {})
+    assert deleted["ok"] and deleted["threadRemoved"] == first["threadId"]
+    assert _request(client, "/sessions")["data"] == []
+    return {"processId": os.getpid(), "restored": True}
+
+
 def _phase(phase: str, state: Path) -> None:
     from fastapi.testclient import TestClient
 
     with TestClient(_configure_process(state)) as client:
         assert client.get("/sessions").status_code == 401
         client.headers["Authorization"] = f"Bearer {TOKEN}"
-        if phase == "seed":
+        if phase == "continuation_seed":
+            result = _continuation_seed(client, state)
+        elif phase == "continuation_resume":
+            result = _continuation_resume(client, state)
+        elif phase == "seed":
             (state / "original.md").write_text("必须保留的脱敏原文")
             result = _seed(client, state)
         else:
@@ -172,6 +209,20 @@ def test_rest_decisions_and_stopping_point_survive_fresh_api_process(tmp_path: P
     restored = json.loads((tmp_path / "resume.json").read_text())
     assert seeded["processId"] != restored["processId"]
     assert restored["restored"] and restored["sideEffects"] == 0
+
+
+def test_new_session_continues_same_thread_across_processes(tmp_path: Path) -> None:
+    if "ARCHER_OFFLINE_PROTECTED_ROOTS" not in os.environ:
+        pytest.skip("requires run_tests.sh synthetic checkout and user-state guard")
+    for phase in ("continuation_seed", "continuation_resume"):
+        result = subprocess.run(
+            [sys.executable, str(Path(__file__).resolve()), phase, str(tmp_path)],
+            cwd=ROOT, capture_output=True, text=True, timeout=30, check=False,
+        )
+        assert result.returncode == 0, result.stdout[-1000:] + result.stderr[-5000:]
+    seeded = json.loads((tmp_path / "continuation_seed.json").read_text())
+    restored = json.loads((tmp_path / "continuation_resume.json").read_text())
+    assert seeded["processId"] != restored["processId"] and restored["restored"]
 
 
 if __name__ == "__main__":

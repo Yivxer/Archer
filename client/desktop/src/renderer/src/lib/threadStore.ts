@@ -1,26 +1,11 @@
-/**
- * L3.8 — threadStore（ConversationThread 连续性契约）
- *
- * 真值来源：loadLocalArcher 注入 items + createLocalThread / updateLocalThread /
- *           addLocalSessionToThread 3 个 API 动作 + 前端局部更新（upsertThreadFromSave）
- * 订阅者：main.tsx（侧边栏 thread 渲染 + active thread 管理）、ChatPage（thread summary 注入）
- *
- * 契约（Archer 稳定性框架.md §ConversationThread 连续性契约）：
- * 1. 首页第一次发送成功后，后端创建 thread，前端立即把它设为当前 active thread
- * 2. 用户不点"新建对话"时，连续追问都 append 到同一 session/thread
- * 3. 侧边栏任务列表渲染 thread，而不是平铺 session
- * 4. 项目归属优先按 `threadIds`，旧 `sessionIds` 只做兼容
- * 5. 发消息前注入当前 thread summary；该 summary 不写入 session 正文，避免污染历史记录
- * 6. 旧 session 无 threadId 时允许 fallback 聚合，但不能把 fallback 当成正式迁移
- *
- * 本批只创建 store 文件不接 main.tsx（接入留 L3.9 跨页面验证时做）。
- */
+/** Conversation threads are server projections; pages subscribe directly. */
 
 import {
+  listLocalThreads,
   addLocalSessionToThread,
   createLocalThread,
   updateLocalThread,
-} from '../adapters/localArcher'
+} from '../adapters/conversationAdapter'
 import type { ChatRequestMessage, ConversationThread } from '../types'
 import { createExternalStore, useExternalStore, type LoadState } from './externalStore'
 
@@ -43,6 +28,30 @@ const initialState: ThreadStoreState = {
 // ───────────────────────── Store 单例 ─────────────────────────
 
 const store = createExternalStore<ThreadStoreState>(initialState)
+let loadGeneration = 0
+let resetGeneration = 0
+let pendingLoad: Promise<void> | null = null
+
+export function loadThreadList(options: { force?: boolean } = {}): Promise<void> {
+  if (pendingLoad && !options.force) return pendingLoad
+  const generation = ++loadGeneration
+  store.setState((state) => ({ ...state, loadState: 'loading', error: '' }))
+  pendingLoad = readThreads(generation)
+  return pendingLoad
+}
+
+async function readThreads(generation: number): Promise<void> {
+  try {
+    const items = await listLocalThreads()
+    if (generation !== loadGeneration) return
+    mergeThreadItems(items)
+  } catch (error) {
+    if (generation !== loadGeneration) return
+    store.setState((state) => ({ ...state, loadState: 'error', error: error instanceof Error ? error.message : String(error) }))
+  } finally {
+    if (generation === loadGeneration) pendingLoad = null
+  }
+}
 
 export function getThreadStoreState(): ThreadStoreState {
   return store.getState()
@@ -64,7 +73,7 @@ function upsertThread(state: ThreadStoreState, thread: ConversationThread): Conv
 // ───────────────────────── Actions ─────────────────────────
 
 /**
- * 由 loadLocalArcher 注入 items（不触发 API）。
+ * 提交服务端已确认的列表（不触发 API）。
  * 保留 currentThreadId（如果新 items 中仍存在）。
  */
 export function mergeThreadItems(items: ConversationThread[]): void {
@@ -95,16 +104,22 @@ export async function createThread(
   messages: ChatRequestMessage[],
   title?: string,
 ): Promise<ConversationThread | null> {
+  const epoch = resetGeneration
   try {
     const thread = await createLocalThread(messages, title)
+    if (epoch !== resetGeneration) return null
+    loadGeneration += 1
+    pendingLoad = null
     store.setState((s) => ({
       ...s,
       items: upsertThread(s, thread),
       currentThreadId: thread.id,
       error: '',
     }))
+    await loadThreadList({ force: true })
     return thread
   } catch (err) {
+    if (epoch !== resetGeneration) throw err
     store.setState((s) => ({
       ...s,
       error: err instanceof Error ? err.message : String(err),
@@ -118,20 +133,26 @@ export async function createThread(
  * 成功后局部更新 items。
  *
  * 契约 5：发消息前注入当前 thread summary；该 summary 不写入 session 正文。
- * summary 由前端 summarizeThreadMessages 生成，通过此 action 持久化。
+ * 返回的摘要与上下文始终来自服务端，不从助手回复推导已确认结论。
  */
 export async function updateThread(
   threadId: string,
   patch: Partial<Pick<ConversationThread, 'title' | 'summary' | 'projectId' | 'archived'>>,
 ): Promise<void> {
+  const epoch = resetGeneration
   try {
     const updated = await updateLocalThread(threadId, patch)
+    if (epoch !== resetGeneration) return
+    loadGeneration += 1
+    pendingLoad = null
     store.setState((s) => ({
       ...s,
       items: upsertThread(s, updated),
       error: '',
     }))
+    await loadThreadList({ force: true })
   } catch (err) {
+    if (epoch !== resetGeneration) throw err
     store.setState((s) => ({
       ...s,
       error: err instanceof Error ? err.message : String(err),
@@ -150,14 +171,20 @@ export async function linkSessionToThread(
   threadId: string,
   sessionId: string,
 ): Promise<void> {
+  const epoch = resetGeneration
   try {
     const updated = await addLocalSessionToThread(threadId, sessionId)
+    if (epoch !== resetGeneration) return
+    loadGeneration += 1
+    pendingLoad = null
     store.setState((s) => ({
       ...s,
       items: upsertThread(s, updated),
       error: '',
     }))
+    await loadThreadList({ force: true })
   } catch (err) {
+    if (epoch !== resetGeneration) throw err
     store.setState((s) => ({
       ...s,
       error: err instanceof Error ? err.message : String(err),
@@ -166,25 +193,6 @@ export async function linkSessionToThread(
   }
 }
 
-/**
- * 前端局部更新 thread（不调 API，用于保存会话后立即更新 UI）。
- *
- * 与 main.tsx 原 upsertSavedSessionSnapshot 的 thread 更新逻辑等价：
- * - 已存在 thread → 替换（更新 summary/updatedAt/sessionIds）
- * - 不存在 thread → 追加到列表头部
- *
- * 注意：此 action 不持久化到后端，需配合 updateThread / linkSessionToThread 使用。
- */
-export function upsertThreadFromSave(thread: ConversationThread): void {
-  store.setState((s) => ({
-    ...s,
-    items: upsertThread(s, thread),
-  }))
-}
-
-/**
- * 获取当前活跃 thread（只读 selector 辅助）。
- */
 export function getCurrentThread(): ConversationThread | null {
   const { items, currentThreadId } = store.getState()
   if (!currentThreadId) return null
@@ -195,6 +203,9 @@ export function getCurrentThread(): ConversationThread | null {
  * 重置 store。
  */
 export function resetThreadStore(): void {
+  loadGeneration += 1
+  resetGeneration += 1
+  pendingLoad = null
   store.setState(() => initialState)
 }
 

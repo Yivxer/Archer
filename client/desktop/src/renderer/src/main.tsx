@@ -22,8 +22,8 @@ import { onStoreEvent } from './lib/storeEventBus'
 import { syncStoresFromAdapter } from './lib/storeSync'
 import { useMemoryStore, loadAllMemory } from './lib/memoryStore'
 import { loadAllSoul } from './lib/soulStore'
-import { upsertThreadFromSave } from './lib/threadStore'
-import { deleteSession, getSessionStoreState, loadSessionDetail } from './lib/sessionStore'
+import { useThreadStore } from './lib/threadStore'
+import { deleteSession, getSessionStoreState, loadSessionDetail, clearSessionDetail, refreshConversations, useSessionStore } from './lib/sessionStore'
 import { createOfflineLocalShell, syncBrainData, wasBrainEverLinked } from './lib/brainConnection'
 import { useConnectionState, type ConnectionStateSnapshot } from './lib/useConnectionState'
 import { ConnectionBadge } from './components/ConnectionBadge'
@@ -46,6 +46,7 @@ import type {
   Route,
   SavedSession,
   SessionDetail,
+  SessionItem,
   Theme
 } from './types'
 import {
@@ -81,6 +82,7 @@ function App() {
     startedAt: string | null
   } | null>(null)
   const [crashBannerDismissed, setCrashBannerDismissed] = React.useState(false)
+  const [continuationThreadId, setContinuationThreadId] = React.useState('')
   const [activeSession, setActiveSession] = React.useState<SessionDetail | null>(null)
   const [sessionLoadState, setSessionLoadState] = React.useState<'idle' | 'loading' | 'error'>('idle')
   const [sessionLoadError, setSessionLoadError] = React.useState('')
@@ -106,7 +108,12 @@ function App() {
   // L1.2.5：第 1 层连接状态机（5s 心跳 + 30s doctor + 1s tick）
   const connection = useConnectionState()
 
+  const sessionSelectionRef = React.useRef(0)
+
   function newChat() {
+    sessionSelectionRef.current += 1
+    clearSessionDetail()
+    setContinuationThreadId('')
     setActiveSession(null)
     setSessionLoadState('idle')
     setSessionLoadError('')
@@ -114,7 +121,9 @@ function App() {
     setRoute('Chat')
   }
 
-  async function openSession(session: ArcherAdapter['sessions'][number]) {
+  async function openSession(session: SessionItem) {
+    const selection = ++sessionSelectionRef.current
+    setContinuationThreadId('')
     setRoute('Chat')
     setSessionLoadError('')
     if (data.status.adapter !== 'local' && !wasBrainEverLinked()) {
@@ -135,9 +144,10 @@ function App() {
     setSessionLoadState('loading')
     try {
       const detail = await loadSessionDetail(session.id)
+      if (selection !== sessionSelectionRef.current) return
       const sessionState = getSessionStoreState()
       if (!detail || sessionState.detailState === 'error') {
-        throw new Error(sessionState.error || '无法读取这个历史会话')
+        throw new Error(sessionState.detailError || '无法读取这个历史会话')
       }
       setActiveSession(detail)
       setSessionLoadState('idle')
@@ -166,6 +176,7 @@ function App() {
         }
       }
     } catch (error) {
+      if (selection !== sessionSelectionRef.current) return
       setSessionLoadState('error')
       setSessionLoadError(error instanceof Error ? error.message : '无法读取这个历史会话')
     }
@@ -187,13 +198,7 @@ function App() {
       setChatKey((k) => k + 1)
       setRoute('Chat')
     }
-    // 立即从本地 data 中移除已删除的 sessions/threads，侧边栏即时刷新
-    const deletedIds = new Set(sessionIds)
-    setData((current) => ({
-      ...current,
-      sessions: current.sessions.filter((s) => !deletedIds.has(s.id)),
-      threads: current.threads.filter((t) => t.id !== thread.id),
-    }))
+
   }
 
   React.useEffect(() => {
@@ -241,7 +246,7 @@ function App() {
       const result = await syncBrainData({ previous: data, silent: options.silent })
       if (result.adapter) {
         setData(result.adapter)
-        // 兼容领域初始化；Soul、Memory 由独立 HTTP/store 加载。
+        // 仅同步剩余 initiative 兼容域；其他领域独立加载。
         syncStoresFromAdapter(result.adapter)
       } else if (!wasBrainEverLinked()) {
         setData(mockArcher)
@@ -251,6 +256,7 @@ function App() {
       if (result.state === 'connected') {
         void loadAllSoul()
         void loadAllMemory({ force: true })
+        void refreshConversations()
         setApiBannerDismissed(false)
         // L0.4: 连接成功后读崩溃信息 (只读一次)
         try {
@@ -307,7 +313,11 @@ function App() {
   }
 
   const pendingMemoryCount = useMemoryStore((state) => state.stats?.pendingCount ?? 0)
-  const sidebarTaskGroups = React.useMemo(() => buildSidebarTaskGroups(data.sessions, projects, data.threads), [data.sessions, projects, data.threads])
+  const sessions = useSessionStore((state) => state.items)
+  const threads = useThreadStore((state) => state.items)
+  const sessionListError = useSessionStore((state) => state.listError)
+  const threadListError = useThreadStore((state) => state.error)
+  const sidebarTaskGroups = React.useMemo(() => buildSidebarTaskGroups(sessions, projects, threads), [sessions, projects, threads])
 
   const sidebarNavItems: Array<{ route: Route; icon: React.ElementType; label: string; touchCount?: number }> = [
     { route: 'Chat', icon: MessageSquare, label: '对话' },
@@ -336,48 +346,6 @@ function App() {
       threadId: savedSession.threadId,
       messages,
     }
-  }
-
-  function upsertSavedSessionSnapshot(messages: SessionDetail['messages'], savedSession: SavedSession) {
-    const detail = buildSessionDetailFromSave(messages, savedSession)
-    setData((current) => {
-      const sessionItem = {
-        id: detail.id,
-        title: detail.title,
-        date: detail.date,
-        turns: detail.turns,
-        tone: detail.tone,
-        threadId: detail.threadId,
-        preview: messages.find((message) => message.role === 'user')?.text.slice(0, 60),
-      }
-      const nextSessions = current.sessions.some((session) => session.id === detail.id)
-        ? current.sessions.map((session) => session.id === detail.id ? { ...session, ...sessionItem } : session)
-        : [sessionItem, ...current.sessions]
-      if (!detail.threadId) {
-        return { ...current, sessions: nextSessions }
-      }
-      const summary = summarizeThreadMessages(messages)
-      const existingThread = current.threads.find((thread) => thread.id === detail.threadId)
-      const thread = {
-        id: detail.threadId,
-        title: existingThread?.title || detail.title,
-        summary,
-        createdAt: existingThread?.createdAt || new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        sessionIds: Array.from(new Set([...(existingThread?.sessionIds || []), detail.id])),
-        projectId: existingThread?.projectId,
-        archived: existingThread?.archived,
-      }
-      // L3.9: 同步到 threadStore（影子真值，在回调内调用确保 thread 已构造）
-      upsertThreadFromSave(thread)
-      return {
-        ...current,
-        sessions: nextSessions,
-        threads: existingThread
-          ? current.threads.map((item) => item.id === thread.id ? thread : item)
-          : [thread, ...current.threads],
-      }
-    })
   }
 
   React.useEffect(() => {
@@ -421,6 +389,7 @@ function App() {
 
   return (
     <div className={`app-shell ${sidebarOpen ? 'has-sidebar' : 'focus-mode'}`}>
+      {(sessionListError || threadListError) && <div className="api-banner" role="alert">会话列表刷新失败，保留上次内容。{sessionListError || threadListError}<button type="button" disabled={apiState !== 'connected'} onClick={() => void refreshConversations()}>重试</button></div>}
       <div className="window-drag-strip" aria-hidden="true" />
       <div className="app-title-tools" aria-label="窗口工具">
         <button
@@ -641,6 +610,7 @@ function App() {
               memoryMode={memoryMode}
               obsidianMode={obsidianMode}
               activeSession={activeSession}
+              continuationThreadId={continuationThreadId}
               sessionLoadState={sessionLoadState}
               sessionLoadError={sessionLoadError}
               resetRuntimeOnMount={chatKey > 0 && !activeSession}
@@ -657,7 +627,6 @@ function App() {
               onRefresh={connectLocalApi}
               onExpertSwitch={patchExpertWorkbench}
               onSessionAppended={(messages, savedSession) => {
-                if (savedSession) upsertSavedSessionSnapshot(messages, savedSession)
                 setActiveSession((current) => {
                   if (current) {
                     return {
@@ -676,8 +645,12 @@ function App() {
             <ReviewPage
               connected={apiState === 'connected'}
               data={data}
-              onRefresh={connectLocalApi}
+              onRefresh={refreshConversations}
               onOpenSession={openSession}
+              onContinueThread={(threadId) => {
+                newChat()
+                setContinuationThreadId(threadId)
+              }}
               onNavigate={setRoute}
             />
           )}
@@ -695,7 +668,6 @@ function App() {
           {route === 'Skills' && <SkillsPage data={data} onRefresh={connectLocalApi} />}
           {route === 'Projects' && (
             <ProjectsPage
-              data={data}
               projects={projects}
               selectedProjectId={selectedProjectId}
               onProjectsChange={setProjects}
@@ -730,21 +702,6 @@ function App() {
       </main>
     </div>
   )
-}
-
-function summarizeThreadMessages(messages: SessionDetail['messages']): string {
-  const firstUser = messages.find((message) => message.role === 'user')?.text.trim()
-  const recentUser = [...messages].reverse().find((message) => message.role === 'user')?.text.trim()
-  const recentAssistant = [...messages].reverse().find((message) => message.role === 'assistant')?.text.trim()
-  const parts: string[] = []
-  if (firstUser) parts.push(`目标：${compactSummaryText(firstUser, 120)}`)
-  if (recentUser && recentUser !== firstUser) parts.push(`最近问题：${compactSummaryText(recentUser, 120)}`)
-  if (recentAssistant) parts.push(`最近结论：${compactSummaryText(recentAssistant, 180)}`)
-  return parts.join('\n')
-}
-
-function compactSummaryText(value: string, limit: number): string {
-  return value.replace(/\s+/g, ' ').trim().slice(0, limit)
 }
 
 /** L0.4: 崩溃原因转中文标签. */

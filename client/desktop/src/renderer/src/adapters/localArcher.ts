@@ -5,7 +5,6 @@ import type {
   BackgroundJobCreateResult,
   BackgroundJobListResult,
   ChatRequestMessage,
-  ConversationThread,
   FileRef,
   MemoryContextMode,
   HypothesisItem,
@@ -14,9 +13,6 @@ import type {
   ExpertSettings,
   ExpertSwitchResult,
   ObsidianContextMode,
-  SavedSession,
-  SessionDetail,
-  SessionSearchResult,
   SettingsDraft,
   ModelProfileTestResult,
   SettingsSaveResult,
@@ -236,8 +232,6 @@ export async function loadLocalArcher(): Promise<ArcherAdapter> {
   ])
 
   const [
-    sessions,
-    threads,
     hypothesisResult,
     skills,
     proactive,
@@ -252,8 +246,6 @@ export async function loadLocalArcher(): Promise<ArcherAdapter> {
     configDoctor,
     toolApprovalAudit,
   ] = await Promise.all([
-    safeJson('/sessions', [] as ArcherAdapter['sessions']),
-    safeJson('/threads', [] as ArcherAdapter['threads']),
     safeJson('/hypotheses?status=all', { ok: false, hypotheses: [] } as HypothesisListResult),
     safeJson('/skills', [] as ArcherAdapter['skills']),
     safeJson('/proactive-touch', { enabled: false, items: [] } as ArcherAdapter['proactive']),
@@ -358,8 +350,6 @@ export async function loadLocalArcher(): Promise<ArcherAdapter> {
       toolEvents: [],
       mockReply: '本地 API 已连接。当前聊天会走纯模型回复，还没有工具调用。'
     },
-    sessions,
-    threads,
     hypotheses: normalizeHypotheses(hypothesisResult.hypotheses),
     skills,
     modes,
@@ -580,65 +570,9 @@ function normalizeHypothesisStatus(status: unknown): HypothesisItem['status'] {
   return 'active'
 }
 
-export async function loadLocalSession(sessionId: string): Promise<SessionDetail> {
-  return getJson<SessionDetail>(`/sessions/${encodeURIComponent(sessionId)}`)
-}
-
-export async function searchLocalSessions(query: string): Promise<SessionSearchResult[]> {
-  if (!query.trim()) return []
-  return getJson<SessionSearchResult[]>(`/sessions/search?q=${encodeURIComponent(query)}`)
-}
-
 export async function sendLocalChat(messages: ChatRequestMessage[]): Promise<string> {
   const response = await postJson<{ role: 'assistant'; text: string }>('/chat', { messages })
   return response.text
-}
-
-export type SessionSaveMeta = {
-  expertId?: string
-  expertLabel?: string
-  modeId?: string
-  modeLabel?: string
-}
-
-export async function saveLocalSession(
-  messages: ChatRequestMessage[],
-  meta: SessionSaveMeta = {},
-): Promise<SavedSession> {
-  return postJson<SavedSession>('/sessions', { messages, ...meta })
-}
-
-export async function appendLocalSession(sessionId: string, messages: ChatRequestMessage[]): Promise<SavedSession> {
-  return postJson<SavedSession>(`/sessions/${encodeURIComponent(sessionId)}/append`, { messages })
-}
-export type SessionDeleteResult = {
-  ok: boolean
-  id: string
-  fileDeleted: boolean
-  threadRemoved?: string | null
-}
-
-export async function deleteLocalSession(sessionId: string): Promise<SessionDeleteResult> {
-  return postJson<SessionDeleteResult>(`/sessions/${encodeURIComponent(sessionId)}/delete`, {})
-}
-
-export async function loadLocalThread(threadId: string): Promise<ConversationThread> {
-  return getJson<ConversationThread>(`/threads/${encodeURIComponent(threadId)}`)
-}
-
-export async function createLocalThread(messages: ChatRequestMessage[], title?: string): Promise<ConversationThread> {
-  return postJson<ConversationThread>('/threads', { messages, title })
-}
-
-export async function updateLocalThread(
-  threadId: string,
-  patch: Partial<Pick<ConversationThread, 'title' | 'summary' | 'projectId' | 'archived'>>,
-): Promise<ConversationThread> {
-  return postJson<ConversationThread>(`/threads/${encodeURIComponent(threadId)}`, patch)
-}
-
-export async function addLocalSessionToThread(threadId: string, sessionId: string): Promise<ConversationThread> {
-  return postJson<ConversationThread>(`/threads/${encodeURIComponent(threadId)}/sessions`, { sessionId })
 }
 
 export async function submitInitiativeFeedback(

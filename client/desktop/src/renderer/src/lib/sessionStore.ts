@@ -1,29 +1,16 @@
-/**
- * L3.4 — sessionStore
- *
- * 真值来源：/sessions + /sessions/{id} + /sessions/search + 保存/续写动作
- * 订阅者：ReviewPage、侧边栏、main.tsx、ProjectsPage
- *
- * 契约：docs/api-contract.md §「sessionStore（L3.4）」
- */
-
+/** Server-owned session summaries, details, search and persistence. */
 import {
   appendLocalSession,
   deleteLocalSession,
+  listLocalSessions,
   loadLocalSession,
   saveLocalSession,
   searchLocalSessions,
-} from '../adapters/localArcher'
-import type {
-  ChatMessage,
-  ChatRequestMessage,
-  SessionDetail,
-  SessionItem,
-  SessionSearchResult,
-} from '../types'
+  type SessionSaveMeta,
+} from '../adapters/conversationAdapter'
+import type { ChatMessage, ChatRequestMessage, SavedSession, SessionDetail, SessionItem, SessionSearchResult } from '../types'
 import { createExternalStore, useExternalStore, type LoadState } from './externalStore'
-
-// ───────────────────────── State ─────────────────────────
+import { loadThreadList } from './threadStore'
 
 export type SessionStoreState = {
   items: SessionItem[]
@@ -34,206 +21,163 @@ export type SessionStoreState = {
   detailState: LoadState
   searchState: 'idle' | 'searching' | 'ready' | 'error'
   error: string
+  listError: string
+  detailError: string
+  searchError: string
 }
 
 const initialState: SessionStoreState = {
-  items: [],
-  currentDetail: null,
-  searchResults: [],
-  searchQuery: '',
-  loadState: 'idle',
-  detailState: 'idle',
-  searchState: 'idle',
-  error: '',
+  items: [], currentDetail: null, searchResults: [], searchQuery: '',
+  loadState: 'idle', detailState: 'idle', searchState: 'idle',
+  error: '', listError: '', detailError: '', searchError: '',
 }
-
-// ───────────────────────── Store 单例 ─────────────────────────
-
 const store = createExternalStore<SessionStoreState>(initialState)
+let listRequestId = 0
 let detailRequestId = 0
 let searchRequestId = 0
+let resetGeneration = 0
+let pendingList: Promise<void> | null = null
+const errorText = (error: unknown): string => error instanceof Error ? error.message : String(error)
 
-export function getSessionStoreState(): SessionStoreState {
-  return store.getState()
+export function getSessionStoreState(): SessionStoreState { return store.getState() }
+export function subscribeSessionStore(listener: () => void): () => void { return store.subscribe(listener) }
+
+export function loadSessionList(options: { force?: boolean } = {}): Promise<void> {
+  if (pendingList && !options.force) return pendingList
+  const requestId = ++listRequestId
+  store.setState((state) => ({ ...state, loadState: 'loading', listError: '' }))
+  pendingList = readSessions(requestId)
+  return pendingList
 }
 
-export function subscribeSessionStore(listener: () => void): () => void {
-  return store.subscribe(listener)
-}
-
-// ───────────────────────── Actions ─────────────────────────
-
-/**
- * 加载会话列表摘要。
- */
-export async function loadSessionList(): Promise<void> {
-  store.setState((s) => ({ ...s, loadState: 'loading', error: '' }))
+async function readSessions(requestId: number): Promise<void> {
   try {
-    // items 由 loadLocalArcher 注入，loadList 不主动 fetch /sessions
-    // 这里只标记 ready，实际数据由 mergeSessionItems 注入
-    store.setState((s) => ({ ...s, loadState: 'ready', error: '' }))
-  } catch (err) {
-    store.setState((s) => ({
-      ...s,
-      loadState: 'error',
-      error: err instanceof Error ? err.message : String(err),
-    }))
+    const items = await listLocalSessions()
+    if (requestId !== listRequestId) return
+    mergeSessionItems(items)
+  } catch (error) {
+    if (requestId !== listRequestId) return
+    store.setState((state) => ({ ...state, loadState: 'error', listError: errorText(error), error: errorText(error) }))
+  } finally {
+    if (requestId === listRequestId) pendingList = null
   }
 }
 
-/**
- * 加载会话详情。
- */
 export async function loadSessionDetail(id: string): Promise<SessionDetail | null> {
   const requestId = ++detailRequestId
-  store.setState((s) => ({ ...s, detailState: 'loading', error: '' }))
+  store.setState((state) => ({ ...state, currentDetail: null, detailState: 'loading', detailError: '' }))
   try {
     const detail = await loadLocalSession(id)
     if (requestId !== detailRequestId) return null
-    store.setState((s) => ({
-      ...s,
-      currentDetail: detail,
-      detailState: 'ready',
-      error: '',
-    }))
+    store.setState((state) => ({ ...state, currentDetail: detail, detailState: 'ready', detailError: '', error: '' }))
     return detail
-  } catch (err) {
+  } catch (error) {
     if (requestId !== detailRequestId) return null
-    store.setState((s) => ({
-      ...s,
-      currentDetail: null,
-      detailState: 'error',
-      error: err instanceof Error ? err.message : String(err),
-    }))
+    store.setState((state) => ({ ...state, currentDetail: null, detailState: 'error', detailError: errorText(error), error: errorText(error) }))
     return null
   }
 }
 
-/**
- * 搜索会话（debounce 由调用方处理）。
- */
 export async function searchSessions(query: string): Promise<void> {
   const requestId = ++searchRequestId
   const trimmed = query.trim()
   if (!trimmed) {
-    store.setState((s) => ({
-      ...s,
-      searchResults: [],
-      searchQuery: '',
-      searchState: 'idle',
-    }))
+    store.setState((state) => ({ ...state, searchResults: [], searchQuery: '', searchState: 'idle', searchError: '' }))
     return
   }
-  store.setState((s) => ({ ...s, searchState: 'searching', searchQuery: trimmed }))
+  store.setState((state) => ({ ...state, searchResults: [], searchState: 'searching', searchQuery: trimmed, searchError: '' }))
   try {
     const results = await searchLocalSessions(trimmed)
     if (requestId !== searchRequestId) return
-    store.setState((s) => ({
-      ...s,
-      searchResults: results,
-      searchState: 'ready',
-    }))
-  } catch (err) {
+    store.setState((state) => ({ ...state, searchResults: results, searchState: 'ready', searchError: '' }))
+  } catch (error) {
     if (requestId !== searchRequestId) return
-    store.setState((s) => ({
-      ...s,
-      searchState: 'error',
-      error: err instanceof Error ? err.message : String(err),
-    }))
+    store.setState((state) => ({ ...state, searchState: 'error', searchError: errorText(error), error: errorText(error) }))
   }
 }
 
-/**
- * 保存新会话。
- */
-export async function saveSession(
-  messages: ChatMessage[],
-  meta?: { expertId?: string; expertLabel?: string },
-): Promise<{ id: string; path: string; threadId?: string } | null> {
+/** Save success remains success if the subsequent read fails; do not repeat the POST. */
+export async function saveSessionMessages(messages: ChatRequestMessage[], meta: SessionSaveMeta = {}): Promise<SavedSession> {
+  const epoch = resetGeneration
+  const saved = await saveLocalSession(messages, meta)
+  if (epoch === resetGeneration) await refreshConversations()
+  return saved
+}
+
+export async function appendSessionMessages(id: string, messages: ChatRequestMessage[]): Promise<SavedSession> {
+  const epoch = resetGeneration
+  const saved = await appendLocalSession(id, messages)
+  if (epoch === resetGeneration) {
+    if (store.getState().currentDetail?.id === id) clearSessionDetail()
+    await refreshConversations()
+  }
+  return saved
+}
+
+export async function refreshConversations(): Promise<void> {
+  await Promise.all([loadSessionList({ force: true }), loadThreadList({ force: true })])
+}
+
+export async function saveSession(messages: ChatMessage[], meta?: SessionSaveMeta): Promise<SavedSession | null> {
   try {
-    const saved = await saveLocalSession(
-      messages.map((m) => ({ role: m.role, content: m.text })),
-      meta,
-    )
-    // 保存成功后需要 refresh items（由 mergeSessionItems 注入新列表）
-    return { id: saved.id, path: saved.path, threadId: saved.threadId }
-  } catch (err) {
-    store.setState((s) => ({
-      ...s,
-      error: err instanceof Error ? err.message : String(err),
-    }))
+    return await saveSessionMessages(messages.map((message) => ({ role: message.role, content: message.text })), meta)
+  } catch (error) {
+    store.setState((state) => ({ ...state, error: errorText(error) }))
     return null
   }
 }
 
-/**
- * 续写现有会话。
- */
-export async function appendSession(
-  id: string,
-  messages: ChatRequestMessage[],
-): Promise<{ id: string; path: string; threadId?: string } | null> {
+export async function appendSession(id: string, messages: ChatRequestMessage[]): Promise<SavedSession | null> {
   try {
-    const saved = await appendLocalSession(id, messages)
-    return { id: saved.id, path: saved.path, threadId: saved.threadId }
-  } catch (err) {
-    store.setState((s) => ({
-      ...s,
-      error: err instanceof Error ? err.message : String(err),
-    }))
+    return await appendSessionMessages(id, messages)
+  } catch (error) {
+    store.setState((state) => ({ ...state, error: errorText(error) }))
     return null
   }
 }
 
-/**
- * 由 loadLocalArcher 注入 items（不触发 API）。
- */
+/** Commit a confirmed server list, never an ArcherAdapter compatibility snapshot. */
 export function mergeSessionItems(items: SessionItem[]): void {
-  store.setState((s) => ({ ...s, items, loadState: 'ready' }))
+  store.setState((state) => ({ ...state, items, loadState: 'ready', listError: '', error: '' }))
 }
 
-/**
- * 删除一个会话（硬删除：后端会同时清理 session 文件和 thread 引用）。
- * 删除成功后从 items 中移除；若删除的是当前详情会话，则一并清空 currentDetail。
- */
 export async function deleteSession(sessionId: string): Promise<{ ok: boolean; threadRemoved?: string | null }> {
+  const epoch = resetGeneration
   try {
     const result = await deleteLocalSession(sessionId)
-    store.setState((s) => ({
-      ...s,
-      items: s.items.filter((item) => item.id !== sessionId),
-      currentDetail: s.currentDetail?.id === sessionId ? null : s.currentDetail,
-      detailState: s.currentDetail?.id === sessionId ? 'idle' : s.detailState,
-      error: '',
+    if (!result.ok) throw new Error('会话未删除，请刷新后重试')
+    if (epoch !== resetGeneration) return { ok: true, threadRemoved: result.threadRemoved }
+    // Invalidate in-flight detail/search so a late response cannot resurrect deleted content.
+    detailRequestId += 1
+    searchRequestId += 1
+    store.setState((state) => ({
+      ...state, items: state.items.filter((item) => item.id !== sessionId),
+      currentDetail: state.currentDetail?.id === sessionId ? null : state.currentDetail,
+      detailState: state.currentDetail?.id === sessionId || state.detailState === 'loading' ? 'idle' : state.detailState,
+      searchResults: state.searchResults.filter((item) => item.id !== sessionId),
+      searchState: 'idle', detailError: '', searchError: '', error: '',
     }))
+    await refreshConversations()
     return { ok: true, threadRemoved: result.threadRemoved }
-  } catch (err) {
-    store.setState((s) => ({
-      ...s,
-      error: err instanceof Error ? err.message : String(err),
-    }))
+  } catch (error) {
+    if (epoch === resetGeneration) store.setState((state) => ({ ...state, error: errorText(error) }))
     return { ok: false }
   }
 }
 
-/**
- * 清空 currentDetail（用于关闭会话详情）。
- */
 export function clearSessionDetail(): void {
   detailRequestId += 1
-  store.setState((s) => ({ ...s, currentDetail: null, detailState: 'idle' }))
+  store.setState((state) => ({ ...state, currentDetail: null, detailState: 'idle', detailError: '' }))
 }
 
-/**
- * 重置 store。
- */
 export function resetSessionStore(): void {
+  listRequestId += 1
   detailRequestId += 1
   searchRequestId += 1
+  resetGeneration += 1
+  pendingList = null
   store.setState(() => initialState)
 }
-
-// ───────────────────────── React hook ─────────────────────────
 
 export function useSessionStore<U>(selector: (state: SessionStoreState) => U): U {
   return useExternalStore(store, selector)

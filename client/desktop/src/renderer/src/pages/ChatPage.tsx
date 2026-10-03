@@ -1,6 +1,8 @@
+import { appendSessionMessages, saveSessionMessages } from '../lib/sessionStore'
+import { useThreadStore } from '../lib/threadStore'
 import React from 'react'
 import { ArrowUp, Check, ChevronDown, Copy, CornerDownLeft, Crop, Download, Edit3, Loader2, Mic, Monitor, Paperclip, RotateCcw, X } from 'lucide-react'
-import { appendLocalSession, approveJobToolEvent, cancelBackgroundJobEvent, createBackgroundJobEvent, ensureLocalConnection, fetchBackgroundJob, pollBackgroundJobEvents, retryBackgroundJobEvent, saveLocalSession, spawnChildJobs, streamLocalChat, submitToolApprovalEvent, switchLocalExpert, switchLocalActiveProfile } from '../adapters/localArcher'
+import { approveJobToolEvent, cancelBackgroundJobEvent, createBackgroundJobEvent, ensureLocalConnection, fetchBackgroundJob, pollBackgroundJobEvents, retryBackgroundJobEvent, spawnChildJobs, streamLocalChat, submitToolApprovalEvent, switchLocalExpert, switchLocalActiveProfile } from '../adapters/localArcher'
 import { pickChatGreeting } from '../lib/chatGreetings'
 import { extendedConversationModes, modelProfileShortLabel, modelSwitchNotice } from '../lib/conversationPersona'
 import { canDeploy, isInputDisabled, isSendDisabled, type ConnectionState } from '../lib/connectionState'
@@ -78,6 +80,7 @@ export function ChatPage({
   memoryMode,
   obsidianMode,
   activeSession,
+  continuationThreadId,
   sessionLoadState = 'idle',
   sessionLoadError = '',
   resetRuntimeOnMount = false,
@@ -94,6 +97,7 @@ export function ChatPage({
   memoryMode: MemoryContextMode
   obsidianMode: ObsidianContextMode
   activeSession?: SessionDetail | null
+  continuationThreadId?: string
   sessionLoadState?: 'idle' | 'loading' | 'error'
   sessionLoadError?: string
   resetRuntimeOnMount?: boolean
@@ -158,15 +162,17 @@ export function ChatPage({
   const homeStarters = (activeExpert?.starters?.length ? activeExpert.starters : DEFAULT_STARTERS).slice(0, 4)
   const modelProfiles = data.settings.modelProfiles ?? []
   const fullConversationModes = extendedConversationModes(data.modes.modes ?? [])
+  const threads = useThreadStore((state) => state.items)
   const activeThread = React.useMemo(() => (
-    activeSession?.threadId
-      ? data.threads.find((thread) => thread.id === activeSession.threadId)
+    (activeSession?.threadId || continuationThreadId)
+      ? threads.find((thread) => thread.id === (activeSession?.threadId || continuationThreadId))
       : undefined
-  ), [activeSession?.threadId, data.threads])
+  ), [activeSession?.threadId, continuationThreadId, threads])
 
   function sessionSaveMeta() {
     const modeId = data.modes.current || data.status.mode || 'auto'
     return {
+      threadId: activeSession?.threadId || continuationThreadId || undefined,
       expertId: activeExpertId,
       expertLabel: activeExpert?.label || data.status.expertLabel,
       modeId,
@@ -175,6 +181,7 @@ export function ChatPage({
   }
 
   function threadContextPayload() {
+    if (continuationThreadId && !activeThread) throw new Error('原话题尚未读取成功，请刷新后再继续。')
     if (!activeThread?.title && !activeThread?.summary) return null
     return {
       id: activeThread?.id,
@@ -541,14 +548,14 @@ export function ChatPage({
         try {
           const finalMessages: ChatMessage[] = [...nextMessages, { id: assistantId, role: 'assistant', text: reply }]
           if (activeSession) {
-            const saved = await appendLocalSession(activeSession.id, [
+            const saved = await appendSessionMessages(activeSession.id, [
               { role: 'user', content: text },
               { role: 'assistant', content: reply }
             ])
             onSessionAppended?.(finalMessages, saved)
             setSaveState('已续写当前会话')
           } else {
-            const saved = await saveLocalSession([...requestMessages, { role: 'assistant', content: reply }], sessionSaveMeta())
+            const saved = await saveSessionMessages([...requestMessages, { role: 'assistant', content: reply }], sessionSaveMeta())
             onSessionAppended?.(finalMessages, saved)
             setSaveState('已保存到历史会话')
           }
@@ -741,14 +748,14 @@ export function ChatPage({
       ))
       try {
         if (activeSession) {
-          const saved = await appendLocalSession(activeSession.id, [{ role: 'assistant', content: reply }])
+          const saved = await appendSessionMessages(activeSession.id, [{ role: 'assistant', content: reply }])
           onSessionAppended?.(nextMessages.map((message) =>
             message.id === assistantId ? { ...message, text: reply } : message,
           ), saved)
           setSaveState('计划任务结果已续写当前会话')
         } else {
           const requestMessages = messages.map((message) => ({ role: message.role, content: message.text }))
-          const saved = await saveLocalSession(
+          const saved = await saveSessionMessages(
             buildPlanResultSessionMessages(plan, requestMessages, reply),
             sessionSaveMeta(),
           )
@@ -892,7 +899,7 @@ export function ChatPage({
       ))
       try {
         if (activeSession) {
-          const saved = await appendLocalSession(activeSession.id, [
+          const saved = await appendSessionMessages(activeSession.id, [
             { role: 'user', content: text },
             { role: 'assistant', content: reply }
           ])
@@ -900,7 +907,7 @@ export function ChatPage({
           setSaveState('后台结果已续写当前会话')
         } else {
           const requestMessages = [...messages, userMessage].map((message) => ({ role: message.role, content: message.text }))
-          const saved = await saveLocalSession([...requestMessages, { role: 'assistant', content: reply }], sessionSaveMeta())
+          const saved = await saveSessionMessages([...requestMessages, { role: 'assistant', content: reply }], sessionSaveMeta())
           onSessionAppended?.(finalMessages, saved)
           setSaveState('后台结果已保存到历史会话')
         }
@@ -1420,7 +1427,7 @@ export function ChatPage({
           onSessionAppended?.(finalMessages)
           setSaveState('已重新生成当前回答')
         } else {
-          const saved = await saveLocalSession([...requestMessages, { role: 'assistant', content: reply }], sessionSaveMeta())
+          const saved = await saveSessionMessages([...requestMessages, { role: 'assistant', content: reply }], sessionSaveMeta())
           onSessionAppended?.(finalMessages, saved)
           setSaveState('已保存到历史会话')
         }
@@ -1749,7 +1756,8 @@ export function ChatPage({
       <div className="chat-home">
         <div className="home-centerpiece">
           <ArcherRing large living />
-          <p className="home-title">{homeGreeting}</p>
+          <p className="home-title">{continuationThreadId && activeThread ? `继续「${activeThread.title}」` : homeGreeting}</p>
+          {continuationThreadId && <p>这是同一话题下的新会话，首次发送后保存。</p>}
           <div className="starter-row" aria-label="快捷开场">
             {homeStarters.map((starter) => (
               <button key={starter.label} type="button" onClick={() => useStarter(starter)}>
