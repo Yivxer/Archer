@@ -37,6 +37,7 @@ SUITES = {
         "tests/test_part8_shadow_validation.py",
         "tests/test_thread_clue_lifecycle.py",
         "tests/test_job_store_authority.py",
+        "tests/test_initiative_store_authority.py",
     ],
     "full": [],
 }

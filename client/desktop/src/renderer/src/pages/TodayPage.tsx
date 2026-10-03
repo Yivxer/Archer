@@ -1,6 +1,6 @@
 import React from 'react'
 import { BellOff, BellRing, Check, Eye, LoaderCircle, RefreshCw, ShieldCheck, VolumeX } from 'lucide-react'
-import { setInitiativeDeliveryOptInAction } from '../lib/initiativeStore'
+import { loadAllInitiative, setInitiativeDeliveryOptInAction } from '../lib/initiativeStore'
 import { useShadowFeedback } from '../lib/useShadowFeedback'
 import type { Route } from '../types'
 import { ThreadClueActions } from '../components/ThreadClueActions'
@@ -15,6 +15,9 @@ export function TodayPage({
   onNavigate: (route: Route) => void
 }) {
   const feedback = useShadowFeedback({ canControl, surface: 'today', onRefresh })
+  const [busy, setBusy] = React.useState('')
+  const [notice, setNotice] = React.useState('')
+  const canManage = feedback.canControl
   const shadow = feedback.review
   const candidates = (shadow?.items ?? [])
     .filter((item) => item.kind === 'thread_resume' && !item.archivedAt)
@@ -32,24 +35,21 @@ export function TodayPage({
   const reviewPacket = shadow?.reviewPacket
   const exposureReport = shadow?.exposureReport
   if (!shadow || !report || !longTermReport || !deliveryGate || !optIn || !reviewPacket || !exposureReport) {
-    return <div className="today-page"><p className="today-empty">正在读取观察数据…</p></div>
+    return <div className="today-page"><p className="today-empty" role={feedback.loadError ? 'alert' : undefined}>{feedback.loadError || '正在读取观察数据…'}</p><button className="quiet-button" type="button" disabled={!canControl} onClick={() => void loadAllInitiative({ force: true })}>刷新</button></div>
   }
   const reviewLabel = report.readyForManualReview ? '可人工复核' : '继续观察'
   const recognitionPercent = Math.round(report.recognitionRate * 100)
   const longTermRecognitionPercent = Math.round(longTermReport.metrics.relevance.recognitionRate * 100)
   const tooFrequentPercent = Math.round(longTermReport.metrics.relevance.tooFrequentRate * 100)
-  const [busy, setBusy] = React.useState('')
-  const [notice, setNotice] = React.useState('')
   const optInEnabled = optIn.enabled
 
   async function toggleOptIn() {
-    if (!canControl || busy) return
+    if (!canManage || busy) return
     const enabled = !optInEnabled
     setBusy('opt-in')
     setNotice('')
     try {
       await setInitiativeDeliveryOptInAction(enabled)
-      await onRefresh()
       setNotice(enabled ? '已记录显式授权' : '已撤回显式授权')
     } catch (error) {
       setNotice(error instanceof Error ? error.message : '授权状态更新失败')
@@ -74,14 +74,14 @@ export function TodayPage({
               className="quiet-button icon-button"
               type="button"
               onClick={() => void feedback.togglePresence()}
-              disabled={Boolean(busy || feedback.busy)}
+              disabled={!canManage || Boolean(busy || feedback.busy)}
               aria-label={shadow.presenceState === 'muted' ? '恢复主动候选' : '静音主动候选'}
               title={shadow.presenceState === 'muted' ? '恢复主动候选' : '静音主动候选'}
             >
               {feedback.busy === 'presence' ? <LoaderCircle size={15} className="spin" /> : shadow.presenceState === 'muted' ? <BellRing size={15} /> : <BellOff size={15} />}
             </button>
           )}
-          <button className="quiet-button" type="button" onClick={() => void onRefresh()}>
+          <button className="quiet-button" type="button" disabled={!canControl} onClick={() => void loadAllInitiative({ force: true })}>
             <RefreshCw size={15} /> 刷新
           </button>
           <button className="quiet-button" type="button" onClick={() => onNavigate('Review')}>
@@ -90,6 +90,7 @@ export function TodayPage({
         </div>
       </header>
 
+      {feedback.loadError && <p className="today-notice" role="alert">{feedback.loadError}</p>}
       <section className="today-validation" aria-label="最近 14 天反馈入口指标">
         <div className="today-section-head">
           <h2>14 天反馈入口</h2>
@@ -196,7 +197,7 @@ export function TodayPage({
             className="quiet-button"
             type="button"
             onClick={() => void toggleOptIn()}
-            disabled={Boolean(busy)}
+            disabled={!canManage || Boolean(busy)}
           >
             {busy === 'opt-in' ? <LoaderCircle size={15} className="spin" /> : <ShieldCheck size={15} />}
             {optIn.enabled ? '关闭话题拾起' : '授权话题拾起'}
@@ -229,7 +230,7 @@ export function TodayPage({
                       className="quiet-button icon-button"
                       type="button"
                       onClick={() => void feedback.sendFeedback(item.id, 'acknowledged')}
-                      disabled={Boolean(busy || feedback.busy)}
+                      disabled={!canManage || Boolean(busy || feedback.busy)}
                       aria-label="认可这条候选"
                       title="认可这条候选"
                     >
@@ -239,7 +240,7 @@ export function TodayPage({
                       className="quiet-button icon-button"
                       type="button"
                       onClick={() => void feedback.sendFeedback(item.id, 'too_frequent')}
-                      disabled={Boolean(busy || feedback.busy)}
+                      disabled={!canManage || Boolean(busy || feedback.busy)}
                       aria-label="标记为太频繁"
                       title="标记为太频繁"
                     >
@@ -247,7 +248,7 @@ export function TodayPage({
                     </button>
                   </div>
                 )}
-                {canControl && <ThreadClueActions item={item} disabled={Boolean(busy || feedback.busy)} onRefresh={onRefresh} />}
+                {canControl && <ThreadClueActions item={item} disabled={!canManage || Boolean(busy || feedback.busy)} onRefresh={onRefresh} />}
                 <small>{formatCandidateTime(item.createdAt)}</small>
               </article>
             ))}

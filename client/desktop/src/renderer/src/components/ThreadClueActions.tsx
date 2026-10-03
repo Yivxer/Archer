@@ -31,7 +31,6 @@ export function ThreadClueActions({ item, disabled = false, onRefresh }: {
       await transitionThreadClueAction(id, status)
       setFinished(true)
       setNotice(`已记录：${label}`)
-      await onRefresh?.()
     } catch (error) {
       setNotice(error instanceof Error ? error.message : '线索状态保存失败')
     } finally {

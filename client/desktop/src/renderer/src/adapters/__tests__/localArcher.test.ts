@@ -1,3 +1,4 @@
+import { fetchInitiativeReview, claimInitiativeReviewCandidate, setInitiativeDeliveryOptIn, submitInitiativeFeedback, setInitiativePresence } from '../initiativeAdapter'
 import { spawnChildJobs } from '../jobAdapter'
 import { fetchMemoryItems } from '../memoryAdapter'
 import { exportPortableData } from '../soulAdapter'
@@ -19,17 +20,13 @@ vi.stubGlobal('window', {
 import {
   clearDesktopApiToken,
   ChatBusyError,
-  claimInitiativeReviewCandidate,
   ensureLocalConnection,
   getDesktopApiToken,
   loadLocalArcher,
   resolveDesktopApiToken,
   saveDesktopApiToken,
-  setInitiativeDeliveryOptIn,
   StreamIdleTimeoutError,
   streamLocalChat,
-  submitInitiativeFeedback,
-  setInitiativePresence,
   switchLocalActiveProfile,
 } from '../localArcher'
 
@@ -660,14 +657,16 @@ describe('localArcher token management', () => {
     expect(data).not.toHaveProperty('soulFiles')
     expect(fetchSpy.mock.calls.some(([url]) => String(url).includes('/soul-profile') || String(url).includes('/soul-files'))).toBe(false)
 
-    expect(data.initiativeShadow.globalThrottleActive).toBe(true)
-    expect(data.initiativeShadow.items).toHaveLength(1)
-    expect(data.initiativeShadow.items[0]).toMatchObject({
+    expect(data).not.toHaveProperty('initiativeShadow')
+    const initiativeShadow = await fetchInitiativeReview()
+    expect(initiativeShadow.globalThrottleActive).toBe(true)
+    expect(initiativeShadow.items).toHaveLength(1)
+    expect(initiativeShadow.items[0]).toMatchObject({
       kind: 'thread_resume',
       delivered: false,
       decisionTrace: { reason: 'stale_open_thread' },
     })
-    expect(data.initiativeShadow.report).toMatchObject({
+    expect(initiativeShadow.report).toMatchObject({
       observationDays: 8,
       totalCandidates: 12,
       dailyAverage: 1.5,
@@ -682,7 +681,7 @@ describe('localArcher token management', () => {
         minRecognitionRate: 0.7,
       },
     })
-    expect(data.initiativeShadow.longTermReport).toMatchObject({
+    expect(initiativeShadow.longTermReport).toMatchObject({
       observedDays: 14,
       candidateCount: 12,
       readyForDeliveryReview: false,
@@ -702,7 +701,7 @@ describe('localArcher token management', () => {
         },
       },
     })
-    expect(data.initiativeShadow.deliveryGate).toMatchObject({
+    expect(initiativeShadow.deliveryGate).toMatchObject({
       canEnableDelivery: false,
       shadowOnly: true,
       reasons: ['explicit_opt_in_required'],
@@ -717,18 +716,18 @@ describe('localArcher token management', () => {
         remainingObservationDays: 0,
       },
     })
-    expect(data.initiativeShadow.optIn).toMatchObject({
+    expect(initiativeShadow.optIn).toMatchObject({
       enabled: false,
       reason: 'not_set',
     })
-    expect(data.initiativeShadow.reviewPacket).toMatchObject({
+    expect(initiativeShadow.reviewPacket).toMatchObject({
       recommendedAction: 'keep_shadow',
       optIn: { enabled: false },
       manualReport: { readyForManualReview: true },
       longTermReport: { observedDays: 14 },
       deliveryGate: { shadowOnly: true },
     })
-    expect(data.initiativeShadow.exposureReport).toMatchObject({
+    expect(initiativeShadow.exposureReport).toMatchObject({
       exposureCount: 8,
       feedbackCount: 5,
       conversionRate: 0.625,

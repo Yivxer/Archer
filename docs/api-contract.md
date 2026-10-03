@@ -661,33 +661,25 @@ State 包含 `jobs/currentDetail`、`loadState/detailState`、`listError/detailE
 
 ### initiativeStore（L3.6，受控 Part 8 投影）
 
-**真值来源**：`/initiative-shadow` + report/long-term-report/delivery-gate/review-packet/exposure-report 子端点 + SSE 增量
+**真值来源**：initiativeAdapter 并发读取 `/initiative-shadow` 与 5 个报告端点，全部成功后由 initiativeStore 一次发布。整体 adapter、离线样例与 storeSync 不再回填本域；SSE 仅提示重新读取，不在前端拼接候选或统计。
 
-**State shape**：
-```ts
-type InitiativeStoreState = {
-  review: InitiativeShadowReview | null   // 合并 5 端点
-  loadState: 'idle' | 'loading' | 'ready' | 'error'
-  error: string
-}
-```
+状态包含完整 review、候选认领回执及独立 load/candidate/action 错误、busy。普通读取合并，force/reset 隔离旧响应；任一端点失败保留上次完整内容，并禁用反馈、静音、授权及线索操作。
 
-**Actions**（只读 + mutation，不暴露写 shadow 的 action）：
-| Action | 调用 API | 副作用 |
-|--------|---------|--------|
-| `loadAll()` | GET /initiative-shadow?limit=5 + 5 子端点（并发） | 替换 review |
-| `claimReviewCandidate()` | POST /initiative-shadow/review-candidate `{surface:"chat_workspace"}` | 原子认领当天唯一 Workspace shadow 候选；不投递 |
-| `submitFeedback(id, feedback, surface?)` | POST /initiative-shadow/{id}/feedback | refresh review.items；可选记录界面来源 |
-| `setPresence(state, surface?)` | POST /initiative-shadow/presence | refresh review.presenceState；记录 mute/unmute 计数 |
-| `exposureReport` | GET /initiative-shadow/exposure-report?surface=chat_workspace&days=14 | 曝光、反馈转化、认可、太频繁、静音的脱敏聚合 |
-| `setDeliveryOptIn(enabled)` | POST /initiative-shadow/opt-in | refresh review.optIn + deliveryGate；关闭时取消未发送的 `initiative.thread_resume` Outbox 项 |
-| `transitionThreadClueAction(id, status)` | POST /initiative-threads/{id}/status | 仅 Part 8 数字线索 ID；status 为 resolved/closed/dismissed/expired；归档关联候选、取消待发送 Outbox，清除当前候选投影；不关闭普通会话或记录认可 |
-| 显式过期维护 | POST /initiative-threads/expire `{maxIdleDays:30}` | 1–365 整数天，依据 last_seen_at；返回 expiredIds。不会在启动或扫描时自动批量过期用户线索 |
+| Action | API 与投影 |
+|---|---|
+| `loadAllInitiative({force?})` | GET 候选 + report/long-term-report/delivery-gate/review-packet/exposure-report；不发布部分报告 |
+| `claimInitiativeReviewCandidateAction()` | POST review-candidate `{surface:"chat_workspace"}`；并发认领合并，保存真实回执后重读报告；反馈或静音使旧认领响应失效 |
+| `submitInitiativeFeedbackAction(id, feedback, surface?)` | POST feedback；校验 ok，读取完整统计与候选，不在前端猜反馈数 |
+| `setInitiativePresenceAction(state, surface?)` | POST presence；重读完整报告与候选 |
+| `setInitiativeDeliveryOptInAction(enabled)` | POST opt-in；重读授权与门槛；关闭时后端取消未发送的 Outbox 项 |
+| `transitionThreadClueAction(id, status)` | POST `/initiative-threads/{id}/status`；仅 Part 8 数字线索 ID；状态为 resolved/closed/dismissed/expired；重读报告，不关闭普通会话或记录认可 |
+| `mergeSseInitiativeEvent(event)` | shadow 且未 delivered 的去重事件触发完整读取 |
+| 显式过期维护 | POST /initiative-threads/expire `{maxIdleDays:30}`；1–365 整数天，不在启动或扫描时自动批量过期 |
+
+写入需要成功读取且本域不 busy。POST 已成功而刷新失败时，保留成功回执并显示读取错误，不重发 POST。Today、Review、Workspace 订阅同一 store；页面不在写入后再调用整体刷新。曝光报告为最近 14 天的脱敏聚合。
 
 线索状态响应为 `{ok,id,status,closedAt,changed}`，重复同终态返回 changed=false；无效状态/ID 为 400、缺失线索为 404、终态冲突为 409。沿用认证及 contractVersion 封装，无 schema 迁移。线索与 conversation thread/capsule 使用独立命名空间；候选 lifecycle trace 记录前后状态和时间，来源证据与历史投递保留。归档后的候选不再进入新认领、重试或聊天展示；发送过程的更新也拒绝已归档候选。
-| `mergeSseEvent(event)` | （无 API，由 SSE initiative.event 注入） | 合并到 review.items |
-
-**订阅者**：TodayPage、ReviewPage、main.tsx（SSE 合并）
+**订阅者**：TodayPage、ReviewPage、WorkspaceContextPanel、main.tsx（SSE 刷新提示）
 
 **Part 8 边界**：唯一 live slice 是 `thread_resume`。只有观察门槛、人工复核就绪和显式 opt-in 同时通过，且 presence 为 idle、当日尚未投递时，后端才通过 `initiative.thread_resume` Durable Outbox 标记为 Archer 应用内已投递。它不写入聊天，不触发系统通知或外部渠道；其他 Part 8 模块继续冻结。
 

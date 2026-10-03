@@ -16,11 +16,9 @@ import {
 } from 'lucide-react'
 import { fetchLocalExpertWorkbench, switchLocalExpert, switchLocalMode } from './adapters/localArcher'
 import { connectionStatusLabel, expertShortLabel, modelProfileShortLabel } from './lib/conversationPersona'
-import { mergeInitiativeShadowEvent } from './lib/initiativeShadow'
-import { mergeSseInitiativeEvent } from './lib/initiativeStore'
+import { loadAllInitiative, mergeSseInitiativeEvent } from './lib/initiativeStore'
 import { onStoreEvent } from './lib/storeEventBus'
 import { loadJobList } from './lib/jobStore'
-import { syncStoresFromAdapter } from './lib/storeSync'
 import { useMemoryStore, loadAllMemory } from './lib/memoryStore'
 import { loadAllSoul } from './lib/soulStore'
 import { useThreadStore } from './lib/threadStore'
@@ -247,8 +245,6 @@ function App() {
       const result = await syncBrainData({ previous: data, silent: options.silent })
       if (result.adapter) {
         setData(result.adapter)
-        // 仅同步剩余 initiative 兼容域；其他领域独立加载。
-        syncStoresFromAdapter(result.adapter)
       } else if (!wasBrainEverLinked()) {
         setData(mockArcher)
       }
@@ -259,6 +255,7 @@ function App() {
         void loadAllMemory({ force: true })
         void refreshConversations()
         void loadJobList({ force: true })
+        void loadAllInitiative({ force: true })
         setApiBannerDismissed(false)
         // L0.4: 连接成功后读崩溃信息 (只读一次)
         try {
@@ -306,11 +303,6 @@ function App() {
   }
 
   function handleInitiativeEvent(event: InitiativeEvent) {
-    setData((current) => ({
-      ...current,
-      initiativeShadow: mergeInitiativeShadowEvent(current.initiativeShadow, event),
-    }))
-    // L3.9: 同步到 initiativeStore（影子真值）
     mergeSseInitiativeEvent(event)
   }
 

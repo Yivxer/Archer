@@ -22,17 +22,7 @@ import type {
 } from '../types'
 import { assertSupportedContractVersion, pythonApprovalToAgentEvent, pythonStreamPayloadToAgentEvents } from '../../../agent'
 import type { AgentEvent, PythonStreamPayload } from '../../../agent'
-import {
-  defaultInitiativeShadowOptIn,
-  normalizeInitiativeShadowItem,
-  normalizeInitiativeShadowOptIn,
-} from './initiativeAdapter'
-import {
-  defaultInitiativeShadowExposureReport,
-  defaultInitiativeShadowReport,
-  normalizeInitiativeShadowExposureReport,
-  normalizeInitiativeShadowReport,
-} from './initiativeReports'
+
 const BASE_URL = 'http://127.0.0.1:8765'
 const TOKEN_STORAGE_KEY = 'archer-desktop-api-token'
 const API_TIMEOUT_MS = 15_000
@@ -231,12 +221,6 @@ export async function loadLocalArcher(): Promise<ArcherAdapter> {
     hypothesisResult,
     skills,
     proactive,
-    initiativeShadowRaw,
-    initiativeShadowReportRaw,
-    initiativeShadowLongTermReportRaw,
-    initiativeShadowDeliveryGateRaw,
-    initiativeShadowReviewPacketRaw,
-    initiativeShadowExposureReportRaw,
     periodReviewsList,
     journalReview,
     configDoctor,
@@ -245,51 +229,6 @@ export async function loadLocalArcher(): Promise<ArcherAdapter> {
     safeJson('/hypotheses?status=all', { ok: false, hypotheses: [] } as HypothesisListResult),
     safeJson('/skills', [] as ArcherAdapter['skills']),
     safeJson('/proactive-touch', { enabled: false, items: [] } as ArcherAdapter['proactive']),
-    safeJson('/initiative-shadow?limit=5', {
-      ok: true,
-      shadow: true,
-      delivered: false,
-      limit: 5,
-      globalThrottleActive: false,
-      presenceState: 'idle',
-      items: [],
-      report: defaultInitiativeShadowReport(),
-      longTermReport: defaultInitiativeShadowLongTermReport(),
-      deliveryGate: defaultInitiativeShadowDeliveryGate(),
-      optIn: defaultInitiativeShadowOptIn(),
-      reviewPacket: defaultInitiativeShadowReviewPacket(),
-      exposureReport: defaultInitiativeShadowExposureReport(),
-    } as ArcherAdapter['initiativeShadow']),
-    safeJson('/initiative-shadow/report', {
-      ok: true,
-      shadow: true,
-      report: defaultInitiativeShadowReport(),
-    }),
-    safeJson('/initiative-shadow/long-term-report', {
-      ok: true,
-      shadow: true,
-      report: defaultInitiativeShadowLongTermReport(),
-    }),
-    safeJson('/initiative-shadow/delivery-gate', {
-      ok: true,
-      shadow: true,
-      optIn: defaultInitiativeShadowOptIn(),
-      gate: defaultInitiativeShadowDeliveryGate(),
-    }),
-    safeJson('/initiative-shadow/review-packet', {
-      ok: true,
-      shadow: true,
-      optIn: defaultInitiativeShadowOptIn(),
-      recommendedAction: 'keep_shadow',
-      manualReport: defaultInitiativeShadowReport(),
-      longTermReport: defaultInitiativeShadowLongTermReport(),
-      deliveryGate: defaultInitiativeShadowDeliveryGate(),
-    }),
-    safeJson('/initiative-shadow/exposure-report?surface=chat_workspace&days=14', {
-      ok: true,
-      shadow: true,
-      report: defaultInitiativeShadowExposureReport(),
-    }),
     Promise.all(reviewPeriods.map((period) => safeJson(`/reviews?period=${period}`, {
       period,
       title: period,
@@ -351,184 +290,11 @@ export async function loadLocalArcher(): Promise<ArcherAdapter> {
     modes,
     experts,
     proactive,
-    initiativeShadow: normalizeInitiativeShadow(
-      initiativeShadowRaw,
-      initiativeShadowReportRaw,
-      initiativeShadowLongTermReportRaw,
-      initiativeShadowDeliveryGateRaw,
-      initiativeShadowReviewPacketRaw,
-      initiativeShadowExposureReportRaw,
-    ),
     periodReviews,
     journalReview,
     settings,
     configDoctor,
     toolApprovalAudit
-  }
-}
-
-type RawInitiativeShadowReportResponse = {
-  report?: Record<string, unknown>
-  gate?: Record<string, unknown>
-  optIn?: Record<string, unknown>
-  recommendedAction?: unknown
-  manualReport?: Record<string, unknown>
-  longTermReport?: Record<string, unknown>
-  deliveryGate?: Record<string, unknown>
-}
-
-function normalizeInitiativeShadow(
-  raw: ArcherAdapter['initiativeShadow'],
-  reportRaw?: RawInitiativeShadowReportResponse,
-  longTermReportRaw?: RawInitiativeShadowReportResponse,
-  deliveryGateRaw?: RawInitiativeShadowReportResponse,
-  reviewPacketRaw?: RawInitiativeShadowReportResponse,
-  exposureReportRaw?: RawInitiativeShadowReportResponse,
-): ArcherAdapter['initiativeShadow'] {
-  return {
-    ok: Boolean(raw.ok),
-    shadow: raw.shadow !== false,
-    delivered: Boolean(raw.delivered),
-    limit: Number(raw.limit || 0),
-    globalThrottleActive: Boolean(raw.globalThrottleActive),
-    presenceState: raw.presenceState === 'engaged' || raw.presenceState === 'muted' ? raw.presenceState : 'idle',
-    items: Array.isArray(raw.items)
-      ? raw.items.map(normalizeInitiativeShadowItem).filter((item) => item.id && item.message)
-      : [],
-    report: normalizeInitiativeShadowReport(reportRaw?.report),
-    longTermReport: normalizeInitiativeShadowLongTermReport(longTermReportRaw?.report),
-    deliveryGate: normalizeInitiativeShadowDeliveryGate(deliveryGateRaw?.gate),
-    optIn: normalizeInitiativeShadowOptIn(deliveryGateRaw?.optIn ?? reviewPacketRaw?.optIn),
-    reviewPacket: normalizeInitiativeShadowReviewPacket(reviewPacketRaw),
-    exposureReport: normalizeInitiativeShadowExposureReport(exposureReportRaw?.report),
-  }
-}
-
-function defaultInitiativeShadowLongTermReport(): ArcherAdapter['initiativeShadow']['longTermReport'] {
-  return {
-    observedDays: 0,
-    candidateCount: 0,
-    readyForDeliveryReview: false,
-    reasons: ['continue_shadow_observation'],
-    metrics: {
-      frequency: {
-        dailyAverage: 0,
-        maxDailyCount: 0,
-      },
-      relevance: {
-        feedbackCount: 0,
-        recognitionRate: 0,
-        tooFrequentRate: 0,
-      },
-      continuity: {
-        threadResumeCount: 0,
-      },
-    },
-  }
-}
-
-function normalizeInitiativeShadowLongTermReport(report?: Record<string, unknown>): ArcherAdapter['initiativeShadow']['longTermReport'] {
-  const fallback = defaultInitiativeShadowLongTermReport()
-  if (!report) return fallback
-  const metrics = report.metrics && typeof report.metrics === 'object' && !Array.isArray(report.metrics)
-    ? report.metrics as Record<string, unknown>
-    : {}
-  const frequency = metrics.frequency && typeof metrics.frequency === 'object' && !Array.isArray(metrics.frequency)
-    ? metrics.frequency as Record<string, unknown>
-    : {}
-  const relevance = metrics.relevance && typeof metrics.relevance === 'object' && !Array.isArray(metrics.relevance)
-    ? metrics.relevance as Record<string, unknown>
-    : {}
-  const continuity = metrics.continuity && typeof metrics.continuity === 'object' && !Array.isArray(metrics.continuity)
-    ? metrics.continuity as Record<string, unknown>
-    : {}
-  return {
-    observedDays: Number(report.observed_days ?? report.observedDays ?? fallback.observedDays),
-    candidateCount: Number(report.candidate_count ?? report.candidateCount ?? fallback.candidateCount),
-    readyForDeliveryReview: Boolean(report.ready_for_delivery_review ?? report.readyForDeliveryReview),
-    reasons: Array.isArray(report.reasons) ? report.reasons.map(String) : fallback.reasons,
-    metrics: {
-      frequency: {
-        dailyAverage: Number(frequency.daily_average ?? frequency.dailyAverage ?? fallback.metrics.frequency.dailyAverage),
-        maxDailyCount: Number(frequency.max_daily_count ?? frequency.maxDailyCount ?? fallback.metrics.frequency.maxDailyCount),
-      },
-      relevance: {
-        feedbackCount: Number(relevance.feedback_count ?? relevance.feedbackCount ?? fallback.metrics.relevance.feedbackCount),
-        recognitionRate: Number(relevance.recognition_rate ?? relevance.recognitionRate ?? fallback.metrics.relevance.recognitionRate),
-        tooFrequentRate: Number(relevance.too_frequent_rate ?? relevance.tooFrequentRate ?? fallback.metrics.relevance.tooFrequentRate),
-      },
-      continuity: {
-        threadResumeCount: Number(continuity.thread_resume_count ?? continuity.threadResumeCount ?? fallback.metrics.continuity.threadResumeCount),
-      },
-    },
-  }
-}
-
-function defaultInitiativeShadowDeliveryGate(): ArcherAdapter['initiativeShadow']['deliveryGate'] {
-  return {
-    canEnableDelivery: false,
-    shadowOnly: true,
-    reasons: ['explicit_opt_in_required'],
-    requirements: {
-      requiredObservationDays: 14,
-      explicitOptIn: true,
-      manualReview: true,
-    },
-    timeline: {
-      firstObservedAt: null,
-      earliestReviewAt: null,
-      remainingObservationDays: 14,
-    },
-  }
-}
-
-function normalizeInitiativeShadowDeliveryGate(gate?: Record<string, unknown>): ArcherAdapter['initiativeShadow']['deliveryGate'] {
-  const fallback = defaultInitiativeShadowDeliveryGate()
-  if (!gate) return fallback
-  const requirements = gate.requirements && typeof gate.requirements === 'object' && !Array.isArray(gate.requirements)
-    ? gate.requirements as Record<string, unknown>
-    : {}
-  const timeline = gate.timeline && typeof gate.timeline === 'object' && !Array.isArray(gate.timeline)
-    ? gate.timeline as Record<string, unknown>
-    : {}
-  return {
-    canEnableDelivery: Boolean(gate.can_enable_delivery ?? gate.canEnableDelivery),
-    shadowOnly: gate.shadow_only === undefined && gate.shadowOnly === undefined
-      ? fallback.shadowOnly
-      : Boolean(gate.shadow_only ?? gate.shadowOnly),
-    reasons: Array.isArray(gate.reasons) ? gate.reasons.map(String) : fallback.reasons,
-    requirements: {
-      requiredObservationDays: Number(requirements.required_observation_days ?? requirements.requiredObservationDays ?? fallback.requirements.requiredObservationDays),
-      explicitOptIn: Boolean(requirements.explicit_opt_in ?? requirements.explicitOptIn ?? fallback.requirements.explicitOptIn),
-      manualReview: Boolean(requirements.manual_review ?? requirements.manualReview ?? fallback.requirements.manualReview),
-    },
-    timeline: {
-      firstObservedAt: timeline.first_observed_at || timeline.firstObservedAt ? String(timeline.first_observed_at ?? timeline.firstObservedAt) : fallback.timeline.firstObservedAt,
-      earliestReviewAt: timeline.earliest_review_at || timeline.earliestReviewAt ? String(timeline.earliest_review_at ?? timeline.earliestReviewAt) : fallback.timeline.earliestReviewAt,
-      remainingObservationDays: Number(timeline.remaining_observation_days ?? timeline.remainingObservationDays ?? fallback.timeline.remainingObservationDays),
-    },
-  }
-}
-
-function defaultInitiativeShadowReviewPacket(): ArcherAdapter['initiativeShadow']['reviewPacket'] {
-  return {
-    recommendedAction: 'keep_shadow',
-    optIn: defaultInitiativeShadowOptIn(),
-    manualReport: defaultInitiativeShadowReport(),
-    longTermReport: defaultInitiativeShadowLongTermReport(),
-    deliveryGate: defaultInitiativeShadowDeliveryGate(),
-  }
-}
-
-function normalizeInitiativeShadowReviewPacket(raw?: RawInitiativeShadowReportResponse): ArcherAdapter['initiativeShadow']['reviewPacket'] {
-  const fallback = defaultInitiativeShadowReviewPacket()
-  if (!raw) return fallback
-  return {
-    recommendedAction: String(raw.recommendedAction || fallback.recommendedAction),
-    optIn: normalizeInitiativeShadowOptIn(raw.optIn),
-    manualReport: normalizeInitiativeShadowReport(raw.manualReport),
-    longTermReport: normalizeInitiativeShadowLongTermReport(raw.longTermReport),
-    deliveryGate: normalizeInitiativeShadowDeliveryGate(raw.deliveryGate),
   }
 }
 
@@ -570,62 +336,6 @@ export async function sendLocalChat(messages: ChatRequestMessage[]): Promise<str
   const response = await postJson<{ role: 'assistant'; text: string }>('/chat', { messages })
   return response.text
 }
-
-export async function submitInitiativeFeedback(
-  id: number,
-  feedback: 'acknowledged' | 'too_frequent',
-  surface?: 'chat_workspace' | 'today',
-): Promise<{ ok: boolean; id: number; feedback: string }> {
-  return postJson(`/initiative-shadow/${id}/feedback`, { feedback, ...(surface ? { surface } : {}) })
-}
-
-export async function setInitiativePresence(
-  state: 'idle' | 'muted',
-  surface?: 'chat_workspace' | 'today',
-): Promise<{ ok: boolean; state: 'engaged' | 'idle' | 'muted'; reason: string }> {
-  return postJson('/initiative-shadow/presence', { state, ...(surface ? { surface } : {}) })
-}
-
-export async function claimInitiativeReviewCandidate(): Promise<import('../types').InitiativeShadowReviewCandidate> {
-  const raw = await postJson<Record<string, unknown>>('/initiative-shadow/review-candidate', {
-    surface: 'chat_workspace',
-  })
-  const item = raw.item && typeof raw.item === 'object' && !Array.isArray(raw.item)
-    ? normalizeInitiativeShadowItem(raw.item as Record<string, unknown>)
-    : null
-  const reason = String(raw.reason || 'no_candidate')
-  return {
-    ok: Boolean(raw.ok),
-    shadow: raw.shadow !== false,
-    delivered: false,
-    surface: 'chat_workspace',
-    exposureDate: String(raw.exposure_date || raw.exposureDate || ''),
-    reason: reason === 'candidate' || reason === 'already_reviewed_today' || reason === 'muted'
-      ? reason
-      : 'no_candidate',
-    item,
-  }
-}
-
-export async function setInitiativeDeliveryOptIn(
-  enabled: boolean,
-): Promise<{
-  ok: boolean
-  shadow: boolean
-  optIn: ArcherAdapter['initiativeShadow']['optIn']
-  gate: ArcherAdapter['initiativeShadow']['deliveryGate']
-}> {
-  return postJson('/initiative-shadow/opt-in', {
-    enabled,
-    reason: enabled ? 'desktop_today_opt_in' : 'desktop_today_revoke',
-  })
-}
-
-
-
-
-
-
 
 export async function toggleSkill(name: string, enabled: boolean): Promise<{ ok: boolean; name: string; enabled: boolean }> {
   return postJson('/skills/toggle', { name, enabled })

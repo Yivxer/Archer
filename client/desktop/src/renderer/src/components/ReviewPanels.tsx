@@ -1,6 +1,6 @@
 import React from 'react'
 import { Check, LoaderCircle, ShieldCheck, X } from 'lucide-react'
-import { setInitiativeDeliveryOptIn } from '../adapters/localArcher'
+import { loadAllInitiative, setInitiativeDeliveryOptInAction, useInitiativeStore } from '../lib/initiativeStore'
 import type { InitiativeShadowReview, JournalReview, MemoryItem, PeriodReview, Route, SoulProfileSection } from '../types'
 
 export type ReviewMemoryGroup = {
@@ -151,28 +151,27 @@ export function ReviewMemoryGroupsPanel({
 }
 
 export function ReviewInitiativeShadowPanel({
-  initiativeShadow,
   canControl,
-  onRefresh,
 }: {
-  initiativeShadow: InitiativeShadowReview
   canControl: boolean
-  onRefresh: () => Promise<void>
 }) {
-  const latest = initiativeShadow.items
+  const initiativeShadow = useInitiativeStore((state) => state.review)
+  const loadState = useInitiativeStore((state) => state.loadState)
+  const loadError = useInitiativeStore((state) => state.loadError)
+  const storeBusy = useInitiativeStore((state) => state.busy)
+  const latest = (initiativeShadow?.items ?? [])
     .filter((item) => item.kind === 'thread_resume')
     .slice(0, 3)
   const [busy, setBusy] = React.useState(false)
   const [notice, setNotice] = React.useState('')
 
   async function toggleOptIn() {
-    if (!canControl || busy) return
+    if (!canControl || loadState !== 'ready' || storeBusy || busy || !initiativeShadow) return
     const enabled = !initiativeShadow.optIn.enabled
     setBusy(true)
     setNotice('')
     try {
-      await setInitiativeDeliveryOptIn(enabled)
-      await onRefresh()
+      await setInitiativeDeliveryOptInAction(enabled)
       setNotice(enabled ? '已授权话题拾起' : '已关闭，未发送项已取消')
     } catch (error) {
       setNotice(error instanceof Error ? error.message : '授权状态更新失败')
@@ -181,8 +180,11 @@ export function ReviewInitiativeShadowPanel({
     }
   }
 
+  if (!initiativeShadow) return <section className="review-signal-panel" aria-label="话题拾起记录"><p role={loadError ? 'alert' : undefined}>{loadError || '观察数据尚未读取成功'}</p><button className="quiet-button" type="button" disabled={!canControl} onClick={() => void loadAllInitiative({ force: true })}>刷新</button></section>
+
   return (
     <section className="review-signal-panel" aria-label="话题拾起记录">
+      {loadError && <p className="detail-error" role="alert">观察数据刷新失败：{loadError}。已保留最近内容。<button className="quiet-button" type="button" disabled={!canControl} onClick={() => void loadAllInitiative({ force: true })}>刷新观察数据</button></p>}
       <div className="review-section-head">
         <div>
           <h3>话题拾起</h3>
@@ -193,7 +195,7 @@ export function ReviewInitiativeShadowPanel({
         </span>
       </div>
       {canControl && (
-        <button className="quiet-button" type="button" onClick={() => void toggleOptIn()} disabled={busy}>
+        <button className="quiet-button" type="button" onClick={() => void toggleOptIn()} disabled={loadState !== 'ready' || storeBusy || busy}>
           {busy ? <LoaderCircle size={15} className="spin" /> : <ShieldCheck size={15} />}
           {initiativeShadow.optIn.enabled ? '关闭话题拾起' : '授权话题拾起'}
         </button>

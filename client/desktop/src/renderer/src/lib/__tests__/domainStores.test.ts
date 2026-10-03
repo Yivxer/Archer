@@ -70,6 +70,8 @@ import {
 } from '../threadStore'
 
 
+vi.mock('../../adapters/initiativeAdapter', () => ({ fetchInitiativeReview: vi.fn(async () => initiativeReview) }))
+
 vi.mock('../../adapters/memoryAdapter', () => ({
   fetchMemoryItems: vi.fn(async () => [memoryItem]),
   fetchMemoryStats: vi.fn(async () => ({ activeCount: 0, pendingCount: 1 })),
@@ -496,9 +498,9 @@ describe('initiativeStore — L3.6（只读，Part 8 边界）', () => {
     expect(getInitiativeStoreState().loadState).toBe('ready')
   })
 
-  it('loadAllInitiative 在 review 缺失时标记 loading', async () => {
+  it('loadAllInitiative independently reads a complete domain', async () => {
     await loadAllInitiative()
-    expect(getInitiativeStoreState().loadState).toBe('loading')
+    expect(getInitiativeStoreState().loadState).toBe('ready')
   })
 
   it('loadAllInitiative 在 review 已存在时标记 ready', async () => {
@@ -512,13 +514,12 @@ describe('initiativeStore — L3.6（只读，Part 8 边界）', () => {
     expect(getInitiativeStoreState().review).toBeNull()
   })
 
-  it('mergeSseInitiativeEvent 在 review 已存在时合并 shadow 候选', () => {
+  it('SSE hints refresh the full HTTP projection instead of inventing a candidate', async () => {
     mergeInitiativeReview(initiativeReview)
     mergeSseInitiativeEvent(makeInitiativeEvent())
-    const state = getInitiativeStoreState()
-    expect(state.review?.items).toHaveLength(1)
-    expect(state.review?.items[0].id).toBe(100)
-    expect(state.review?.items[0].title).toBe('测试候选')
+    await loadAllInitiative()
+    expect(getInitiativeStoreState().review?.items).toEqual(initiativeReview.items)
+    expect(getInitiativeStoreState().loadState).toBe('ready')
   })
 
   it('mergeSseInitiativeEvent 过滤 delivered=true 的事件（不写入）', () => {
@@ -537,7 +538,7 @@ describe('initiativeStore — L3.6（只读，Part 8 边界）', () => {
     mergeInitiativeReview(initiativeReview)
     mergeSseInitiativeEvent(makeInitiativeEvent())
     mergeSseInitiativeEvent(makeInitiativeEvent())
-    expect(getInitiativeStoreState().review?.items).toHaveLength(1)
+    expect(getInitiativeStoreState().review?.items).toHaveLength(0)
   })
 
   it('resetInitiativeStore 恢复初始 state', () => {

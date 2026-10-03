@@ -52,9 +52,9 @@ describe('storeSync — L3.9a syncStoresFromAdapter', () => {
     expect(getSessionStoreState().items).toEqual([])
   })
 
-  it('sync 后 initiativeStore.review 与 adapter.initiativeShadow 一致', () => {
+  it('legacy sync cannot initialize initiative authority', () => {
     syncStoresFromAdapter(mockArcher)
-    expect(getInitiativeStoreState().review).toEqual(mockArcher.initiativeShadow)
+    expect(getInitiativeStoreState().review).toBeNull()
   })
 
   it('compatibility sync cannot initialize thread authority', () => {
@@ -65,7 +65,7 @@ describe('storeSync — L3.9a syncStoresFromAdapter', () => {
   it('sync 后兼容 store loadState 为 ready', () => {
     syncStoresFromAdapter(mockArcher)
     expect(getSessionStoreState().loadState).toBe('idle')
-    expect(getInitiativeStoreState().loadState).toBe('ready')
+    expect(getInitiativeStoreState().loadState).toBe('idle')
     expect(getThreadStoreState().loadState).toBe('idle')
   })
 

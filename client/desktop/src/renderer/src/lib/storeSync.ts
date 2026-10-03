@@ -1,7 +1,5 @@
-/** Compatibility initialization for the remaining initiative snapshot. */
+/** Retired compatibility hook: domain stores load only their own HTTP projections. */
 import type { ArcherAdapter } from '../types'
-import { mergeInitiativeReview } from './initiativeStore'
 
-export function syncStoresFromAdapter(adapter: ArcherAdapter): void {
-  mergeInitiativeReview(adapter.initiativeShadow)
-}
+/** Regression seam for legacy snapshots; no production callers remain. */
+export function syncStoresFromAdapter(_adapter: ArcherAdapter): void {}

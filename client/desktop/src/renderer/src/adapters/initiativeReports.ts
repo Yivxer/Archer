@@ -1,6 +1,6 @@
-import type { ArcherAdapter } from '../types'
+import type { InitiativeShadowReview } from '../types'
 
-export function defaultInitiativeShadowExposureReport(): ArcherAdapter['initiativeShadow']['exposureReport'] {
+export function defaultInitiativeShadowExposureReport(): InitiativeShadowReview['exposureReport'] {
   return {
     surface: 'chat_workspace',
     days: 14,
@@ -17,7 +17,7 @@ export function defaultInitiativeShadowExposureReport(): ArcherAdapter['initiati
 
 export function normalizeInitiativeShadowExposureReport(
   report?: Record<string, unknown>,
-): ArcherAdapter['initiativeShadow']['exposureReport'] {
+): InitiativeShadowReview['exposureReport'] {
   const fallback = defaultInitiativeShadowExposureReport()
   if (!report) return fallback
   const surface = String(report.surface || fallback.surface)
@@ -35,7 +35,7 @@ export function normalizeInitiativeShadowExposureReport(
   }
 }
 
-export function defaultInitiativeShadowReport(): ArcherAdapter['initiativeShadow']['report'] {
+export function defaultInitiativeShadowReport(): InitiativeShadowReview['report'] {
   return {
     observationDays: 0,
     totalCandidates: 0,
@@ -55,7 +55,7 @@ export function defaultInitiativeShadowReport(): ArcherAdapter['initiativeShadow
 
 export function normalizeInitiativeShadowReport(
   report?: Record<string, unknown>,
-): ArcherAdapter['initiativeShadow']['report'] {
+): InitiativeShadowReview['report'] {
   const fallback = defaultInitiativeShadowReport()
   if (!report) return fallback
   const thresholds = report.thresholds && typeof report.thresholds === 'object' && !Array.isArray(report.thresholds)

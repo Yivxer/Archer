@@ -80,6 +80,7 @@ export function WorkspaceContextPanel({
           <strong>{runtimeRuns.length} / {sidebarJobs.length}</strong>
         </div>
       </div>
+      {shadowFeedback.loadError && <p role="alert">{shadowFeedback.loadError}</p>}
       {candidate && (
         <ShadowCandidateCard
           item={candidate}
@@ -90,7 +91,7 @@ export function WorkspaceContextPanel({
           onMute={() => void shadowFeedback.togglePresence()}
           onViewAll={() => onNavigate?.('Today')}
           onRefresh={onRefresh}
-          canControl={canControlInitiative}
+          canControl={shadowFeedback.canControl}
         />
       )}
       {runtimeRuns.length > 0 && (

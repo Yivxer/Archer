@@ -320,11 +320,7 @@ export function ReviewPage({
             onResolve={(id, accepted) => void resolveReviewMemory(id, accepted)}
             onNavigate={onNavigate}
           />
-          <ReviewInitiativeShadowPanel
-            initiativeShadow={data.initiativeShadow}
-            canControl={data.status.adapter === 'local'}
-            onRefresh={onRefresh}
-          />
+          <ReviewInitiativeShadowPanel canControl={connected} />
           <ReviewMemoryGroupsPanel memoryGroups={memoryGroups} onNavigate={onNavigate} />
           <ReviewSoulProfilePanel soulSections={soulSections} onNavigate={onNavigate} />
           <ReviewSignalsPanel reviewSignals={reviewSignals} journalReview={data.journalReview} onNavigate={onNavigate} />

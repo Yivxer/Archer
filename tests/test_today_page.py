@@ -47,7 +47,7 @@ def test_initiative_sse_is_bridged_into_shared_today_data():
     main_source = MAIN_TSX.read_text()
     chat_source = (ROOT / "client/desktop/src/renderer/src/pages/ChatPage.tsx").read_text()
 
-    assert "mergeInitiativeShadowEvent" in main_source
+    assert "mergeSseInitiativeEvent" in main_source
     assert "onInitiativeEvent={handleInitiativeEvent}" in main_source
     assert "onInitiativeEvent?: (event: InitiativeEvent) => void" in chat_source
     assert "onInitiativeEvent?.(event)" in chat_source

@@ -34,15 +34,15 @@ export function ShadowCandidateCard({
       <p>{item.message}</p>
       <small>这是 Archer 的观察候选，不代表已经理解正确。</small>
       <div className="workspace-shadow-actions">
-        <button type="button" disabled={Boolean(busy)} onClick={onAcknowledge}>
+        <button type="button" disabled={!canControl || Boolean(busy)} onClick={onAcknowledge}>
           {busy === `${item.id}:acknowledged` ? <LoaderCircle size={13} className="spin" /> : <Check size={13} />}
           认可
         </button>
-        <button type="button" disabled={Boolean(busy)} onClick={onTooFrequent}>
+        <button type="button" disabled={!canControl || Boolean(busy)} onClick={onTooFrequent}>
           {busy === `${item.id}:too_frequent` ? <LoaderCircle size={13} className="spin" /> : <VolumeX size={13} />}
           太频繁
         </button>
-        <button type="button" disabled={Boolean(busy)} onClick={onMute}>
+        <button type="button" disabled={!canControl || Boolean(busy)} onClick={onMute}>
           {busy === 'presence' ? <LoaderCircle size={13} className="spin" /> : <BellOff size={13} />}
           静音
         </button>
