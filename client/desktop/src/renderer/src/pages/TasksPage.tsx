@@ -46,19 +46,18 @@ export function TasksPage({ connected }: { connected: boolean }) {
   const loadState = useJobStore((state) => state.loadState)
   const listError = useJobStore((state) => state.listError)
   const detailError = useJobStore((state) => state.detailError)
-  const actionError = useJobStore((state) => state.actionError)
   const detailState = useJobStore((state) => state.detailState)
   const busyIds = useJobStore((state) => state.busyIds)
   const [selectedId, setSelectedId] = React.useState('')
   const [query, setQuery] = React.useState('')
-  const [notice, setNotice] = React.useState('')
+  const [notice, setNotice] = React.useState<{ jobId: string; text: string } | null>(null)
   const [runtimeNotice, setRuntimeNotice] = React.useState('')
   const [retryingRunId, setRetryingRunId] = React.useState('')
   const [cancellingRunId, setCancellingRunId] = React.useState('')
 
   async function refreshJobs() {
     if (!connected) return
-    setNotice('')
+    setNotice(null)
     await Promise.all([loadJobList({ force: true }), loadRuntimeRuns()])
   }
 
@@ -83,9 +82,9 @@ export function TasksPage({ connected }: { connected: boolean }) {
     try {
       const result = await cancelStoredJob(job.id)
       setSelectedId(job.id)
-      setNotice(result.message || `任务状态：${jobStatusLabel(result.job.status, result.job.stale)}`)
+      setNotice({ jobId: job.id, text: result.message || `任务状态：${jobStatusLabel(result.job.status, result.job.stale)}` })
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : '取消失败')
+      setNotice({ jobId: job.id, text: error instanceof Error ? error.message : '取消失败' })
     }
   }
 
@@ -93,9 +92,9 @@ export function TasksPage({ connected }: { connected: boolean }) {
     try {
       const result = await retryStoredJob(job.id)
       setSelectedId(job.id)
-      setNotice(result.message || `任务状态：${jobStatusLabel(result.job.status, result.job.stale)}`)
+      setNotice({ jobId: job.id, text: result.message || `任务状态：${jobStatusLabel(result.job.status, result.job.stale)}` })
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : '重试失败')
+      setNotice({ jobId: job.id, text: error instanceof Error ? error.message : '重试失败' })
     }
   }
 
@@ -132,10 +131,10 @@ export function TasksPage({ connected }: { connected: boolean }) {
   async function spawnChildJobsForParent(job: BackgroundJob, specs: SpawnChildSpec[]) {
     try {
       const result = await spawnChildren(job.id, specs)
-      setNotice(`已创建 ${result.spawned} 个子任务`)
+      setNotice({ jobId: job.id, text: `已创建 ${result.spawned} 个子任务` })
       return true
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : '子任务创建失败')
+      setNotice({ jobId: job.id, text: error instanceof Error ? error.message : '子任务创建失败' })
       return false
     }
   }
@@ -238,7 +237,7 @@ export function TasksPage({ connected }: { connected: boolean }) {
           job={selectedDetail}
           canAct={loadState === 'ready' && detailState === 'ready' && jobDetail?.id === selectedDetail.id && !busyIds.has(selectedDetail.id)}
           busy={busyIds.has(selectedDetail.id)}
-          notice={[notice || actionError, detailError ? `详情读取失败：${detailError}` : ''].filter(Boolean).join('；')}
+          notice={[notice?.jobId === selectedDetail.id ? notice.text : '', detailError ? `详情读取失败：${detailError}` : ''].filter(Boolean).join('；')}
           onCancel={() => void cancelJob(selectedDetail)}
           onRetry={() => void retryJob(selectedDetail)}
           onSpawnChildren={(specs) => spawnChildJobsForParent(selectedDetail, specs)}
