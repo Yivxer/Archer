@@ -389,7 +389,6 @@ function App() {
 
   return (
     <div className={`app-shell ${sidebarOpen ? 'has-sidebar' : 'focus-mode'}`}>
-      {(sessionListError || threadListError) && <div className="api-banner" role="alert">会话列表刷新失败，保留上次内容。{sessionListError || threadListError}<button type="button" disabled={apiState !== 'connected'} onClick={() => void refreshConversations()}>重试</button></div>}
       <div className="window-drag-strip" aria-hidden="true" />
       <div className="app-title-tools" aria-label="窗口工具">
         <button
@@ -583,6 +582,12 @@ function App() {
       {/* ── Main workspace ── */}
       <main className="workspace">
         <section className="page-frame">
+          {(sessionListError || threadListError) && (
+            <div className="crash-banner" role="alert">
+              <span><strong>会话列表刷新失败，保留上次内容</strong><em>{sessionListError || threadListError}</em></span>
+              <button type="button" disabled={apiState !== 'connected'} onClick={() => void refreshConversations()}>重试</button>
+            </div>
+          )}
           {/* L0.4: 崩溃恢复提示 banner */}
           {crashInfo && crashInfo.isCrash && !crashBannerDismissed && (
             <div className="crash-banner" role="status">

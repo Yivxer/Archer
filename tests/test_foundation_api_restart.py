@@ -147,7 +147,10 @@ def _resume(client: Any, state: Path, before: dict) -> dict:
 def _continuation_seed(client: Any, state: Path) -> dict:
     first = _request(client, "/sessions", {"messages": MESSAGES})
     second = _request(client, "/sessions", {
-        "messages": [{"role": "user", "content": "从上次停点继续核对本地备份"}],
+        "messages": [
+            {"role": "user", "content": "从上次停点继续核对本地备份"},
+            {"role": "assistant", "content": "从本地备份核对继续"},
+        ],
         "threadId": first["threadId"],
     })
     assert first["id"] != second["id"]
