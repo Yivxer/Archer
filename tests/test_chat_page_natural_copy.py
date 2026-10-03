@@ -81,7 +81,9 @@ def test_conversation_thread_followup_sends_accumulated_history():
     assert "const nextMessages = [...messages, userMessage]" in source
     assert "const requestMessages = nextMessages.map" in source
     assert "await streamLocalChat(\n        requestMessages," in source
-    assert "saveLocalSession([...requestMessages" in source
+    assert "saveSessionMessages([...requestMessages" in source
+    assert "appendSessionMessages(activeSession.id" in source
+    assert "saveLocalSession" not in source
 
 
 def test_job_shadow_projects_outcome_summary_without_result_body():

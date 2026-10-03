@@ -137,4 +137,6 @@ def test_today_and_review_offer_explicit_reversible_thread_resume_opt_in():
     assert "setInitiativeDeliveryOptIn" in review_panels
     assert "授权话题拾起" in review_panels
     assert "关闭话题拾起" in review_panels
-    assert "onRefresh={onRefresh}" in review_page
+    assert "<ReviewInitiativeShadowPanel canControl={connected} />" in review_page
+    assert "setInitiativeDeliveryOptInAction(enabled)" in review_panels
+    assert "loadState !== 'ready' || storeBusy" in review_panels

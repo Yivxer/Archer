@@ -11,12 +11,13 @@ SIDEBAR_CSS = ROOT / "client/desktop/src/renderer/src/styles/sidebar.css"
 def test_mock_memory_preview_is_not_actionable_review():
     source = MEMORY_PAGE.read_text()
 
-    assert "const canResolveMemory = data.status.adapter === 'local'" in source
+    assert "const canResolveMemory = connected && memoryLoadState === 'ready'" in source
     assert "resolvePendingMemoryAction(id, accepted)" in source
     assert "useMemoryStore" in source
     assert "onMemoryItemsChange" not in source
     assert "canResolveMemory && pending.length > 0" in source
-    assert "canResolveMemory ? performResolveMemory : undefined" in source
+    assert "onResolve={canResolveMemory ? performResolveMemory : undefined}" in source
+    assert "ArcherAdapter" not in source
     assert "title: '确认这条记忆？'" not in source
 
 
