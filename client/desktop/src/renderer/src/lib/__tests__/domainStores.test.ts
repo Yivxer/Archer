@@ -450,7 +450,7 @@ describe('jobStore — L3.5', () => {
     expect(getJobStoreState().jobs).toEqual([{
       ...serverJob,
       status: 'running',
-      result: '服务端 SSE 进度',
+      result: '',
     }])
     expect(merged).toBe(true)
   })

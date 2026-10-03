@@ -2,7 +2,7 @@ import { appendSessionMessages, saveSessionMessages } from '../lib/sessionStore'
 import { useThreadStore } from '../lib/threadStore'
 import React from 'react'
 import { ArrowUp, Check, ChevronDown, Copy, CornerDownLeft, Crop, Download, Edit3, Loader2, Mic, Monitor, Paperclip, RotateCcw, X } from 'lucide-react'
-import { approveJobToolEvent, cancelBackgroundJobEvent, createBackgroundJobEvent, ensureLocalConnection, fetchBackgroundJob, pollBackgroundJobEvents, retryBackgroundJobEvent, spawnChildJobs, streamLocalChat, submitToolApprovalEvent, switchLocalExpert, switchLocalActiveProfile } from '../adapters/localArcher'
+import { ensureLocalConnection, streamLocalChat, submitToolApprovalEvent, switchLocalExpert, switchLocalActiveProfile } from '../adapters/localArcher'
 import { pickChatGreeting } from '../lib/chatGreetings'
 import { extendedConversationModes, modelProfileShortLabel, modelSwitchNotice } from '../lib/conversationPersona'
 import { canDeploy, isInputDisabled, isSendDisabled, type ConnectionState } from '../lib/connectionState'
@@ -24,7 +24,7 @@ import { LoadingState } from '../components/LoadingState'
 import { TracePanel } from '../components/TracePanel'
 import { buildThinkingMutter } from '../lib/thinkingMutter'
 import { useMemoryGroundedCompanion } from '../lib/useMemoryGroundedCompanion'
-import { loadJobList, mergeJobEvent, useJobStore } from '../lib/jobStore'
+import { approveJobToolEvent, cancelBackgroundJobEvent, createBackgroundJobEvent, fetchBackgroundJob, pollBackgroundJobEvents, retryBackgroundJobEvent, spawnChildren as spawnChildJobs, loadJobList, mergeJobEvent, useJobStore } from '../lib/jobStore'
 import { loadRuntimeRuns, useRuntimeRunStore } from '../lib/runtimeRunStore'
 import { bindTaskPlanShadowJob, observeTaskPlanShadow, observeTaskPlanShadowJob } from '../adapters/runtimeRunsAdapter'
 import { buildTraceDiagnostics, createInitialRuntimeState, createPersistentEventLog, reduceRuntimeEvent, restoreRuntimeStateFromEvents, isForegroundOnlyWritingFeedbackPlan, isHugoBlogPublishPlan, jobSnapshotToAgentEvent, buildConfirmedPlanJobPayload, buildPlanChildJobSpecs, buildPlanCoordinatorPrompt, buildPlanResultSessionMessages, planWithStatus } from '../../../agent'
@@ -235,10 +235,9 @@ export function ChatPage({
     if (event.type === 'job.event') {
       const merged = mergeJobEvent(event.jobId, {
         status: event.status,
-        result: event.detail,
         stale: event.stale,
       })
-      if (!merged) void loadJobList()
+      if (!merged) void loadJobList({ force: true })
     }
     if (event.type === 'initiative.event') onInitiativeEvent?.(event)
   }

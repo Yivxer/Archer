@@ -19,6 +19,7 @@ import { connectionStatusLabel, expertShortLabel, modelProfileShortLabel } from 
 import { mergeInitiativeShadowEvent } from './lib/initiativeShadow'
 import { mergeSseInitiativeEvent } from './lib/initiativeStore'
 import { onStoreEvent } from './lib/storeEventBus'
+import { loadJobList } from './lib/jobStore'
 import { syncStoresFromAdapter } from './lib/storeSync'
 import { useMemoryStore, loadAllMemory } from './lib/memoryStore'
 import { loadAllSoul } from './lib/soulStore'
@@ -257,6 +258,7 @@ function App() {
         void loadAllSoul()
         void loadAllMemory({ force: true })
         void refreshConversations()
+        void loadJobList({ force: true })
         setApiBannerDismissed(false)
         // L0.4: 连接成功后读崩溃信息 (只读一次)
         try {
@@ -666,7 +668,7 @@ function App() {
               onNavigate={setRoute}
             />
           )}
-          {route === 'Tasks' && <TasksPage data={data} />}
+          {route === 'Tasks' && <TasksPage connected={apiState === 'connected'} />}
           {route === 'Memory' && <MemoryPage
             connected={apiState === 'connected'}
           />}

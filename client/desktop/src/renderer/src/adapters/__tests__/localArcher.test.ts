@@ -1,3 +1,4 @@
+import { spawnChildJobs } from '../jobAdapter'
 import { fetchMemoryItems } from '../memoryAdapter'
 import { exportPortableData } from '../soulAdapter'
 import { describe, expect, it, beforeEach, vi } from 'vitest'
@@ -26,7 +27,6 @@ import {
   saveDesktopApiToken,
   setInitiativeDeliveryOptIn,
   StreamIdleTimeoutError,
-  spawnChildJobs,
   streamLocalChat,
   submitInitiativeFeedback,
   setInitiativePresence,

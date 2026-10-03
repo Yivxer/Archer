@@ -2,10 +2,11 @@ import React from 'react'
 import { Check, ChevronRight, Clock3, Copy, Loader2, Plus, Trash2, X } from 'lucide-react'
 import { EmptyDetail, SearchBox } from '../components/common'
 import { EmptyState } from '../components/EmptyState'
-import type { ArcherAdapter, BackgroundJob, BackgroundJobChildSummary, RuntimeRun } from '../types'
-import type { SpawnChildSpec } from '../adapters/localArcher'
+import type { BackgroundJob, BackgroundJobChildSummary, RuntimeRun } from '../types'
+import type { SpawnChildSpec } from '../adapters/jobAdapter'
 import {
   cancelJob as cancelStoredJob,
+  clearJobDetail,
   loadJobDetail,
   loadJobList,
   retryJob as retryStoredJob,
@@ -37,13 +38,17 @@ function createChildDraft(): ChildDraft {
   }
 }
 
-export function TasksPage({ data }: { data: ArcherAdapter }) {
+export function TasksPage({ connected }: { connected: boolean }) {
   const jobs = useJobStore((state) => state.jobs)
   const runtimeRuns = useRuntimeRunStore((state) => state.runs)
   const runtimeLoadState = useRuntimeRunStore((state) => state.loadState)
   const jobDetail = useJobStore((state) => state.currentDetail)
   const loadState = useJobStore((state) => state.loadState)
-  const storeError = useJobStore((state) => state.error)
+  const listError = useJobStore((state) => state.listError)
+  const detailError = useJobStore((state) => state.detailError)
+  const actionError = useJobStore((state) => state.actionError)
+  const detailState = useJobStore((state) => state.detailState)
+  const busyIds = useJobStore((state) => state.busyIds)
   const [selectedId, setSelectedId] = React.useState('')
   const [query, setQuery] = React.useState('')
   const [notice, setNotice] = React.useState('')
@@ -52,18 +57,20 @@ export function TasksPage({ data }: { data: ArcherAdapter }) {
   const [cancellingRunId, setCancellingRunId] = React.useState('')
 
   async function refreshJobs() {
-    if (data.status.adapter !== 'local') return
+    if (!connected) return
     setNotice('')
-    await Promise.all([loadJobList(), loadRuntimeRuns()])
+    await Promise.all([loadJobList({ force: true }), loadRuntimeRuns()])
   }
 
   React.useEffect(() => {
     void refreshJobs()
-  }, [data.status.adapter])
+  }, [connected])
 
   React.useEffect(() => {
-    if (selectedId && data.status.adapter === 'local') void loadJobDetail(selectedId)
-  }, [selectedId, data.status.adapter])
+    if (selectedId && connected) void loadJobDetail(selectedId)
+    else clearJobDetail()
+    return clearJobDetail
+  }, [selectedId, connected])
 
   React.useEffect(() => {
     if (jobs.length && !jobs.some((job) => job.id === selectedId)) {
@@ -74,10 +81,9 @@ export function TasksPage({ data }: { data: ArcherAdapter }) {
 
   async function cancelJob(job: BackgroundJob) {
     try {
-      await cancelStoredJob(job.id)
+      const result = await cancelStoredJob(job.id)
       setSelectedId(job.id)
-      setNotice('任务已取消')
-      await loadJobDetail(job.id)
+      setNotice(result.message || `任务状态：${jobStatusLabel(result.job.status, result.job.stale)}`)
     } catch (error) {
       setNotice(error instanceof Error ? error.message : '取消失败')
     }
@@ -85,9 +91,9 @@ export function TasksPage({ data }: { data: ArcherAdapter }) {
 
   async function retryJob(job: BackgroundJob) {
     try {
-      await retryStoredJob(job.id)
+      const result = await retryStoredJob(job.id)
       setSelectedId(job.id)
-      setNotice('任务已重新排队')
+      setNotice(result.message || `任务状态：${jobStatusLabel(result.job.status, result.job.stale)}`)
     } catch (error) {
       setNotice(error instanceof Error ? error.message : '重试失败')
     }
@@ -125,10 +131,12 @@ export function TasksPage({ data }: { data: ArcherAdapter }) {
 
   async function spawnChildJobsForParent(job: BackgroundJob, specs: SpawnChildSpec[]) {
     try {
-      await spawnChildren(job.id, specs)
-      setNotice(`已创建 ${specs.length} 个子任务`)
+      const result = await spawnChildren(job.id, specs)
+      setNotice(`已创建 ${result.spawned} 个子任务`)
+      return true
     } catch (error) {
       setNotice(error instanceof Error ? error.message : '子任务创建失败')
+      return false
     }
   }
 
@@ -150,7 +158,7 @@ export function TasksPage({ data }: { data: ArcherAdapter }) {
     }
   }, [selectedId, visibleJobs])
 
-  if (data.status.adapter !== 'local') {
+  if (!connected) {
     return <EmptyDetail icon={Clock3} title="等待连接" text="后台任务需要先连上 Archer 大脑。" />
   }
 
@@ -160,7 +168,7 @@ export function TasksPage({ data }: { data: ArcherAdapter }) {
         <div className="sessions-head">
           <div>
             <h1>后台任务</h1>
-            <p>{loadState === 'loading' ? '同步中' : '本地 jobs'}</p>
+            <p>{loadState === 'loading' ? '同步中' : '已保存的后台任务'}</p>
           </div>
           <span>{visibleJobs.length}</span>
         </div>
@@ -170,6 +178,7 @@ export function TasksPage({ data }: { data: ArcherAdapter }) {
             刷新
           </button>
         </div>
+        {listError && <p className="detail-error" role="alert">任务列表刷新失败：{listError}。已保留最近内容，请刷新重试。</p>}
         {runtimeNotice && <p className="detail-muted">{runtimeNotice}</p>}
         {runtimeRuns.length > 0 && (
           <div className="runtime-run-list" aria-label="Runtime Runs">
@@ -219,14 +228,17 @@ export function TasksPage({ data }: { data: ArcherAdapter }) {
             <ChevronRight size={16} />
           </button>
         )) : (
-          <EmptyState compact title={loadState === 'error' ? '任务读取失败' : '暂无后台任务'} />
+          <EmptyState compact title={loadState === 'error' ? '任务读取失败' : loadState === 'idle' || loadState === 'loading' ? '正在读取任务' : '暂无后台任务'} />
         )}
       </div>
 
       {selectedDetail ? (
         <TaskDetail
+          key={selectedDetail.id}
           job={selectedDetail}
-          notice={notice || storeError}
+          canAct={loadState === 'ready' && detailState === 'ready' && jobDetail?.id === selectedDetail.id && !busyIds.has(selectedDetail.id)}
+          busy={busyIds.has(selectedDetail.id)}
+          notice={[notice || actionError, detailError ? `详情读取失败：${detailError}` : ''].filter(Boolean).join('；')}
           onCancel={() => void cancelJob(selectedDetail)}
           onRetry={() => void retryJob(selectedDetail)}
           onSpawnChildren={(specs) => spawnChildJobsForParent(selectedDetail, specs)}
@@ -241,15 +253,19 @@ export function TasksPage({ data }: { data: ArcherAdapter }) {
 function TaskDetail({
   job,
   notice,
+  canAct,
+  busy,
   onCancel,
   onRetry,
   onSpawnChildren,
 }: {
   job: BackgroundJob
   notice: string
+  canAct: boolean
+  busy: boolean
   onCancel: () => void
   onRetry: () => void
-  onSpawnChildren: (specs: SpawnChildSpec[]) => Promise<void>
+  onSpawnChildren: (specs: SpawnChildSpec[]) => Promise<boolean>
 }) {
   const isActive = job.status === 'queued' || job.status === 'running' || job.status === 'waiting_approval'
   const canRetry = job.status === 'failed' || job.status === 'cancelled'
@@ -287,8 +303,8 @@ function TaskDetail({
         autoStart: draft.autoStart,
       }))
       .filter((spec) => spec.title && spec.prompt)
-    if (!specs.length) return
-    await onSpawnChildren(specs)
+    if (!specs.length || !canAct) return
+    if (!await onSpawnChildren(specs)) return
     setChildDrafts([createChildDraft()])
     setShowChildForm(false)
   }
@@ -317,12 +333,12 @@ function TaskDetail({
           <p>{job.id} · {jobStatusLabel(job.status, job.stale)} · {formatDate(job.updatedAt)}</p>
         </div>
         <div className="task-actions">
-          <button className="quiet-button" type="button" onClick={() => setShowChildForm((value) => !value)}>
+          <button className="quiet-button" type="button" disabled={!canAct} onClick={() => setShowChildForm((value) => !value)}>
             <Plus size={14} />
             拆分子任务
           </button>
-          {isActive && <button className="quiet-button" type="button" onClick={onCancel}>取消</button>}
-          {canRetry && <button className="quiet-button strong" type="button" onClick={onRetry}>重试</button>}
+          {isActive && <button className="quiet-button" type="button" disabled={!canAct} onClick={onCancel}>{busy ? '处理中…' : '取消'}</button>}
+          {canRetry && <button className="quiet-button strong" type="button" disabled={!canAct} onClick={onRetry}>{busy ? '处理中…' : '重试'}</button>}
         </div>
       </div>
       <dl>
@@ -392,7 +408,7 @@ function TaskDetail({
           </div>
           <div className="task-child-form-actions">
             <button className="quiet-button" type="button" onClick={() => setShowChildForm(false)}>取消</button>
-            <button className="quiet-button strong" type="submit" disabled={!validDraftCount}>
+            <button className="quiet-button strong" type="submit" disabled={!canAct || !validDraftCount}>
               创建 {validDraftCount || ''} 个子任务
             </button>
           </div>

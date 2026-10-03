@@ -641,37 +641,23 @@ SoulPage 的 hypotheses、journalReview、periodReviews 仍是其他领域传入
 
 Review 的“在新会话继续这个话题”沿用现有 POST `/sessions` 的 `threadId` 元数据。选择时不写会话，首次实际发送后生成同线程的新 session；普通“恢复”仍续写原 session。没有复制旧对话、合成用户决定或自动标记 J8 样本通过。
 
-### jobStore（L3.5）
+### jobStore（L3.5，后台任务投影）
 
-**真值来源**：`/jobs` + `/jobs/{id}` + cancel/retry/approve/spawn 动作
+**真值来源**：`jobAdapter` 的 `/jobs`、`/jobs/{id}`、create/cancel/retry/approve/spawn 回执；聊天区和 TasksPage 的操作、轮询统一经过 jobStore。runtimeStore 的 JobEvent 仍用于聊天 trace，不接管 Runtime 权威。
 
-**State shape**：
-```ts
-type JobStoreState = {
-  jobs: BackgroundJob[]                       // /jobs（列表）
-  currentDetail: BackgroundJob | null         // /jobs/{id}（选中详情，含 children）
-  loadState: 'idle' | 'loading' | 'ready' | 'error'
-  detailState: 'idle' | 'loading' | 'ready' | 'error'
-  error: string
-  busyIds: Set<string>                        // 动作进行中（cancel/retry/spawn）
-}
-```
+State 包含 `jobs/currentDetail`、`loadState/detailState`、`listError/detailError/actionError`、兼容 `error` 和 `busyIds`。连接/重连由 main 独立加载任务；TasksPage 仅接收 connected。
 
-**Actions**：
-| Action | 调用 API | 副作用 |
-|--------|---------|--------|
-| `loadList()` | GET /jobs | 替换 jobs |
-| `loadDetail(id)` | GET /jobs/{id} | 替换 currentDetail |
-| `create(payload)` | POST /jobs | 返回 BackgroundJob + refresh jobs |
-| `cancel(id)` | POST /jobs/{id}/cancel | 替换对应 job |
-| `retry(id)` | POST /jobs/{id}/retry | 替换对应 job + 600ms 后 refresh |
-| `approve(id, eventId, decision)` | POST /jobs/{id}/approve | 替换对应 job |
-| `spawn(id, children)` | POST /jobs/{id}/spawn | 替换对应 job |
-| `mergeFromRuntime(jobEvents)` | （由 runtimeStore SSE 注入） | 合并 JobEvent → BackgroundJob |
+| Action | API 与投影 |
+|---|---|
+| `loadJobList({force?})` | GET /jobs；普通请求合并，force/reset 忽略旧成功/失败，读取失败保留列表 |
+| `loadJobDetail(id)` | GET /jobs/{id}；选择切换/clear/reset/较新回执使旧详情失效 |
+| `createJobReceipt/createJob` | POST /jobs；先发布真实回执，强制读列表 |
+| `cancelJob/retryJob/approveJob` | POST 对应动作；校验 ok、同任务 busy 去重，发布真实回执，再读列表及当前详情 |
+| `spawnChildren` | POST /spawn；发布返回的真实 children，读列表/当前父任务详情，不在前端拼接父任务汇总 |
+| `fetchBackgroundJob/pollBackgroundJobEvents` | GET 轮询结果进入同一 store；较新动作使旧读取失效，事件回执采用最新已确认快照 |
+| `mergeJobEvent` | 服务端 SSE 补充 status/stale；进度文本只用于 trace，不充当最终 result/evidence；隔离旧列表及详情，状态改变时读取完整投影；未知任务由聊天区触发读取 |
 
-**订阅者**：TasksPage、ChatPage 回执、Workspace
-
-**注意**：runtimeStore 的 `state.jobs` 是 `JobEvent`（SSE 事件），jobStore 的 `state.jobs` 是 `BackgroundJob`（API 拉取）。两者并存，jobStore 是页面消费的真值；runtimeStore 的 JobEvent 用于 trace log。
+已确认动作与后续刷新失败分开，读取失败不使成功动作重复执行；POST 的 ok=false 不发布成功状态，finally 清除 busy。TasksPage 显示独立列表/详情错误，初次加载与成功为空分别呈现；仅连接、列表成功、选中详情成功且任务不 busy 时启用任务动作。子任务创建失败保留表单内容。
 
 ### initiativeStore（L3.6，受控 Part 8 投影）
 

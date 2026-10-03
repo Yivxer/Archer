@@ -36,6 +36,7 @@ SUITES = {
         "tests/test_tool_approval_cache_replay.py",
         "tests/test_part8_shadow_validation.py",
         "tests/test_thread_clue_lifecycle.py",
+        "tests/test_job_store_authority.py",
     ],
     "full": [],
 }
