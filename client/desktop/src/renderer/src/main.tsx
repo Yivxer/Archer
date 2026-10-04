@@ -414,7 +414,7 @@ function App() {
       </div>
 
       {/* ── Sidebar ── */}
-      <aside className={`sidebar ${sidebarOpen ? '' : 'closed'}`}>
+      <aside className={`sidebar ${sidebarOpen ? '' : 'closed'}`} inert={!sidebarOpen} aria-hidden={!sidebarOpen}>
         <div className="sidebar-head">
           <button className="sidebar-brand" type="button" onClick={newChat} title="新建对话">
             <ArcherRing living />
