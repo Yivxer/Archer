@@ -363,6 +363,10 @@ export async function fetchLocalExpertWorkbench(): Promise<{
   }
 }
 
+export async function readLocalSettings(): Promise<SettingsDraft> {
+  return getJson<SettingsDraft>('/settings')
+}
+
 export async function validateLocalSettings(settings: SettingsDraft): Promise<SettingsValidationResult> {
   return postJson<SettingsValidationResult>('/settings/validate', { settings })
 }

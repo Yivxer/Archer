@@ -1,9 +1,11 @@
 import React from 'react'
+import { createSettingsSession } from '../lib/settingsSession'
+import { useExternalStore } from '../lib/externalStore'
 import { useMemoryStore } from '../lib/memoryStore'
 import { ArrowLeft, CalendarClock, CalendarDays, Clipboard, Database, Eye, KeyRound, Layers, ListChecks, Moon, Palette, Settings2, SlidersHorizontal, Sun, Terminal, X, Activity } from 'lucide-react'
 import type { ArcherAdapter, MemoryContextMode, ObsidianContextMode, Route, ScheduledTask, Theme } from '../types'
 import { FormField } from '../components/common'
-import { addSchedule, clearDesktopApiToken, getDesktopApiToken, listSchedules, removeSchedule, resolveDesktopApiToken, restartLocalApi, runSchedule, saveDesktopApiToken, saveLocalProfileSettings, saveLocalSettings, setScheduleEnabled, switchLocalMode, testLocalModelProfile } from '../adapters/localArcher'
+import { addSchedule, clearDesktopApiToken, getDesktopApiToken, listSchedules, removeSchedule, resolveDesktopApiToken, readLocalSettings, restartLocalApi, runSchedule, saveDesktopApiToken, saveLocalProfileSettings, saveLocalSettings, setScheduleEnabled, switchLocalMode, testLocalModelProfile } from '../adapters/localArcher'
 import { expertShortLabel, modeLabelFromId, modelProfileShortLabel, personaPresetFromMode } from '../lib/conversationPersona'
 import { badgeLabel, type ConnectionState } from '../lib/connectionState'
 import type { ConnectionStateSnapshot } from '../lib/useConnectionState'
@@ -50,33 +52,40 @@ export function SettingsPage({
       ? stored
       : 'model'
   })
-  const [draft, setDraft] = React.useState(data.settings)
+  const [session] = React.useState(() => createSettingsSession(data.settings, { settings: readLocalSettings, schedules: listSchedules }))
+  const sync = useExternalStore(session, state => state)
+  const { draft, notice, warning: noticeWarning, tasks: scheduleTasks, scheduleLoading } = sync
+  const saving = Boolean(sync.busy)
+  const testingModel = sync.busy === 'test'
+  const restartingApi = sync.busy === 'restart'
   const [apiToken, setApiToken] = React.useState(() => getDesktopApiToken())
-  const [notice, setNotice] = React.useState('')
-  const [noticeWarning, setNoticeWarning] = React.useState(false)
-  const [saving, setSaving] = React.useState(false)
-  const [testingModel, setTestingModel] = React.useState(false)
-  const [restartingApi, setRestartingApi] = React.useState(false)
-  const [modeSaving, setModeSaving] = React.useState('')
-  const modeRequestRef = React.useRef(0)
   const [commandCopied, setCommandCopied] = React.useState(false)
-  const [scheduleTasks, setScheduleTasks] = React.useState<ScheduledTask[]>([])
-  const [scheduleLoading, setScheduleLoading] = React.useState(false)
   const [scheduleSkill, setScheduleSkill] = React.useState('')
   const [scheduleInterval, setScheduleInterval] = React.useState('daily')
   const [scheduleLabel, setScheduleLabel] = React.useState('')
-  const [scheduleBusyId, setScheduleBusyId] = React.useState<number | null>(null)
+  const connected = data.status.adapter === 'local' && (connectionState === 'ready' || connectionState === 'degraded')
+  const setNotice = session.notify
 
   React.useEffect(() => {
-    setDraft({ ...data.settings, apiKey: '' })
-    setNotice('')
-  }, [data.settings])
+    session.connect(connected)
+    return () => session.connect(false)
+  }, [session, connected])
+  React.useEffect(() => {
+    if (connected) void session.refreshSettings()
+  }, [session, connected, data.settings])
+  React.useEffect(() => {
+    if (connected && activeTab === 'schedules') void session.refreshSchedules()
+  }, [session, connected, activeTab])
+
+  React.useEffect(() => {
+    if (connected && activeTab === 'schedules' && !sync.busy && !sync.schedulesReady && !sync.scheduleError && !sync.scheduleLoading) void session.refreshSchedules()
+  }, [session, connected, activeTab, sync.busy, sync.schedulesReady, sync.scheduleError, sync.scheduleLoading])
 
   React.useEffect(() => {
     if (apiToken) return
-    resolveDesktopApiToken().then((token) => {
-      if (token) setApiToken(token)
-    }).catch(() => {})
+    let active = true
+    resolveDesktopApiToken().then(token => { if (active && token) setApiToken(token) }).catch(() => {})
+    return () => { active = false }
   }, [apiToken])
 
   // Esc 返回 Chat
@@ -91,162 +100,89 @@ export function SettingsPage({
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [onNavigate])
 
-  function updateDraft(key: keyof typeof draft, value: string) {
-    setDraft((current) => ({ ...current, [key]: value }))
-    setNotice('')
+  const updateDraft = session.updateDraft
+  const resetDraft = session.resetDraft
+
+  function assertSaved(result: { ok: boolean; error?: string; errors?: string[]; message?: string }): void {
+    if (!result.ok) throw new Error(result.error || result.errors?.join('；') || result.message || '操作未保存，请重试')
   }
 
   async function chooseModelProfile(profileId: 'lite' | 'pro' | 'max') {
-    // 切换前先保存当前 profile 的配置，避免丢失当前填写的 apiKey 等字段
-    const currentProfileId = draft.activeProfile
-    if (currentProfileId && currentProfileId !== profileId) {
-      // 只有当前 draft 有任何配置变更时才保存
-      const hasChanges = draft.apiKey || draft.baseUrl || draft.model || draft.provider
-      if (hasChanges) {
-        try {
-          await saveLocalProfileSettings({
-            profileId: currentProfileId,
-            provider: draft.provider,
-            baseUrl: draft.baseUrl,
-            model: draft.model,
-            apiKey: draft.apiKey,
-          })
-        } catch (err) {
-          // 保存失败不阻塞切换，但提示用户
-          setNotice(`切换前保存 ${modelProfileShortLabel(currentProfileId)} 配置失败：${err instanceof Error ? err.message : String(err)}`)
-        }
+    if (profileId === draft.activeProfile) return
+    const submitted = draft
+    await session.run('profile', async () => {
+      const baseline = session.getState().baseline
+      const changed = ['provider', 'baseUrl', 'model', 'apiKey'].some(key => submitted[key as keyof typeof draft] !== baseline[key as keyof typeof draft])
+      if (changed) {
+        assertSaved(await saveLocalProfileSettings({ profileId: submitted.activeProfile, provider: submitted.provider, baseUrl: submitted.baseUrl, model: submitted.model, apiKey: submitted.apiKey }))
       }
-    }
-
-    const profile = draft.modelProfiles?.find((item) => item.id === profileId)
-    setDraft((current) => ({
-      ...current,
-      activeProfile: profileId,
-      provider: profile?.provider ?? current.provider,
-      baseUrl: profile?.baseUrl ?? '',
-      model: profile?.model ?? '',
-      apiKey: '',
-      apiKeyPreview: profile?.apiKeyPreview ?? '',
-    }))
-    setNotice('')
-  }
-
-  function resetDraft() {
-    setDraft({ ...data.settings, apiKey: '' })
-    setNotice('已恢复为当前读取到的配置。')
+      // Edits made while the profile save was pending must remain visible.
+      if (session.getState().draft !== submitted) return { notice: '原配置已处理；仍有新输入，请保存后再切换。' }
+      const profile = submitted.modelProfiles?.find(item => item.id === profileId)
+      return {
+        notice: '', refresh: 'settings',
+        draft: { ...submitted, activeProfile: profileId, provider: profile?.provider ?? submitted.provider, baseUrl: profile?.baseUrl ?? '', model: profile?.model ?? '', apiKey: '', apiKeyPreview: profile?.apiKeyPreview ?? '' },
+      }
+    }, 'settings')
   }
 
   async function saveToken() {
+    session.connect(connected)
     saveDesktopApiToken(apiToken)
     setNotice(apiToken.trim() ? 'API token 已保存。' : 'API token 已清除。')
-    await onRefresh()
+    await onRefresh().catch(() => {})
+    await session.refreshSettings()
   }
 
   async function clearToken() {
     setApiToken('')
+    session.connect(connected)
     clearDesktopApiToken()
     setNotice('API token 已清除。')
-    await onRefresh()
+    await onRefresh().catch(() => {})
+    await session.refreshSettings()
   }
 
   async function restartApi() {
-    setRestartingApi(true)
-    setNotice('')
-    setNoticeWarning(false)
-    try {
+    await session.run('restart', async () => {
       const result = await restartLocalApi()
+      if (!result.ok) throw new Error(`重启本地大脑失败：${result.reason}`)
       await onRefresh()
-      if (result.ok) {
-        setNotice('已重启本地大脑。')
-      } else {
-        setNotice(`重启本地大脑失败：${result.reason}`)
-        setNoticeWarning(true)
-      }
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : '重启本地大脑失败')
-      setNoticeWarning(true)
-    } finally {
-      setRestartingApi(false)
-    }
+      return { notice: '已重启本地大脑。', refresh: 'settings' }
+    })
   }
 
   async function saveDraft() {
-    if (data.status.adapter !== 'local') {
-      setNotice('需要本地 API 连接才能保存设置。')
-      return
-    }
-    setSaving(true)
-    setNotice('')
-    try {
-      const result = await saveLocalSettings(draft)
-      if (result.ok) {
-        const restartMsg = result.restartRequired ? '；请重启 Archer API 使路径变更生效' : ''
-        setNotice(`已保存 ${result.savedFields.length} 个字段到 archer.toml${restartMsg}。`)
-        setNoticeWarning(Boolean(result.restartRequired))
-      } else {
-        setNotice(`保存失败：${result.errors?.join('；')}`)
-      }
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : '设置保存失败')
-    } finally {
-      setSaving(false)
-    }
+    const submitted = draft
+    const saved = await session.run('save', async () => {
+      const result = await saveLocalSettings(submitted)
+      assertSaved(result)
+      const restartMsg = result.restartRequired ? '；请重启 Archer API 使路径变更生效' : ''
+      return { notice: `已保存 ${result.savedFields.length} 个字段到 archer.toml${restartMsg}。`, warning: Boolean(result.restartRequired), refresh: 'settings', savedDraft: submitted }
+    }, 'settings')
+    if (saved) await onRefresh().catch(() => {})
   }
 
   async function testCurrentModelProfile() {
-    if (data.status.adapter !== 'local') {
-      setNotice('需要本地 API 连接后才能测试模型。')
-      setNoticeWarning(true)
-      return
-    }
-    setTestingModel(true)
-    setSaving(true)
-    setNotice('')
-    setNoticeWarning(false)
-    try {
-      const saved = await saveLocalSettings(draft)
-      if (!saved.ok) {
-        setNotice(`保存失败，未测试：${saved.errors?.join('；')}`)
-        setNoticeWarning(true)
-        return
+    const submitted = draft
+    const saved = await session.run('test', async () => {
+      assertSaved(await saveLocalSettings(submitted))
+      try {
+        const result = await testLocalModelProfile(submitted)
+        return { notice: result.ok ? `${result.profile} / ${result.provider} 测试通过：${result.model} · ${result.latencyMs}ms` : `设置已保存；测试失败：${result.message}`, warning: !result.ok, refresh: 'settings', savedDraft: submitted }
+      } catch (error) {
+        return { notice: `设置已保存；测试失败：${error instanceof Error ? error.message : String(error)}`, warning: true, refresh: 'settings', savedDraft: submitted }
       }
-      const result = await testLocalModelProfile(draft)
-      if (result.ok) {
-        setNotice(`${result.profile} / ${result.provider} 测试通过：${result.model} · ${result.latencyMs}ms`)
-        setNoticeWarning(false)
-      } else {
-        setNotice(`${modelProfileShortLabel(draft.activeProfile)} 测试失败：${result.message}${result.errors?.length ? `；${result.errors[0]}` : ''}`)
-        setNoticeWarning(true)
-      }
-      await onRefresh()
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : '模型测试失败')
-      setNoticeWarning(true)
-    } finally {
-      setTestingModel(false)
-      setSaving(false)
-    }
+    }, 'settings')
+    if (saved) await onRefresh().catch(() => {})
   }
 
   async function chooseConversationMode(mode: string) {
-    setNotice('')
-    if (data.status.adapter !== 'local') {
-      setNotice('需要本地 API 连接才能写入模式配置。')
-      return
-    }
-    const requestId = ++modeRequestRef.current
-    setModeSaving(mode)
-    try {
+    await session.run(`mode:${mode}`,  async () => {
       const result = await switchLocalMode(mode)
       await onRefresh()
-      if (requestId !== modeRequestRef.current) return
-      setNotice(`已切换到 ${result.label} 模式。`)
-    } catch (error) {
-      if (requestId !== modeRequestRef.current) return
-      setNotice(error instanceof Error ? error.message : '模式切换失败')
-    } finally {
-      if (requestId === modeRequestRef.current) setModeSaving('')
-    }
+      return { notice: `已切换到 ${result.label} 模式。`, refresh: 'settings' }
+    })
   }
 
   async function copyStartCommand() {
@@ -261,94 +197,40 @@ export function SettingsPage({
     }
   }
 
-  const loadScheduleTasks = React.useCallback(async () => {
-    if (data.status.adapter !== 'local') {
-      setScheduleTasks([])
-      return
-    }
-    setScheduleLoading(true)
-    try {
-      const result = await listSchedules()
-      setScheduleTasks(result.tasks || [])
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : '读取定时任务失败')
-    } finally {
-      setScheduleLoading(false)
-    }
-  }, [data.status.adapter])
-
-  React.useEffect(() => {
-    if (activeTab !== 'schedules') return
-    void loadScheduleTasks()
-  }, [activeTab, loadScheduleTasks])
-
   async function submitSchedule() {
-    if (data.status.adapter !== 'local') {
-      setNotice('需要本地 API 连接才能管理定时任务。')
-      return
-    }
-    if (!scheduleSkill.trim()) {
-      setNotice('请填写技能名称。')
-      return
-    }
-    setSaving(true)
-    setNotice('')
-    try {
-      await addSchedule({
-        skillName: scheduleSkill.trim(),
-        interval: scheduleInterval.trim() || 'daily',
-        label: scheduleLabel.trim(),
-      })
-      setScheduleSkill('')
-      setScheduleLabel('')
-      setNotice('定时任务已添加。')
-      await loadScheduleTasks()
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : '添加定时任务失败')
-    } finally {
-      setSaving(false)
+    if (!scheduleSkill.trim()) { setNotice('请填写技能名称。'); return }
+    const skill = scheduleSkill
+    const label = scheduleLabel
+    const success = await session.run('addSchedule', async () => {
+      assertSaved(await addSchedule({ skillName: skill.trim(), interval: scheduleInterval.trim() || 'daily', label: label.trim() }))
+      return { notice: '定时任务已添加。', refresh: 'schedules' }
+    }, 'schedules')
+    if (success) {
+      setScheduleSkill(current => current === skill ? '' : current)
+      setScheduleLabel(current => current === label ? '' : current)
     }
   }
 
   async function toggleScheduleTask(task: ScheduledTask) {
-    setScheduleBusyId(task.id)
-    setNotice('')
-    try {
-      await setScheduleEnabled(task.id, !task.enabled)
-      await loadScheduleTasks()
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : '更新任务状态失败')
-    } finally {
-      setScheduleBusyId(null)
-    }
+    await session.run('schedule', async () => {
+      assertSaved(await setScheduleEnabled(task.id, !task.enabled))
+      return { notice: '任务状态已更新。', refresh: 'schedules' }
+    }, 'schedules')
   }
 
   async function deleteScheduleTask(taskId: number) {
-    setScheduleBusyId(taskId)
-    setNotice('')
-    try {
-      await removeSchedule(taskId)
-      setNotice('定时任务已删除。')
-      await loadScheduleTasks()
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : '删除定时任务失败')
-    } finally {
-      setScheduleBusyId(null)
-    }
+    await session.run('schedule', async () => {
+      assertSaved(await removeSchedule(taskId))
+      return { notice: '定时任务已删除。', refresh: 'schedules' }
+    }, 'schedules')
   }
 
   async function runScheduleTask(taskId: number) {
-    setScheduleBusyId(taskId)
-    setNotice('')
-    try {
+    await session.run('schedule', async () => {
       const result = await runSchedule(taskId)
-      setNotice(result.ok ? `已执行：${result.summary || '完成'}` : `执行失败：${result.summary || result.error || '未知错误'}`)
-      await loadScheduleTasks()
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : '执行任务失败')
-    } finally {
-      setScheduleBusyId(null)
-    }
+      assertSaved(result)
+      return { notice: `已执行：${result.summary || '完成'}`, refresh: 'schedules' }
+    }, 'schedules')
   }
 
   const tabs: Array<{ id: SettingsTab; icon: React.ElementType; label: string; desc: string }> = [
@@ -435,6 +317,7 @@ export function SettingsPage({
                     key={profile.id}
                     className={`model-profile-card${draft.activeProfile === profile.id ? ' active' : ''}`}
                     type="button"
+                    disabled={saving || !sync.settingsReady || sync.settingsLoading}
                     onClick={() => chooseModelProfile(profile.id)}
                     title={profile.configured ? `${modelProfileShortLabel(profile.id)} 已配置` : `${modelProfileShortLabel(profile.id)} 待配置`}
                   >
@@ -469,7 +352,7 @@ export function SettingsPage({
               />
             </SettingRow>
             <SettingRow title="连通测试" description="保存后发送最短 ping 验证。">
-              <button className="quiet-button strong" type="button" onClick={() => void testCurrentModelProfile()} disabled={testingModel || saving}>
+              <button className="quiet-button strong" type="button" onClick={() => void testCurrentModelProfile()} disabled={saving || !sync.settingsReady || sync.settingsLoading}>
                 {testingModel ? '测试中' : `测试 ${modelProfileShortLabel(draft.activeProfile)}`}
               </button>
               <span className="settings-note">会消耗极少量 API 额度；不会显示或返回密钥。</span>
@@ -484,21 +367,21 @@ export function SettingsPage({
                 <button
                   className={activeConversationMode === 'auto' ? 'active' : ''}
                   type="button"
-                  disabled={Boolean(modeSaving)}
+                  disabled={saving || !connected}
                   onClick={() => void chooseConversationMode('auto')}
                 >
-                  {modeSaving === 'auto' ? '切换中' : '自动'}
+                  {sync.busy === 'mode:auto' ? '切换中' : '自动'}
                 </button>
                 {conversationModes.map((mode) => (
                   <button
                     key={mode.id}
                     className={activeConversationMode === mode.id ? 'active' : ''}
                     type="button"
-                    disabled={Boolean(modeSaving)}
+                    disabled={saving || !connected}
                     onClick={() => void chooseConversationMode(mode.id)}
                     title={mode.source === 'file' ? '文件模式' : '配置模式'}
                   >
-                    {modeSaving === mode.id ? '切换中' : mode.label}
+                    {sync.busy === `mode:${mode.id}` ? '切换中' : mode.label}
                   </button>
                 ))}
               </div>
@@ -573,7 +456,7 @@ export function SettingsPage({
               )}
             </div>
             <SettingRow title="大脑进程" description="连接异常时，可手动重启本地 API。">
-              <button className="quiet-button strong" type="button" onClick={() => void restartApi()} disabled={restartingApi}>
+              <button className="quiet-button strong" type="button" onClick={() => void restartApi()} disabled={saving || !connected}>
                 {restartingApi ? '重启中…' : '重启本地大脑'}
               </button>
             </SettingRow>
@@ -673,7 +556,7 @@ export function SettingsPage({
             {data.status.adapter === 'local' && scheduleLoading && (
               <p className="schedule-empty">加载中…</p>
             )}
-            {data.status.adapter === 'local' && !scheduleLoading && scheduleTasks.length === 0 && (
+            {data.status.adapter === 'local' && !scheduleLoading && sync.schedulesReady && scheduleTasks.length === 0 && (
               <p className="schedule-empty">无定时任务。下方添加，或终端 /schedule add。</p>
             )}
             {data.status.adapter === 'local' && scheduleTasks.length > 0 && (
@@ -691,7 +574,7 @@ export function SettingsPage({
                       <button
                         className="quiet-button"
                         type="button"
-                        disabled={scheduleBusyId === task.id}
+                        disabled={saving || !sync.schedulesReady || scheduleLoading}
                         onClick={() => void toggleScheduleTask(task)}
                       >
                         {task.enabled ? '禁用' : '启用'}
@@ -699,7 +582,7 @@ export function SettingsPage({
                       <button
                         className="quiet-button"
                         type="button"
-                        disabled={scheduleBusyId === task.id}
+                        disabled={saving || !sync.schedulesReady || scheduleLoading}
                         onClick={() => void runScheduleTask(task.id)}
                       >
                         立即运行
@@ -707,7 +590,7 @@ export function SettingsPage({
                       <button
                         className="quiet-button"
                         type="button"
-                        disabled={scheduleBusyId === task.id}
+                        disabled={saving || !sync.schedulesReady || scheduleLoading}
                         onClick={() => void deleteScheduleTask(task.id)}
                       >
                         删除
@@ -722,7 +605,7 @@ export function SettingsPage({
                 <FormField label="技能名" value={scheduleSkill} onChange={setScheduleSkill} />
                 <FormField label="间隔" value={scheduleInterval} onChange={setScheduleInterval} />
                 <FormField label="标签（可选）" value={scheduleLabel} onChange={setScheduleLabel} />
-                <button className="quiet-button strong" type="button" onClick={() => void submitSchedule()} disabled={saving}>
+                <button className="quiet-button strong" type="button" onClick={() => void submitSchedule()} disabled={saving || !sync.schedulesReady || scheduleLoading}>
                   {saving ? '添加中' : '添加定时任务'}
                 </button>
               </div>
@@ -880,14 +763,16 @@ export function SettingsPage({
 
         {canSaveDraft && (
           <div className="settings-actions settings-actions-fixed">
-            <button className="quiet-button" type="button" onClick={resetDraft}>
+            <button className="quiet-button" type="button" onClick={resetDraft} disabled={saving || !sync.settingsReady}>
               恢复当前配置
             </button>
-            <button className="quiet-button strong" type="button" onClick={saveDraft} disabled={saving}>
+            <button className="quiet-button strong" type="button" onClick={saveDraft} disabled={saving || !sync.settingsReady || sync.settingsLoading}>
               {saving ? '保存中' : saveLabel}
             </button>
           </div>
         )}
+        {sync.settingsError && <div className="settings-notice warning" role="alert">配置刷新失败：{sync.settingsError}；已保留当前输入。<button type="button" disabled={saving || !connected} onClick={() => void session.refreshSettings()}>重试读取配置</button></div>}
+        {activeTab === 'schedules' && sync.scheduleError && <div className="settings-notice warning" role="alert">定时任务刷新失败：{sync.scheduleError}；已保留上次列表。<button type="button" disabled={saving || !connected} onClick={() => void session.refreshSchedules()}>重试读取定时任务</button></div>}
         {notice && <div className={`settings-notice${noticeWarning ? ' warning' : ''}`}>{notice}</div>}
       </div>
     </div>
