@@ -41,4 +41,11 @@
 
 ## 验证与发布边界
 
-验证结果待隔离回归后填写。本批没有修改桌面源码、版本和安装包，没有改变生产配置、数据库、审批缓存或 Runtime authority 开关。
+- 源码提交：`a255fb18daa7b33056d986a0fe3e12bd28bc9937`。隔离 runner 从这个已提交版本建立临时 checkout，以合成配置、数据与 Python audit guards 运行；未请求外部模型。
+- 最小回归：policy + architecture 两文件 **126 passed**。
+- 相关回归：tool_stage、Outbox、migrations、config_contract、FastAPI、Desktop API、审批缓存、Obsidian Runtime、api_tool_service、api_tool_helpers、tool_runtime、authority_migration 十二文件 **274 passed / 5 deselected**。integration / journey 按离线规则排除；87 条现有依赖弃用警告，不算失败，也不宣称已修复。
+- 拆分前后 **22 个函数 / 类定义与全部常量的 AST 一致**，验证搬移未改写规则。六份新说明中的 **40 个本地文档链接**均可解析。
+- 对运行中的当前应用只做 `GET /health` 与 `GET /ready`：均 200，对应 ok / ready 为 true。这证明已有服务仍就绪，不证明已运行新源码；新源码由隔离回归验证。
+- 本批没有修改桌面源码、版本和安装包；未重启/重装应用，未提交生产配置或执行生产迁移、工具副作用与 Runtime authority 切换。安装基线仍为 1.0.36。
+
+本地 runner 元数据：`work/backend-maintenance-focused-2026-10-04.json`、`work/backend-maintenance-regression-2026-10-04.json`（均 exitCode=0、syntheticState=true）。
