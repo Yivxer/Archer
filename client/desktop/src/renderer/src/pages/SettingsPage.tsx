@@ -5,7 +5,10 @@ import { useMemoryStore } from '../lib/memoryStore'
 import { ArrowLeft, CalendarClock, CalendarDays, Clipboard, Database, Eye, KeyRound, Layers, ListChecks, Moon, Palette, Settings2, SlidersHorizontal, Sun, Terminal, X, Activity } from 'lucide-react'
 import type { ArcherAdapter, MemoryContextMode, ObsidianContextMode, Route, ScheduledTask, Theme } from '../types'
 import { FormField } from '../components/common'
-import { addSchedule, clearDesktopApiToken, getDesktopApiToken, listSchedules, removeSchedule, resolveDesktopApiToken, readLocalSettings, restartLocalApi, runSchedule, saveDesktopApiToken, saveLocalProfileSettings, saveLocalSettings, setScheduleEnabled, switchLocalMode, testLocalModelProfile } from '../adapters/localArcher'
+import { clearDesktopApiToken, getDesktopApiToken, resolveDesktopApiToken, restartLocalApi, saveDesktopApiToken, switchLocalMode } from '../adapters/localArcher'
+import { addSchedule, listSchedules, removeSchedule, runSchedule, setScheduleEnabled, testLocalModelProfile } from '../adapters/settingsAdapter'
+import { emptySettings, loadSettings, readConfirmedSettings, resetSettingsStore, saveSettings, saveSettingsProfile, useSettingsStore } from '../lib/settingsStore'
+import { mockSettings } from '../adapters/mockSettings'
 import { expertShortLabel, modeLabelFromId, modelProfileShortLabel, personaPresetFromMode } from '../lib/conversationPersona'
 import { badgeLabel, type ConnectionState } from '../lib/connectionState'
 import type { ConnectionStateSnapshot } from '../lib/useConnectionState'
@@ -52,10 +55,11 @@ export function SettingsPage({
       ? stored
       : 'model'
   })
-  const [session] = React.useState(() => createSettingsSession(data.settings, { settings: readLocalSettings, schedules: listSchedules }))
+  const serverSettings = useSettingsStore(state => state)
+  const [session] = React.useState(() => createSettingsSession(data.status.adapter === 'local' ? (serverSettings.settings ?? emptySettings) : mockSettings, { settings: () => loadSettings({ force: true }), savedSettings: readConfirmedSettings, schedules: listSchedules }))
   const sync = useExternalStore(session, state => state)
   const { draft, notice, warning: noticeWarning, tasks: scheduleTasks, scheduleLoading } = sync
-  const saving = Boolean(sync.busy)
+  const saving = Boolean(sync.busy || serverSettings.busy)
   const testingModel = sync.busy === 'test'
   const restartingApi = sync.busy === 'restart'
   const [apiToken, setApiToken] = React.useState(() => getDesktopApiToken())
@@ -72,7 +76,11 @@ export function SettingsPage({
   }, [session, connected])
   React.useEffect(() => {
     if (connected) void session.refreshSettings()
-  }, [session, connected, data.settings])
+  }, [session, connected])
+  React.useEffect(() => {
+    session.syncServer(serverSettings)
+  }, [session, serverSettings, sync.busy, connected])
+
   React.useEffect(() => {
     if (connected && activeTab === 'schedules') void session.refreshSchedules()
   }, [session, connected, activeTab])
@@ -114,13 +122,13 @@ export function SettingsPage({
       const baseline = session.getState().baseline
       const changed = ['provider', 'baseUrl', 'model', 'apiKey'].some(key => submitted[key as keyof typeof draft] !== baseline[key as keyof typeof draft])
       if (changed) {
-        assertSaved(await saveLocalProfileSettings({ profileId: submitted.activeProfile, provider: submitted.provider, baseUrl: submitted.baseUrl, model: submitted.model, apiKey: submitted.apiKey }))
+        assertSaved(await saveSettingsProfile({ profileId: submitted.activeProfile, provider: submitted.provider, baseUrl: submitted.baseUrl, model: submitted.model, apiKey: submitted.apiKey }))
       }
       // Edits made while the profile save was pending must remain visible.
       if (session.getState().draft !== submitted) return { notice: '原配置已处理；仍有新输入，请保存后再切换。' }
       const profile = submitted.modelProfiles?.find(item => item.id === profileId)
       return {
-        notice: '', refresh: 'settings',
+        notice: '', refresh: 'settings', useConfirmedSettings: changed,
         draft: { ...submitted, activeProfile: profileId, provider: profile?.provider ?? submitted.provider, baseUrl: profile?.baseUrl ?? '', model: profile?.model ?? '', apiKey: '', apiKeyPreview: profile?.apiKeyPreview ?? '' },
       }
     }, 'settings')
@@ -128,6 +136,7 @@ export function SettingsPage({
 
   async function saveToken() {
     session.connect(connected)
+    resetSettingsStore()
     saveDesktopApiToken(apiToken)
     setNotice(apiToken.trim() ? 'API token 已保存。' : 'API token 已清除。')
     await onRefresh().catch(() => {})
@@ -137,6 +146,7 @@ export function SettingsPage({
   async function clearToken() {
     setApiToken('')
     session.connect(connected)
+    resetSettingsStore()
     clearDesktopApiToken()
     setNotice('API token 已清除。')
     await onRefresh().catch(() => {})
@@ -155,7 +165,7 @@ export function SettingsPage({
   async function saveDraft() {
     const submitted = draft
     const saved = await session.run('save', async () => {
-      const result = await saveLocalSettings(submitted)
+      const result = await saveSettings(submitted)
       assertSaved(result)
       const restartMsg = result.restartRequired ? '；请重启 Archer API 使路径变更生效' : ''
       return { notice: `已保存 ${result.savedFields.length} 个字段到 archer.toml${restartMsg}。`, warning: Boolean(result.restartRequired), refresh: 'settings', savedDraft: submitted }
@@ -166,7 +176,7 @@ export function SettingsPage({
   async function testCurrentModelProfile() {
     const submitted = draft
     const saved = await session.run('test', async () => {
-      assertSaved(await saveLocalSettings(submitted))
+      assertSaved(await saveSettings(submitted))
       try {
         const result = await testLocalModelProfile(submitted)
         return { notice: result.ok ? `${result.profile} / ${result.provider} 测试通过：${result.model} · ${result.latencyMs}ms` : `设置已保存；测试失败：${result.message}`, warning: !result.ok, refresh: 'settings', savedDraft: submitted }

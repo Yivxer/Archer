@@ -937,7 +937,6 @@ export type ArcherAdapter = {
   proactive: ProactiveTouch
   periodReviews: Record<ReviewPeriod, PeriodReview>
   journalReview: JournalReview
-  settings: SettingsDraft
   configDoctor: ConfigDoctorResult
   toolApprovalAudit: ToolApprovalAuditResult
 }

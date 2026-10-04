@@ -9,13 +9,6 @@ import type {
   ExpertSettings,
   ExpertSwitchResult,
   ObsidianContextMode,
-  SettingsDraft,
-  ModelProfileTestResult,
-  SettingsSaveResult,
-  SettingsValidationResult,
-  ScheduledTask,
-  ScheduleListResult,
-  ScheduleMutationResult,
   ReviewPeriod,
   ToolApprovalResult,
   ToolEvent,
@@ -211,8 +204,7 @@ export async function loadLocalArcher(): Promise<ArcherAdapter> {
   const statusRaw = await getJson<ArcherAdapter['status']>('/status')
   const status: ArcherAdapter['status'] = { ...statusRaw, adapter: 'local' }
 
-  const [settings, experts, modes] = await Promise.all([
-    getJson<ArcherAdapter['settings']>('/settings'),
+  const [experts, modes] = await Promise.all([
     getJson<ArcherAdapter['experts']>('/experts'),
     getJson<ArcherAdapter['modes']>('/modes'),
   ])
@@ -292,7 +284,6 @@ export async function loadLocalArcher(): Promise<ArcherAdapter> {
     proactive,
     periodReviews,
     journalReview,
-    settings,
     configDoctor,
     toolApprovalAudit
   }
@@ -361,76 +352,6 @@ export async function fetchLocalExpertWorkbench(): Promise<{
     experts,
     status: { ...statusRaw, adapter: 'local' },
   }
-}
-
-export async function readLocalSettings(): Promise<SettingsDraft> {
-  return getJson<SettingsDraft>('/settings')
-}
-
-export async function validateLocalSettings(settings: SettingsDraft): Promise<SettingsValidationResult> {
-  return postJson<SettingsValidationResult>('/settings/validate', { settings })
-}
-
-export async function saveLocalSettings(settings: SettingsDraft): Promise<SettingsSaveResult> {
-  return postJson<SettingsSaveResult>('/settings/save', { settings })
-}
-
-export async function saveLocalProfileSettings(payload: {
-  profileId: 'lite' | 'pro' | 'max'
-  provider?: string
-  baseUrl?: string
-  model?: string
-  apiKey?: string
-}): Promise<{ ok: boolean; profileId?: string; error?: string; message?: string }> {
-  return postJson('/settings/profile/save', payload)
-}
-
-export async function switchLocalActiveProfile(profileId: 'lite' | 'pro' | 'max'): Promise<{ ok: boolean; profileId?: string; activeProfile?: string; error?: string; message?: string }> {
-  const result = await postJson<{ ok: boolean; profileId?: string; activeProfile?: string; error?: string; message?: string }>('/settings/profile/switch', { profileId })
-  if (!result.ok) return result
-  const settings = await getJson<ArcherAdapter['settings']>('/settings')
-  if (settings.activeProfile !== profileId) {
-    return {
-      ok: false,
-      profileId,
-      activeProfile: settings.activeProfile,
-      error: `模型切换未生效：当前仍是 ${settings.activeProfile}`,
-    }
-  }
-  return {
-    ...result,
-    profileId,
-    activeProfile: settings.activeProfile,
-  }
-}
-
-export async function testLocalModelProfile(settings: SettingsDraft): Promise<ModelProfileTestResult> {
-  return postJson<ModelProfileTestResult>('/settings/test-model', { settings })
-}
-
-export async function listSchedules(): Promise<ScheduleListResult> {
-  return getJson<ScheduleListResult>('/schedules')
-}
-
-export async function addSchedule(payload: {
-  skillName: string
-  interval: string
-  label?: string
-  catchup?: 'latest' | 'skip'
-}): Promise<ScheduleMutationResult> {
-  return postJson<ScheduleMutationResult>('/schedules', payload)
-}
-
-export async function removeSchedule(taskId: number): Promise<ScheduleMutationResult> {
-  return postJson<ScheduleMutationResult>(`/schedules/${taskId}/remove`, {})
-}
-
-export async function setScheduleEnabled(taskId: number, enabled: boolean): Promise<ScheduleMutationResult> {
-  return postJson<ScheduleMutationResult>(`/schedules/${taskId}/${enabled ? 'enable' : 'disable'}`, {})
-}
-
-export async function runSchedule(taskId: number): Promise<ScheduleMutationResult> {
-  return postJson<ScheduleMutationResult>(`/schedules/${taskId}/run`, {})
 }
 
 export async function submitToolApproval(

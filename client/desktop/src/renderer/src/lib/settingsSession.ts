@@ -1,6 +1,7 @@
 /** Page-scoped editing session; server reads never own an unsaved form. */
 import type { ScheduledTask, SettingsDraft } from '../types'
 import { createExternalStore } from './externalStore'
+import type { SettingsStoreState } from './settingsStore'
 
 const clean = (settings: SettingsDraft): SettingsDraft => ({ ...settings, apiKey: '' })
 const message = (error: unknown): string => error instanceof Error ? error.message : String(error)
@@ -22,11 +23,13 @@ type ActionResult = {
   notice: string
   warning?: boolean
   refresh?: 'settings' | 'schedules'
+  useConfirmedSettings?: boolean
   savedDraft?: SettingsDraft
   draft?: SettingsDraft
 }
 interface SettingsReaders {
   settings: () => Promise<SettingsDraft>
+  savedSettings?: () => Promise<SettingsDraft>
   schedules: () => Promise<{ ok: boolean; tasks: ScheduledTask[] }>
 }
 
@@ -42,12 +45,12 @@ export function createSettingsSession(initial: SettingsDraft, readers: SettingsR
   let schedulesRead = 0
   const patch = (values: Partial<ReturnType<typeof store.getState>>): void => store.setState(s => ({ ...s, ...values }))
 
-  async function readSettings(savedDraft?: SettingsDraft): Promise<boolean> {
+  async function readSettings(savedDraft?: SettingsDraft, confirmed = false): Promise<boolean> {
     if (!store.getState().connected) return false
     const id = ++settingsRead
     patch({ settingsLoading: true, settingsError: '' })
     try {
-      const incoming = await readers.settings()
+      const incoming = await (confirmed && readers.savedSettings ? readers.savedSettings() : readers.settings())
       if (id !== settingsRead) return false
       store.setState(s => ({ ...s, draft: rebaseSettings(s.draft, savedDraft ?? s.baseline, incoming), baseline: clean(incoming), settingsReady: true }))
       return true
@@ -97,7 +100,7 @@ export function createSettingsSession(initial: SettingsDraft, readers: SettingsR
       if (result.savedDraft) {
         store.setState(s => ({ ...s, baseline: clean(result.savedDraft!), draft: { ...s.draft, apiKey: s.draft.apiKey === result.savedDraft!.apiKey ? '' : s.draft.apiKey } }))
       }
-      if (result.refresh === 'settings') await readSettings(result.savedDraft ? clean(result.savedDraft) : undefined)
+      if (result.refresh === 'settings') await readSettings(result.savedDraft ? clean(result.savedDraft) : undefined, Boolean(result.savedDraft || result.useConfirmedSettings))
       if (result.refresh === 'schedules') await readSchedules()
       return generation === epoch
     } catch (error) {
@@ -110,6 +113,15 @@ export function createSettingsSession(initial: SettingsDraft, readers: SettingsR
 
   return {
     ...store, connect, run,
+    syncServer: (server: SettingsStoreState): void => {
+      const state = store.getState()
+      if (!state.connected || state.busy) return
+      if (server.loadState === 'ready' && server.settings) {
+        patch({ draft: rebaseSettings(state.draft, state.baseline, server.settings), baseline: clean(server.settings), settingsReady: true, settingsLoading: false, settingsError: '' })
+      } else {
+        patch({ settingsReady: false, settingsLoading: server.loadState === 'loading', settingsError: server.error })
+      }
+    },
     refreshSettings: (): Promise<boolean> => store.getState().busy ? Promise.resolve(false) : readSettings(),
     refreshSchedules: (): Promise<boolean> => store.getState().busy ? Promise.resolve(false) : readSchedules(),
     updateDraft: (key: keyof SettingsDraft, value: string): void => store.setState(s => ({ ...s, draft: { ...s.draft, [key]: value }, notice: '' })),

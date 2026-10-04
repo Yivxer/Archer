@@ -1,3 +1,4 @@
+import { switchLocalActiveProfile } from '../settingsAdapter'
 import { fetchInitiativeReview, claimInitiativeReviewCandidate, setInitiativeDeliveryOptIn, submitInitiativeFeedback, setInitiativePresence } from '../initiativeAdapter'
 import { spawnChildJobs } from '../jobAdapter'
 import { fetchMemoryItems } from '../memoryAdapter'
@@ -27,7 +28,6 @@ import {
   saveDesktopApiToken,
   StreamIdleTimeoutError,
   streamLocalChat,
-  switchLocalActiveProfile,
 } from '../localArcher'
 
 describe('localArcher token management', () => {
@@ -133,46 +133,19 @@ describe('localArcher token management', () => {
     expect(String(fetchSpy.mock.calls[0][0])).toContain('/exports/portable')
   })
 
-  it('confirms active profile by reading settings after switching models', async () => {
+  it('returns profile switch receipts without inventing a settings snapshot', async () => {
     saveDesktopApiToken('test-token')
-    const fetchSpy = vi.fn(async (url: string, init?: RequestInit) => {
-      if (String(url).includes('/settings/profile/switch')) {
-        expect(JSON.parse(String(init?.body))).toEqual({ profileId: 'max' })
-        return new Response(JSON.stringify({ ok: true, profileId: 'max' }), { status: 200 })
-      }
-      if (String(url).includes('/settings')) {
-        return new Response(JSON.stringify({ activeProfile: 'max' }), { status: 200 })
-      }
-      return new Response(JSON.stringify({ ok: true }), { status: 200 })
-    })
+    const fetchSpy = vi.fn(async () => new Response(JSON.stringify({ ok: true, profileId: 'max' }), { status: 200 }))
     vi.stubGlobal('fetch', fetchSpy)
-
-    await expect(switchLocalActiveProfile('max')).resolves.toMatchObject({
-      ok: true,
-      profileId: 'max',
-      activeProfile: 'max',
-    })
+    await expect(switchLocalActiveProfile('max')).resolves.toMatchObject({ ok: true, profileId: 'max' })
+    expect(fetchSpy).toHaveBeenCalledOnce()
     expect(fetchSpy).toHaveBeenCalledWith(expect.stringContaining('/settings/profile/switch'), expect.any(Object))
-    expect(fetchSpy).toHaveBeenCalledWith(expect.stringContaining('/settings'), expect.any(Object))
   })
 
-  it('reports a model switch failure when settings read-back does not match', async () => {
+  it('keeps rejected profile switch receipts available to the store', async () => {
     saveDesktopApiToken('test-token')
-    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
-      if (String(url).includes('/settings/profile/switch')) {
-        return new Response(JSON.stringify({ ok: true, profileId: 'max' }), { status: 200 })
-      }
-      if (String(url).includes('/settings')) {
-        return new Response(JSON.stringify({ activeProfile: 'pro' }), { status: 200 })
-      }
-      return new Response(JSON.stringify({ ok: true }), { status: 200 })
-    }))
-
-    await expect(switchLocalActiveProfile('max')).resolves.toMatchObject({
-      ok: false,
-      profileId: 'max',
-      activeProfile: 'pro',
-    })
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: false, error: 'rejected' }), { status: 200 })))
+    await expect(switchLocalActiveProfile('max')).resolves.toMatchObject({ ok: false, error: 'rejected' })
   })
 
   it('submits initiative feedback and presence controls to the local API', async () => {
@@ -651,6 +624,8 @@ describe('localArcher token management', () => {
     vi.stubGlobal('fetch', fetchSpy)
 
     const data = await loadLocalArcher()
+    expect(data).not.toHaveProperty('settings')
+    expect(vi.mocked(fetch).mock.calls.some(call => String(call[0]).endsWith('/settings'))).toBe(false)
     expect(data).not.toHaveProperty('memory')
     expect(fetchSpy.mock.calls.map(([url]) => new URL(String(url)).pathname)).not.toContain('/memory')
     expect(data).not.toHaveProperty('soulProfile')

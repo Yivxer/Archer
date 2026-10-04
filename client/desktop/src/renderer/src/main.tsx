@@ -1,4 +1,6 @@
 import React from 'react'
+import { loadSettings, resetSettingsStore, useSettingsStore } from './lib/settingsStore'
+import { mockSettings } from './adapters/mockSettings'
 import ReactDOM from 'react-dom/client'
 import {
   Brain,
@@ -106,6 +108,10 @@ function App() {
 
   // L1.2.5：第 1 层连接状态机（5s 心跳 + 30s doctor + 1s tick）
   const connection = useConnectionState()
+  React.useEffect(() => {
+    if (connection.state === 'ready' || connection.state === 'degraded') void loadSettings().catch(() => {})
+    else resetSettingsStore()
+  }, [connection.state])
 
   const sessionSelectionRef = React.useRef(0)
 
@@ -251,6 +257,7 @@ function App() {
       setApiState(result.state)
       setApiReason(result.reason || '')
       if (result.state === 'connected') {
+        void loadSettings().catch(() => {})
         void loadAllSoul()
         void loadAllMemory({ force: true })
         void refreshConversations()
@@ -294,12 +301,8 @@ function App() {
         ...snapshot.status,
         adapter: 'local',
       },
-      settings: {
-        ...current.settings,
-        activeExpert: snapshot.experts.current,
-        experts: snapshot.experts.experts,
-      },
     }))
+    void loadSettings({ force: true }).catch(() => {})
   }
 
   function handleInitiativeEvent(event: InitiativeEvent) {
@@ -751,7 +754,8 @@ function ProfilePanel({
     data.experts?.experts ?? [],
     data.status.expertLabel,
   )
-  const modelText = modelProfileShortLabel(data.settings.activeProfile || data.status.modelProfile)
+  const settings = useSettingsStore(state => state.settings)
+  const modelText = data.status.adapter === 'local' && !settings ? '读取配置中' : modelProfileShortLabel((data.status.adapter === 'local' ? settings : mockSettings)?.activeProfile)
   const themeLabel = theme === 'dark' ? '深色' : '亮色'
 
   function openSettings(tab: 'model' | 'context' | 'local' | 'appearance' | 'schedules' | 'diagnostics' = 'model') {

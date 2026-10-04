@@ -1,8 +1,10 @@
+import React from 'react'
+import { useSettingsStore, switchSettingsProfile, loadSettings } from '../lib/settingsStore'
+import { mockSettings } from '../adapters/mockSettings'
 import { appendSessionMessages, saveSessionMessages } from '../lib/sessionStore'
 import { useThreadStore } from '../lib/threadStore'
-import React from 'react'
 import { ArrowUp, Check, ChevronDown, Copy, CornerDownLeft, Crop, Download, Edit3, Loader2, Mic, Monitor, Paperclip, RotateCcw, X } from 'lucide-react'
-import { ensureLocalConnection, streamLocalChat, submitToolApprovalEvent, switchLocalExpert, switchLocalActiveProfile } from '../adapters/localArcher'
+import { ensureLocalConnection, streamLocalChat, submitToolApprovalEvent, switchLocalExpert } from '../adapters/localArcher'
 import { pickChatGreeting } from '../lib/chatGreetings'
 import { extendedConversationModes, modelProfileShortLabel, modelSwitchNotice } from '../lib/conversationPersona'
 import { canDeploy, isInputDisabled, isSendDisabled, type ConnectionState } from '../lib/connectionState'
@@ -143,7 +145,10 @@ export function ChatPage({
   const [activeComposerMenu, setActiveComposerMenu] = React.useState<'attach' | 'screenshot' | 'model' | 'persona' | null>(null)
   const [captureSources, setCaptureSources] = React.useState<Array<{ id: string; name: string; kind: 'screen' | 'window'; thumbnailEmpty?: boolean; screenStatus?: string }>>([])
   const [captureSourcesState, setCaptureSourcesState] = React.useState<'idle' | 'loading' | 'error'>('idle')
-  const activeModelProfile = data.settings.activeProfile || 'lite'
+  const settingsState = useSettingsStore(state => state)
+  const settings = data.status.adapter === 'local' ? settingsState.settings : mockSettings
+  const settingsReady = data.status.adapter !== 'local' || settingsState.loadState === 'ready'
+  const activeModelProfile = settings?.activeProfile
   const [switchingModel, setSwitchingModel] = React.useState<'lite' | 'pro' | 'max' | null>(null)
   const [expertSwitching, setExpertSwitching] = React.useState(false)
   const workspaceJobs = useJobStore((state) => state.jobs)
@@ -160,7 +165,7 @@ export function ChatPage({
   const expertOptions = data.experts?.experts ?? []
   const activeExpert = expertOptions.find((option) => option.id === activeExpertId)
   const homeStarters = (activeExpert?.starters?.length ? activeExpert.starters : DEFAULT_STARTERS).slice(0, 4)
-  const modelProfiles = data.settings.modelProfiles ?? []
+  const modelProfiles = settings?.modelProfiles ?? []
   const fullConversationModes = extendedConversationModes(data.modes.modes ?? [])
   const threads = useThreadStore((state) => state.items)
   const activeThread = React.useMemo(() => (
@@ -1295,7 +1300,7 @@ export function ChatPage({
   }
 
   async function chooseChatModelProfile(profileId: 'lite' | 'pro' | 'max') {
-    if (switchingModel || profileId === activeModelProfile) {
+    if (switchingModel || !settingsReady || settingsState.busy || profileId === activeModelProfile) {
       setActiveComposerMenu(null)
       return
     }
@@ -1308,13 +1313,8 @@ export function ChatPage({
       return
     }
     try {
-      const result = await switchLocalActiveProfile(profileId)
-      if (!result.ok) {
-        setSwitchingModel(null)
-        setChatError(`模型切换失败：${result.error || '配置未保存'}`)
-        return
-      }
-      const notice = modelSwitchNotice(previousModel, profileId)
+      await switchSettingsProfile(profileId)
+      const notice = modelSwitchNotice(previousModel ?? 'lite', profileId)
       setMessages((current) => [
         ...current,
         { id: current.length + 1, role: 'system', text: notice.text, detail: notice.detail },
@@ -1469,7 +1469,7 @@ export function ChatPage({
                 ? '接着这段聊…'
                 : '继续说…'
 
-  const modelButtonLabel = modelProfileShortLabel(activeModelProfile)
+  const modelButtonLabel = activeModelProfile ? modelProfileShortLabel(activeModelProfile) : '读取配置中'
   const activeExpertTitle = expertOptions.find((item) => item.id === activeExpertId)?.label
     || data.status.expertLabel
     || '基础 Archer'
@@ -1678,7 +1678,7 @@ export function ChatPage({
               className={`composer-tool-btn composer-model-btn has-label${activeComposerMenu === 'model' ? ' active' : ''}`}
               type="button"
               onClick={() => setActiveComposerMenu((current) => (current === 'model' ? null : 'model'))}
-              disabled={Boolean(switchingModel)}
+              disabled={Boolean(switchingModel) || settingsState.busy}
               title={`模型：${modelButtonLabel}`}
               aria-label={`模型：${modelButtonLabel}`}
             >
@@ -1686,12 +1686,17 @@ export function ChatPage({
             </button>
             {activeComposerMenu === 'model' && (
               <div className="composer-popover choice-menu">
+                {data.status.adapter === 'local' && settingsState.loadState === 'error' && (
+                  <button type="button" onClick={() => void loadSettings({ force: true }).catch(() => {})}>
+                    <span><strong>重试读取配置</strong><em>{settingsState.error}</em></span>
+                  </button>
+                )}
                 {modelProfiles.map((option) => (
                   <button
                     className={activeModelProfile === option.id ? 'active' : ''}
                     type="button"
                     key={option.id}
-                    disabled={Boolean(switchingModel) || activeModelProfile === option.id}
+                    disabled={Boolean(switchingModel) || settingsState.busy || !settingsReady || activeModelProfile === option.id}
                     onClick={() => {
                       void chooseChatModelProfile(option.id)
                     }}

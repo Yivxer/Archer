@@ -1,9 +1,9 @@
 import { describe, it, expect, vi } from 'vitest'
 import { createSettingsSession } from '../settingsSession'
-import { mockArcher } from '../../adapters/mockArcher'
+import { mockSettings } from '../../adapters/mockSettings'
 import type { ScheduledTask, SettingsDraft } from '../../types'
 
-const initial = { ...mockArcher.settings, apiKey: '', model: 'original' }
+const initial = { ...mockSettings, apiKey: '', model: 'original' }
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(r => { resolve = r }); return { promise, resolve } }
 async function fixture() {
   const readers = { settings: vi.fn().mockResolvedValue(initial), schedules: vi.fn().mockResolvedValue({ ok: true, tasks: [] }) }
