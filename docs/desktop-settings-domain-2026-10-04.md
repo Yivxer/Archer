@@ -1,6 +1,6 @@
 # Settings 领域读取与写入收口
 
-2026-10-04，**build verified**。源码提交 `7f91eb1`。本批未修改版本号、未打包、未安装；`/Applications/Archer.app` 仍为此前 1.0.35，仅包含前一批页内同步修复，不包含本批领域拆分。
+2026-10-04，**installed，1.0.36**。实现提交 `7f91eb1`，发布提交 `8b46973`；干净发布 worktree 构建，本批集中安装一次。
 
 ## 行为与边界
 
@@ -21,4 +21,19 @@
 
 证据：`work/settings-domain-{focused-final,desktop-final,build-final,browser-final,authority-final}.log`、`work/settings-domain-authority.json`；组件入口 `work/settings-check/{fixture.tsx,check.mjs}`。没有真实模型调用或生产资料写入。
 
-当前最强状态为 **build verified**；没有本批 native Electron dev 验收、打包/安装或安装窗口真实保存验收。前一批 1.0.35 的 installed 证据不能替代本批安装验收。成长计划保留逐页拆分父项待办，本批到此停止。
+## 发布与安装版验收
+
+- 1.0.36 TypeScript/build、arm64 DMG、deep-strict ad-hoc 签名通过，本地包未公证。仅安装一次；安装版 app.asar 与构建包哈希一致。沿用本批已通过的 672 Desktop、41 聚焦、18 隔离边界和 8/8 合成组件结果，没有重复无关全量。
+- 停止确切旧主进程前检查无活跃后台任务，确认旧监听退出后重新取得当时生产资料/SQLite 一致性快照、桌面状态、源码归档及旧 app。没有使用前一批快照回滚。
+- 安装版本机检查 9/9；实际原生窗口 Settings 检查 7/7：一次合成 GET 失败禁写、实际 GET 重试保留临时草稿并恢复可写、恢复确认配置、读取真实定时列表、切页签保留恢复结果、renderer 错误 0、写请求/模型请求尝试 0。只读取数值/布尔做验证，不导出私人 DOM、响应正文或截图；临时草稿已恢复，没有提交真实设置或运行定时任务。真实保存行为仍由 8/8 合成组件和领域测试证明。
+- 验收过程中观察到个人中心鼠标点击被 chat-layout 遮挡，键盘 Enter 能进入设置；未定位成因、未证明旧版也存在，记录为后续体验问题。本批不改布局。脚本另修正了连接提示文案及回读完成等待时机，不改产品源码、未重装。
+- 临时调试启动已结束，正常启动 ready，调试端口关闭；仅一个主进程与 8765 API，后端 cwd 主仓库。首次正常重开未留下运行进程，确认旧进程退出后重开成功，疑似退出/重开时机竞态，未作为产品修复宣称。
+- 安装前后 51 张普通 DB 表完全一致；128 个原有检查文件无新增，配置/会话/线程及 4 个无关 dirty 文件不变。仅 schedules.json 顶层 updatedAt 和 4 份日/周自动导出改变，任务数组不变，保留自然启动导出。
+- Runtime 未切权，候选反馈未代填，真实跨会话/回答质量和主动投递仍待实际使用与审查。接下来进入日常使用观察，优先真实问题的小修复，不追加本批功能或重构。
+
+受保护证据与当前恢复资料：`/Users/Yivxer/Library/Application Support/Archer Desktop Checks/20261004-settings-domain-77cep7og`（0700）。
+
+- app.asar SHA-256：`cffe128d9af3cf1fe8821045fcc338e088e4eccafe42905ef6b8c5bd4830abb5`
+- DMG SHA-256：`a6ee10eb3a0d88fe0789295404fa66c9dcd4becaf65f7341fc2054a8e11ae537`
+- 包：`/Users/Yivxer/.codex/worktrees/foundation-release/Archer/client/desktop/release/Archer-1.0.36-arm64.dmg`
+- 结果：`installed.json`、`native-settings.json`、`live-smoke.log`、`comparison.json`；当时快照、旧 app 与源码归档均保留在同目录。
