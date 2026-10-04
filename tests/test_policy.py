@@ -8,6 +8,8 @@ import tempfile
 import types
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 
@@ -763,3 +765,15 @@ if __name__ == "__main__":
 
     print(f"\n{passed} passed, {failed} failed")
     sys.exit(1 if failed else 0)
+
+
+@pytest.mark.parametrize(("code", "expected"), [
+    (r"\x65\x76\x61\x6c('1+1')", ["eval"]),
+    (r"\u0065\u0076\u0061\u006c('1+1')", ["eval"]),
+    (r"\145\166\141\154('1+1')", ["eval"]),
+    ("eval(value)\neval(other)\nos.system('pwd')", ["eval", "os.system"]),
+    ("eval(unfinished", ["eval("]),
+    ("# eval(value)\nlabel = 'os.system(value)'", []),
+])
+def test_source_scan_preserves_encoded_fallback_and_order(code: str, expected: list[str]) -> None:
+    assert scan_code_for_dangers(code) == expected

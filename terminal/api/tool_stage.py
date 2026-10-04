@@ -1,4 +1,9 @@
-"""Tool selection, approval messaging, and execution receipt helpers."""
+"""Approval transformations and execution helpers using injected callbacks.
+
+This module owns no persistent state or approval dispatcher. Callers provide
+cache, audit, executor and follow-up ports. See
+docs/architecture-maintenance-2026-10-04.md for the ownership boundaries.
+"""
 
 from __future__ import annotations
 

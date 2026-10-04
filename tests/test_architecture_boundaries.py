@@ -11,6 +11,9 @@ from core.policy import Decision, check
 
 ROOT = Path(__file__).resolve().parents[1]
 GOD_FILE_LINE_BASELINE = {
+    # 2026-10-04: code scanning extracted; exact baselines, no growth buffer.
+    "core/policy.py": 730,
+    "core/policy_code_scan.py": 188,
     # Part 10 Wave 4 收尾后收紧（2026-07-17）+ P1 store 拆分（2026-07-18）：
     # 基线从拆分前高位降到当前实际行数 +10% buffer，让后续回归被更早发现。
     # store.py 从 1369 降到 786（拆出 store_quality / store_pending / store_themes /
@@ -680,3 +683,21 @@ def test_tools_facade_does_not_redefine_chat_turn_stages():
     assert "def iter_hugo_turn_events(" not in source
     assert "def iter_chat_reply_events(" not in source
     assert "def iter_post_reply_draft_events(" not in source
+
+
+@pytest.mark.contract
+def test_policy_code_scanning_and_tool_stage_do_not_own_persistent_state() -> None:
+    # These helpers must use arguments/callbacks; persistence belongs to callers.
+    for relative_path in ("core/policy_code_scan.py", "terminal/api/tool_stage.py"):
+        tree = ast.parse((ROOT / relative_path).read_text(encoding="utf-8"))
+        modules = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                modules.extend(alias.name for alias in node.names)
+            elif isinstance(node, ast.ImportFrom):
+                assert node.level == 0, relative_path
+                modules.append(node.module or "")
+        assert not any(
+            module.split(".")[0] in {"core", "memory", "infrastructure", "terminal", "sqlite3"}
+            for module in modules
+        ), relative_path

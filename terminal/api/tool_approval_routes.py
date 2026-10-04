@@ -3,6 +3,11 @@
 Extracted from ``terminal/api/_routes.py`` so that file can shrink back to a
 pure compatibility dispatcher. The nine historic private names are
 re-exported from ``_routes`` for callers that still import them there.
+
+Owns approval orchestration; tool_stage uses injected callbacks and has no
+independent store. Durable sending state belongs to infrastructure.outbox;
+Runtime lifecycle is finalized through obsidian_runtime_bridge. See
+docs/architecture-maintenance-2026-10-04.md for the call and state boundaries.
 """
 
 from __future__ import annotations
