@@ -219,6 +219,16 @@ def get_by_ids(ids: list[int]) -> dict[int, dict]:
     return result
 
 
+def _fts_phrase(keyword: str) -> str:
+    """Bind user text as one FTS5 phrase.
+
+    Parentheses, quotes, and words like AND/OR are literal in retrieval
+    questions. Passing them through unquoted makes MATCH raise, and the
+    previous fallback scanned every memory with LIKE.
+    """
+    return '"' + keyword.replace('"', '""') + '"'
+
+
 def search(keyword: str, limit: int = 10, block_type: str | None = None,
            label: str | None = None) -> list[dict]:
     conn = sqlite3.connect(DB_PATH)
@@ -241,7 +251,7 @@ def search(keyword: str, limit: int = 10, block_type: str | None = None,
             f"FROM memories_fts f JOIN memories m ON f.rowid = m.id "
             f"WHERE memories_fts MATCH ? AND m.status = 'active'{where_extra} "
             f"ORDER BY m.importance DESC, rank LIMIT ?",
-            (keyword, *filter_args, limit),
+            (_fts_phrase(keyword), *filter_args, limit),
         ).fetchall()
     except Exception:
         like = f"%{keyword}%"
