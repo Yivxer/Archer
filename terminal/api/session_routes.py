@@ -163,6 +163,13 @@ def save_session(payload: dict) -> dict:
 
     messages = _clean_session_messages(payload.get("messages"))
     isolated_sessions, isolated_threads = _isolated_journey_paths(payload)
+    # A supplied threadId must already exist. Dropping it and creating a thread
+    # hides a bad id and leaves an orphan mapping. Omitted threadId still creates.
+    requested_thread_id = str(payload.get("threadId", "") or "").strip()
+    if requested_thread_id and not re.fullmatch(r"[A-Za-z0-9_-]{1,96}", requested_thread_id):
+        raise ValueError("invalid threadId")
+    if requested_thread_id and get_thread(requested_thread_id, isolated_threads) is None:
+        raise FileNotFoundError(f"thread not found: {requested_thread_id}")
     sessions_dir = isolated_sessions or Path(SESSIONS_DIR)
     sessions_dir.mkdir(parents=True, exist_ok=True)
     # Use the timestamp-derived id as the lock key: callers within the same
@@ -176,16 +183,17 @@ def save_session(payload: dict) -> dict:
             path = sessions_dir / f"{session_id}_{counter}.json"
             counter += 1
         meta = session_meta_from_payload(payload)
-        thread_id = str(meta.get("threadId", "") or "")
-        if thread_id and not get_thread(thread_id, isolated_threads):
-            thread_id = ""
-            meta.pop("threadId", None)
-        if not thread_id:
+        if requested_thread_id:
+            linked = add_session_to_thread(
+                requested_thread_id, path.stem, messages, isolated_threads
+            )
+            if linked is None:
+                raise FileNotFoundError(f"thread not found: {requested_thread_id}")
+            thread_id = requested_thread_id
+        else:
             thread = create_thread(messages, path.stem, isolated_threads)
             thread_id = thread["id"]
             meta["threadId"] = thread_id
-        else:
-            add_session_to_thread(thread_id, path.stem, messages, isolated_threads)
         path.write_text(dump_session_file(messages, token_usage=session_usage_for_file(), meta=meta or None), encoding="utf-8")
         return {"id": path.stem, "path": str(path), "messages": len(messages), "threadId": thread_id}
 
@@ -265,6 +273,28 @@ def create_thread(payload: dict) -> dict:
     thread = create(_clean_session_messages(payload.get("messages")), path=threads_path)
     if isinstance(payload.get("title"), str) and payload["title"].strip():
         return update_thread(thread["id"], {"title": payload["title"]}, threads_path) or thread
+    return thread
+
+
+def ensure_thread_for_continue(thread_id: str, payload: dict) -> dict:
+    """Upsert one missing topic so the existing continue save can name that id.
+
+    Does not read session files or accept message bodies. A known id is returned
+    unchanged. A malformed id is rejected before any index write.
+    """
+    from core.thread_store import ensure_thread
+    from terminal.api._config import _valid_session_id
+
+    raw_id = str(thread_id or "").strip()
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,96}", raw_id):
+        raise ValueError("invalid threadId")
+    title = payload.get("title") if isinstance(payload.get("title"), str) else ""
+    session_id = str(payload.get("sessionId", "") or "").strip()
+    if session_id and not _valid_session_id(session_id):
+        session_id = ""
+    thread = ensure_thread(raw_id, title=title, session_id=session_id or None)
+    if thread is None:
+        raise ValueError("invalid threadId")
     return thread
 
 

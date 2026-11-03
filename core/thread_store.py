@@ -42,6 +42,42 @@ def get_thread(thread_id: str, path: Path | None = None) -> dict[str, Any] | Non
     return next((thread for thread in read_threads(path) if thread["id"] == thread_id), None)
 
 
+def ensure_thread(
+    thread_id: str,
+    *,
+    title: str = "",
+    session_id: str | None = None,
+    path: Path | None = None,
+) -> dict[str, Any] | None:
+    """Index one well-formed id that is missing, and leave a known id unchanged.
+
+    The record is enough for get_thread and a later known-id session save.
+    It does not read or copy session messages.
+    """
+    if not valid_thread_id(thread_id):
+        return None
+    threads = read_threads(path)
+    existing = next((thread for thread in threads if thread["id"] == thread_id), None)
+    if existing is not None:
+        return existing
+    clean_session = str(session_id or "").strip()
+    now = now_iso()
+    threads.insert(0, {
+        "id": thread_id,
+        "title": compact_text(title, 80) or "未命名话题",
+        "summary": "",
+        "createdAt": now,
+        "updatedAt": now,
+        "sessionIds": [clean_session] if clean_session else [],
+        "archived": False,
+    })
+    saved = write_threads(threads, path)
+    stored = next(item for item in saved if item["id"] == thread_id)
+    if _uses_context_db(path):
+        return _with_context_state(stored)
+    return stored
+
+
 def create_thread(messages: list[dict], session_id: str | None = None, path: Path | None = None) -> dict[str, Any]:
     now = now_iso()
     threads = read_threads(path)

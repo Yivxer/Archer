@@ -639,7 +639,7 @@ SoulPage 的 hypotheses、journalReview、periodReviews 仍是其他领域传入
 - `mergeSessionItems` 仅用于提交已经读取的服务端列表和合成测试，不再是旧 adapter 注入入口。
 - 侧栏、ProjectsPage、ReviewPage 直接订阅 sessionStore；ChatPage 保存走 store action。活动聊天消息仍保留组件内状态，不把临时消息推为线程权威摘要。
 
-Review 的“在新会话继续这个话题”沿用现有 POST `/sessions` 的 `threadId` 元数据。选择时不写会话，首次实际发送后生成同线程的新 session；普通“恢复”仍续写原 session。没有复制旧对话、合成用户决定或自动标记 J8 样本通过。
+Review 的“在新会话继续这个话题”仍沿用 `continuationThreadId`，并在首次实际发送时 POST `/sessions` 带上该 `threadId`。选择时不写新会话。若会话上的 `threadId` 格式合法（`[A-Za-z0-9_-]{1,96}`）但还不在 `GET /threads` 索引里，点击时先 POST `/threads/{id}/ensure` 写入一条最小话题记录（id、已展示的标题、来源 sessionId；摘要为空，不读会话正文），再走原来的继续流程。索引里已有的话题不调用 ensure，服务端对已知 id 也不改写。非法 threadId 返回 400 `validation_error` / `invalid threadId`，不写索引，按钮也不出现。这不是批量补齐孤儿话题。普通“恢复”仍续写原 session。没有复制旧对话、合成用户决定或自动标记 J8 样本通过。
 
 ### jobStore（L3.5，后台任务投影）
 
@@ -731,6 +731,7 @@ type ThreadStoreState = {
 | `mergeThreadItems(items)` | （提交已确认的服务端列表） | 替换 items + 保留 currentThreadId（若仍存在）+ 标记 ready |
 | `setCurrentThread(id\|null)` | （无） | 设置/清空当前活跃 thread |
 | `createThread(messages, title?)` | POST /threads | upsert items + 设为 current |
+| `ensureThreadForContinue(id, {title?, sessionId?})` | POST /threads/{id}/ensure | 仅当继续时索引缺失：写入最小记录并刷新列表，不设为 current；已知 id 不改写 |
 | `updateThread(id, patch)` | POST /threads/{id} | upsert items（持久化 summary/title/projectId/archived） |
 | `linkSessionToThread(threadId, sessionId)` | POST /threads/{id}/sessions | upsert items（thread.sessionIds 追加） |
 | `getCurrentThread()` | （selector） | 返回当前活跃 thread 或 null |
