@@ -4,6 +4,7 @@ import {
   listLocalThreads,
   addLocalSessionToThread,
   createLocalThread,
+  ensureLocalThread,
   updateLocalThread,
 } from '../adapters/conversationAdapter'
 import type { ChatRequestMessage, ConversationThread } from '../types'
@@ -92,6 +93,39 @@ export function mergeThreadItems(items: ConversationThread[]): void {
  */
 export function setCurrentThread(threadId: string | null): void {
   store.setState((s) => ({ ...s, currentThreadId: threadId }))
+}
+
+/**
+ * 继续话题前补一条索引记录：id 已存在则服务端不改写。
+ * 只上传标题和来源 sessionId，不上传会话正文。
+ * 不把该话题设为 current；继续流程仍由 continuationThreadId 接手。
+ */
+export async function ensureThreadForContinue(
+  threadId: string,
+  meta: { title?: string; sessionId?: string } = {},
+): Promise<ConversationThread | null> {
+  const epoch = resetGeneration
+  try {
+    const thread = await ensureLocalThread(threadId, meta)
+    if (epoch !== resetGeneration) return null
+    loadGeneration += 1
+    pendingLoad = null
+    store.setState((s) => ({
+      ...s,
+      items: upsertThread(s, thread),
+      loadState: 'ready',
+      error: '',
+    }))
+    await loadThreadList({ force: true })
+    return getThreadStoreState().items.find((item) => item.id === thread.id) ?? thread
+  } catch (err) {
+    if (epoch !== resetGeneration) return null
+    store.setState((s) => ({
+      ...s,
+      error: err instanceof Error ? err.message : String(err),
+    }))
+    throw err
+  }
 }
 
 /**

@@ -1,4 +1,5 @@
-import { useThreadStore } from '../lib/threadStore'
+import { canContinueTopic, continueTopicFromReview } from '../lib/continueTopic'
+import { ensureThreadForContinue, useThreadStore } from '../lib/threadStore'
 import React from 'react'
 import { Brain, ChevronRight, History, Layers, Search } from 'lucide-react'
 import { EmptyDetail, SearchBox } from '../components/common'
@@ -52,6 +53,8 @@ export function ReviewPage({
   const memoryError = useMemoryStore((state) => state.error)
   const memoryBusyIds = useMemoryStore((state) => state.busyIds)
   const [memoryNotice, setMemoryNotice] = React.useState('')
+  const [continuing, setContinuing] = React.useState(false)
+  const [continueError, setContinueError] = React.useState('')
   const contentSearching = searchState === 'searching'
   const expertOptions = data.experts?.experts ?? []
   const pendingMemoryCount = memoryItems.filter((item) => item.status === 'pending').length
@@ -77,6 +80,10 @@ export function ReviewPage({
     }
     void loadSessionDetail(selectedId)
   }, [selectedId, connected])
+
+  React.useEffect(() => {
+    setContinueError('')
+  }, [selectedId])
 
   const now = new Date()
   const todayStr = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`
@@ -166,6 +173,29 @@ export function ReviewPage({
   ].filter((review) => review.highlights.length || review.growth_markers.length || review.suggested_questions.length)
   const soulProfile = useSoulStore((state) => state.profile)
   const soulSections = soulProfile?.sections.filter((section) => section.items.length).slice(0, 4) ?? []
+
+  async function continueSelectedTopic() {
+    const session = selected
+    const threadId = session?.threadId
+    if (!session || !onContinueThread || !canContinueTopic(threadId)) return
+    if (!connected || threadLoadState !== 'ready' || continuing) return
+    setContinueError('')
+    setContinuing(true)
+    try {
+      await continueTopicFromReview({
+        threadId,
+        title: session.title,
+        sessionId: session.id,
+        indexed: threads.some((thread) => thread.id === threadId),
+        ensure: (id, meta) => ensureThreadForContinue(id, meta),
+        continueThread: onContinueThread,
+      })
+    } catch (error) {
+      setContinueError(error instanceof Error ? error.message : '话题暂时无法继续')
+    } finally {
+      setContinuing(false)
+    }
+  }
 
   const grouped: { label: string; sessions: typeof sessions }[] = []
   for (const session of visibleSessions) {
@@ -278,11 +308,12 @@ export function ReviewPage({
             </button>
           </div>
           <div className="review-shortcuts" aria-label="复盘相关入口">
-            {onContinueThread && selected.threadId && threads.some((thread) => thread.id === selected.threadId) && (
-              <button type="button" className="quiet-button" disabled={!connected || threadLoadState !== 'ready'} onClick={() => onContinueThread(selected.threadId!)}>
+            {onContinueThread && canContinueTopic(selected.threadId) && (
+              <button type="button" className="quiet-button" disabled={!connected || threadLoadState !== 'ready' || continuing} onClick={() => void continueSelectedTopic()}>
                 在新会话继续这个话题
               </button>
             )}
+            {continueError && <p role="alert">{continueError}</p>}
             <button type="button" className="quiet-button" onClick={() => onNavigate('Memory')}>
               <Brain size={15} />
               记忆审阅{pendingMemoryCount ? ` · ${pendingMemoryCount} 待确认` : ''}
