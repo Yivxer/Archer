@@ -56,6 +56,16 @@ export async function createLocalThread(messages: ChatRequestMessage[], title?: 
   return postJson<ConversationThread>('/threads', { messages, title })
 }
 
+export async function ensureLocalThread(
+  threadId: string,
+  meta: { title?: string; sessionId?: string } = {},
+): Promise<ConversationThread> {
+  return postJson<ConversationThread>(`/threads/${encodeURIComponent(threadId)}/ensure`, {
+    ...(meta.title ? { title: meta.title } : {}),
+    ...(meta.sessionId ? { sessionId: meta.sessionId } : {}),
+  })
+}
+
 export async function updateLocalThread(
   threadId: string,
   patch: Partial<Pick<ConversationThread, 'title' | 'summary' | 'projectId' | 'archived'>>,

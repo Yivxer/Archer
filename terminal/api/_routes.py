@@ -81,6 +81,7 @@ from terminal.api.session_routes import (
     append_session as _append_session,
     create_thread as _create_thread,
     delete_session as _delete_session,
+    ensure_thread_for_continue as _ensure_thread_for_continue,
     save_session as _save_session,
     session_detail as _session_detail,
     session_meta_from_payload as _session_meta_from_payload,
@@ -538,6 +539,9 @@ def payload_post(path: str, payload: dict, runtime_context=None) -> tuple[int, d
         return 200, _save_session(payload)
     if path == "/threads":
         return 200, _create_thread(payload)
+    thread_ensure = re.fullmatch(r"/threads/([^/]+)/ensure", path)
+    if thread_ensure:
+        return 200, _ensure_thread_for_continue(thread_ensure.group(1), payload)
     thread_add_session = re.fullmatch(r"/threads/([^/]+)/sessions", path)
     if thread_add_session:
         return 200, _add_thread_session(thread_add_session.group(1), payload)

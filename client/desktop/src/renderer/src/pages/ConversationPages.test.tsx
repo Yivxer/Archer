@@ -16,6 +16,9 @@ function project() {
 function review(connected = true) {
   return renderToStaticMarkup(<ReviewPage data={mockArcher} connected={connected} onRefresh={async () => {}} onOpenSession={() => {}} onNavigate={() => {}} />)
 }
+function reviewContinue(connected = true) {
+  return renderToStaticMarkup(<ReviewPage data={mockArcher} connected={connected} onRefresh={async () => {}} onOpenSession={() => {}} onContinueThread={() => {}} onNavigate={() => {}} />)
+}
 beforeEach(() => {
   vi.resetAllMocks(); resetSessionStore(); resetThreadStore()
   api.listLocalSessions.mockResolvedValue([session]); api.listLocalThreads.mockResolvedValue([thread])
@@ -38,4 +41,24 @@ it('unloaded review does not claim a successful empty result and disconnected re
   expect(review(false)).toContain('会话尚未读取成功')
   expect(review(false)).toMatch(/<button[^>]*disabled=""[^>]*>刷新/)
   expect(review(false)).not.toContain('无匹配会话')
+})
+it('offers continue for a well-formed threadId missing from the live index', async () => {
+  api.listLocalSessions.mockResolvedValue([{ ...session, id: '20260101_000000', threadId: 'thread-missing', title: 'Synthetic session' }])
+  api.listLocalThreads.mockResolvedValue([])
+  await Promise.all([loadSessionList(), loadThreadList()])
+  const html = reviewContinue()
+  expect(html).toContain('在新会话继续这个话题')
+  expect(html).not.toMatch(/<button[^>]*disabled=""[^>]*>在新会话继续这个话题/)
+})
+it('keeps continue for a known thread and hides it for an invalid id', async () => {
+  await Promise.all([loadSessionList(), loadThreadList()])
+  expect(reviewContinue()).toContain('在新会话继续这个话题')
+  resetSessionStore()
+  api.listLocalSessions.mockResolvedValue([{ ...session, threadId: '../invalid' }])
+  await loadSessionList()
+  expect(reviewContinue()).not.toContain('在新会话继续这个话题')
+  resetSessionStore()
+  api.listLocalSessions.mockResolvedValue([{ ...session, threadId: undefined }])
+  await loadSessionList()
+  expect(reviewContinue()).not.toContain('在新会话继续这个话题')
 })

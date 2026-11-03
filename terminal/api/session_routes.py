@@ -268,6 +268,28 @@ def create_thread(payload: dict) -> dict:
     return thread
 
 
+def ensure_thread_for_continue(thread_id: str, payload: dict) -> dict:
+    """Upsert one missing topic so the existing continue save can name that id.
+
+    Does not read session files or accept message bodies. A known id is returned
+    unchanged. A malformed id is rejected before any index write.
+    """
+    from core.thread_store import ensure_thread
+    from terminal.api._config import _valid_session_id
+
+    raw_id = str(thread_id or "").strip()
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,96}", raw_id):
+        raise ValueError("invalid threadId")
+    title = payload.get("title") if isinstance(payload.get("title"), str) else ""
+    session_id = str(payload.get("sessionId", "") or "").strip()
+    if session_id and not _valid_session_id(session_id):
+        session_id = ""
+    thread = ensure_thread(raw_id, title=title, session_id=session_id or None)
+    if thread is None:
+        raise ValueError("invalid threadId")
+    return thread
+
+
 def update_thread(thread_id: str, payload: dict) -> dict:
     from core.thread_store import update_thread as update
     updated = update(thread_id, payload)
