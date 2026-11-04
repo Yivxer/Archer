@@ -7,6 +7,7 @@ import logging
 import os
 import sys
 import threading
+import time
 from collections.abc import Iterator
 from pathlib import Path
 from uuid import uuid4
@@ -20,6 +21,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.concurrency import run_in_threadpool
 from starlette.responses import Response
+from starlette.types import Receive, Scope, Send
 
 from core.runtime_context import RuntimeContext, create_runtime_context
 from terminal.api._config import ALLOWED_DESKTOP_ORIGINS, ROOT, _load_config
@@ -181,6 +183,102 @@ def _close_iter(iter_obj) -> None:
             close_fn()
         except Exception:
             pass
+
+
+class _ChatStreamPermit:
+    """One acquire of the chat-stream semaphore, releasable once from any thread.
+
+    A second release must be a no-op. BoundedSemaphore.release() would otherwise
+    either raise or free a *later* request's acquire after this stream's cleanup
+    races with the next one.
+    """
+
+    def __init__(self, semaphore: threading.BoundedSemaphore) -> None:
+        self._semaphore = semaphore
+        self._lock = threading.Lock()
+        self._released = False
+
+    def release(self) -> None:
+        with self._lock:
+            if self._released:
+                return
+            self._released = True
+        self._semaphore.release()
+
+
+def _close_chat_stream(generator: object) -> bool:
+    """Close a sync chat generator. Return False if another thread is inside it."""
+    close = getattr(generator, "close", None)
+    if not callable(close):
+        return True
+    try:
+        close()
+    except ValueError:
+        # generator already executing; caller retries once it is suspended again
+        return False
+    except Exception:
+        logger.warning("[chat/stream] closing stream generator failed", exc_info=True)
+    return True
+
+
+def _close_chat_stream_when_idle(generator: object) -> None:
+    # In-flight model calls can run for the stream timeout; keep trying until
+    # the generator is suspended so its finally (and chunk-iterator close) run.
+    deadline = time.monotonic() + 300.0
+    while True:
+        if _close_chat_stream(generator):
+            return
+        if time.monotonic() >= deadline:
+            logger.warning(
+                "[chat/stream] stream generator still executing; chat slot was already released"
+            )
+            return
+        time.sleep(0.05)
+
+
+def _finish_chat_stream(permit: _ChatStreamPermit, generator: object) -> None:
+    permit.release()
+    if _close_chat_stream(generator):
+        return
+    threading.Thread(
+        target=_close_chat_stream_when_idle,
+        args=(generator,),
+        name="archer-chat-stream-close",
+        daemon=True,
+    ).start()
+
+
+class _ChatStreamResponse(StreamingResponse):
+    """SSE response that frees the chat-stream slot when the client goes away.
+
+    Starlette cancels ``stream_response`` on ``http.disconnect`` (ASGI spec
+    2.3, which uvicorn advertises for HTTP) but does not ``close()`` a sync
+    body generator. ``_chat_stream_events`` releases the slot in its
+    ``finally``, so an abandoned generator keeps ``BoundedSemaphore(1)``
+    forever and every later ``POST /chat/stream`` returns 429 ``chat_busy``.
+    """
+
+    def __init__(self, content: Iterator[str], permit: _ChatStreamPermit, **kwargs) -> None:
+        super().__init__(content, **kwargs)
+        self._permit = permit
+        self._generator = content
+
+    async def listen_for_disconnect(self, receive: Receive) -> None:
+        try:
+            await super().listen_for_disconnect(receive)
+        finally:
+            # Free the slot as soon as the client is gone, even if the current
+            # chunk is still blocked in a worker thread. StreamingResponse
+            # waits for that thread before __call__ returns.
+            self._permit.release()
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        try:
+            await super().__call__(scope, receive, send)
+        finally:
+            # spec >= 2.4 never calls listen_for_disconnect; send() raises and
+            # the body iterator is dropped without close(). Always finish here.
+            _finish_chat_stream(self._permit, self._generator)
 
 
 def _read_desktop_pid_from_env() -> int | None:
@@ -423,18 +521,25 @@ def create_app(
                 "error": "chat_busy",
                 "message": "上一轮对话仍在处理中，请等待它结束后再发送。",
             })
-        return StreamingResponse(
-            _chat_stream_events(
+        permit = _ChatStreamPermit(semaphore)
+        try:
+            generator = _chat_stream_events(
                 payload,
-                release_slot=semaphore.release,
+                release_slot=permit.release,
                 runtime_context=request.app.state.runtime_context,
-            ),
-            media_type="text/event-stream; charset=utf-8",
-            headers={
-                "Cache-Control": "no-cache",
-                "Connection": "keep-alive",
-            },
-        )
+            )
+            return _ChatStreamResponse(
+                generator,
+                permit,
+                media_type="text/event-stream; charset=utf-8",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                },
+            )
+        except BaseException:
+            permit.release()
+            raise
 
     @app.websocket("/ws/chat")
     async def ws_chat(websocket: WebSocket) -> None:
