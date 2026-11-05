@@ -81,6 +81,38 @@ prompt = "Current mode: coach. Drive toward action."
 
 ---
 
+## `[experts.<id>]` — 专家档案（Part 6 + 人格层）
+
+专家 id 是表名，例如 `[experts.developer]`。内置 id：`default`、`developer`、`video-coach`、`content-creator`、`counselor`、`parent-educator`。未写进 toml 的内置专家用 `core/experts.py` 的默认值。
+
+人格层是附加字段，不替换 Part 6 功能键。`developer` 与 `counselor` 的试点文案写在内置默认里；其它专家的人格字段默认为空。
+
+| 键 | 层 | 类型 | 说明 |
+|----|----|------|------|
+| `label` / `note` | Part 6 | string | 名称与短说明。`note` 保持原义，不被 `subtitle` 替换 |
+| `model_profile` | Part 6 | string | `lite` / `pro` / `max` |
+| `skill_policy` / `skills` | Part 6 | string / string[] | `open` 或 `allowlist` |
+| `prompt_overlay` | Part 6 | string | 专家工作台叠层，先于人格注入 |
+| `starters` / `memory_tags` | Part 6 | array | 开场与记忆标签 |
+| `subtitle` / `icon` / `color` | 档案 | string | 可选标识。`color` 为 `#RRGGBB` |
+| `personality_blurb` | 人格 | string | 人格素描，建议 200 字内，上限 400 |
+| `voice_markers` / `voice_avoid` | 人格 | string[] | 可用口头禅 / 禁止话术 |
+| `emotional_register` / `silence_behavior` | 人格 | string | 情绪区间 / 用户沉默时的偏向 |
+| `mission` / `rules` / `workflow` | 人格 | string / string[] / string | 使命、铁律、工作流。本周注入使用铁律；使命与工作流只入档案 |
+| `deliverable_signals` | 人格 | string[] | 体验信号。本周只入档案，不进 prompt |
+| `default_stance` | 档案 | string | 建议姿态 id。本周只校验并保存，不改全局 mode 选择 |
+| `permission_boundary` | 档案 | string | 可选收紧说明。不改审批器 |
+
+禁止在专家表里写 `covenant_path`、`soul_path`、`presence_path` 或 `system_prompt`。根契约只来自 `[persona].covenant_path`。
+
+运行时拼接顺序写死在 `core/agent_profile.py` 的 `PROFILE_PROMPT_ORDER`，由 `core/context.py` 的 `build_system_prompt()` 发出：
+
+`COVENANT → Soul → Expert overlay → Personality injection → Stance → Skill context`
+
+COVENANT 与 Soul 仍在原锚点；后四层在提示词尾部按同一元组顺序拼接。人格注入开头声明它不能覆盖根契约。
+
+---
+
 ## `[obsidian]` — 笔记库
 
 | 键 | 类型 | 默认值 | 说明 |

@@ -33,13 +33,17 @@ def enrich_with_memory(
     system_parts: list[str] = []
     tool_parts: list[str] = []
     try:
+        from core.agent_profile import build_personality_injection, join_profile_layers
         from core.experts import active_expert, expert_memory_tags, format_expert_block
         from memory.retrieve import for_context, format_for_prompt
 
         expert = active_expert(config)
-        expert_block = format_expert_block(expert)
-        if expert_block:
-            system_parts.append(expert_block)
+        profile_block = join_profile_layers({
+            "expert_overlay": format_expert_block(expert),
+            "personality": build_personality_injection(expert),
+        })
+        if profile_block:
+            system_parts.append(profile_block)
 
         retrieval_kwargs: dict[str, Any] = {
             "limit": 5,

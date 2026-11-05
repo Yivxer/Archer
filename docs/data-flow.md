@@ -69,7 +69,7 @@ Desktop 发送：
 | Web 预搜索 | web_search | skill_router 命中 |
 | 编排块 | orchestrator | task plan / mode constraints / matched skills |
 | Stance | `_get_mode_prompt` | 当前 mode |
-| System prompt | `context.build_system_prompt` | COVENANT / SOUL / MEMORY / 分层 ARCHER.md |
+| System prompt | `context.build_system_prompt` | COVENANT / Soul / Expert overlay / Personality / Stance / Skill context，再加 MEMORY 与 ARCHER.md。顺序常量：`core.agent_profile.PROFILE_PROMPT_ORDER` |
 | 模型选型 | `core/model_select` | `model_auto` |
 
 记忆检索与 system prompt 构建带 observability span（`memory.retrieve`、`context.build_system_prompt`）。
