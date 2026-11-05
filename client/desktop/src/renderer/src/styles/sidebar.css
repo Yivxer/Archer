@@ -397,7 +397,7 @@
   width: var(--sidebar-width);
   min-width: var(--sidebar-width);
   border-right: 1px solid var(--line);
-  background: #ffffff;
+  background: var(--sidebar);
   transition:
     width 220ms ease,
     min-width 220ms ease,
@@ -481,23 +481,19 @@
 
 .sidebar-brand-wordmark span {
   display: inline-block;
-  animation: none;
 }
 
 .sidebar-brand-wordmark span:nth-child(1) {
   color: #48c8d8;
   font-size: 1.15em;
-  animation-delay: 0s;
 }
 
 .sidebar-brand-wordmark span:nth-child(2) {
   color: #2d91e7;
-  animation-delay: 0.08s;
 }
 
 .sidebar-brand-wordmark span:nth-child(3) {
   color: #3f7fd6;
-  animation-delay: 0.16s;
 }
 
 .sidebar-brand-wordmark span:nth-child(4) {
@@ -505,17 +501,14 @@
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
-  animation-delay: 0.24s;
 }
 
 .sidebar-brand-wordmark span:nth-child(5) {
   color: #f2a22c;
-  animation-delay: 0.32s;
 }
 
 .sidebar-brand-wordmark span:nth-child(6) {
   color: #f46b2c;
-  animation-delay: 0.40s;
 }
 
 .sidebar-body {
