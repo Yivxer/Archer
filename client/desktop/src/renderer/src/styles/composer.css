@@ -214,7 +214,7 @@
   position: absolute;
   bottom: calc(100% + 10px);
   z-index: 200;
-  background: #ffffff;
+  background: var(--panel);
   border: 1px solid rgba(15, 23, 42, 0.10);
   border-radius: 12px;
   box-shadow: 0 8px 28px rgba(15, 23, 42, 0.12);
@@ -307,13 +307,15 @@
 }
 
 .send-btn.active {
-  background: linear-gradient(135deg, #45e0d0, #3a89e8);
+  background: var(--cyan);
+  color: #ffffff;
   opacity: 1;
 }
 
 .send-btn.active:hover {
+  background: color-mix(in srgb, var(--cyan) 84%, white);
   transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(69, 224, 208, 0.28);
+  box-shadow: none;
 }
 
 .composer-toolbar {
@@ -614,10 +616,12 @@
 
 .composer-send.active {
   color: #ffffff;
-  background: conic-gradient(from 20deg, #ffd66b, #ff8b2f, #f34545, #45e0d0, #68a8ff, #ffd66b);
-  box-shadow:
-    0 7px 18px color-mix(in srgb, var(--cyan) 20%, transparent),
-    0 3px 10px rgba(245, 97, 42, 0.14);
+  background: var(--cyan);
+  box-shadow: none;
+}
+
+.composer-send.active:hover {
+  background: color-mix(in srgb, var(--cyan) 84%, white);
 }
 
 .composer-send.stopping {

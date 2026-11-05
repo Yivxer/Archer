@@ -1,12 +1,17 @@
 /* ── Archer Design Tokens ───────────────────────────────
-   Desktop runtime typography and brand palette.
-   Generated snapshots: scripts/generate_tokens.py.
-   Desktop surface overrides live in styles.css.
+   Single source for desktop color, type, radius, and shadow.
+   Generated snapshots: scripts/generate_tokens.py
+   → web/public/assets/generated/tokens.json
+   → client/desktop/src/renderer/src/generated/tokens.ts
+   Do not redeclare these custom properties in styles.css.
 
    2026-08-14 收敛（方向：做给自己用，极简、克制、系统字体）
    - 桌面端不打包文楷（无 @font-face），UI 正文统一系统字体。
    - 文楷降级为「长文阅读」独立 token（--reading-font），
      web 端已打包、桌面端回退系统字体。
+
+   2026-11-05 小刀 UI：语义色从 styles.css 收口到此。
+   浅色画布 #f7f8f9，面板与侧栏保持纯白。
    ──────────────────────────────────────────────────── */
 
 :root {
@@ -17,9 +22,30 @@
   --orange: #f5612a;
   --red: #e8212a;
 
-  /* Light theme surface */
-  --bg-1: #f8f5ef;
-  --bg-2: #f3eee6;
+  /* Light theme surfaces: gray canvas, white panels */
+  --bg-1: #f7f8f9;
+  --bg-2: #ffffff;
+  --ink: #252a32;
+  --text: #3e4650;
+  --muted: #8f98a3;
+  --faint: #c7cdd4;
+  --line: rgba(15, 23, 42, 0.09);
+  --border-medium: rgba(15, 23, 42, 0.10);
+  --panel: #ffffff;
+  --panel-solid: #ffffff;
+  --field: rgba(255, 255, 255, 0.96);
+  --shadow: 0 18px 48px rgba(44, 54, 67, 0.08);
+  --shadow-xs: 0 2px 8px rgba(15, 23, 42, 0.06);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --sidebar: #ffffff;
+  --panel-border: rgba(36, 49, 58, 0.10);
+  --soft-hover: rgba(36, 49, 58, 0.045);
+  --quiet-glow: 0 18px 54px rgba(48, 80, 118, 0.075);
+  --radius: 10px;
+  --radius-window: 10px;
+  --radius-panel: 10px;
+  --radius-composer: 10px;
+  --sidebar-width: 264px;
 
   /* Typography */
   --brand-font: "Comfortaa", "Avenir Next", "Trebuchet MS", sans-serif;
@@ -39,4 +65,16 @@
 :root[data-theme="dark"] {
   --bg-1: #0d1219;
   --bg-2: #0a0f14;
+  --ink: #d0dde8;
+  --text: #8a9dac;
+  --muted: #687b89;
+  --line: rgba(77, 217, 212, 0.12);
+  --panel: rgba(18, 30, 50, 0.62);
+  --panel-solid: #101b2b;
+  --field: rgba(15, 25, 42, 0.82);
+  --shadow: 0 30px 90px rgba(0, 0, 0, 0.5);
+  --sidebar: rgba(10, 18, 32, 0.62);
+  --panel-border: rgba(77, 217, 212, 0.12);
+  --soft-hover: rgba(77, 217, 212, 0.065);
+  --quiet-glow: 0 24px 70px rgba(0, 0, 0, 0.28);
 }

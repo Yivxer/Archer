@@ -9,20 +9,52 @@ CHAT_CSS = ROOT / "client/desktop/src/renderer/src/styles/chat.css"
 SIDEBAR_CSS = ROOT / "client/desktop/src/renderer/src/styles/sidebar.css"
 
 
-def test_light_theme_uses_unified_white_workspace_backgrounds():
+def test_light_theme_tokens_are_the_single_source():
+    tokens = (ROOT / "client/desktop/src/renderer/src/tokens.css").read_text()
     styles = STYLES.read_text()
     base = BASE_CSS.read_text()
     workspace = WORKSPACE_CSS.read_text()
     sidebar = SIDEBAR_CSS.read_text()
+    chat = CHAT_CSS.read_text()
+    composer = (ROOT / "client/desktop/src/renderer/src/styles/composer.css").read_text()
 
-    assert "--bg-1: #ffffff" in styles
-    assert "--panel: #ffffff" in styles
-    assert "--panel-solid: #ffffff" in styles
-    assert "body {\n  background: #ffffff;" in base
+    assert "--bg-1: #f7f8f9" in tokens
+    assert "--bg-2: #ffffff" in tokens
+    assert "--panel: #ffffff" in tokens
+    assert "--panel-solid: #ffffff" in tokens
+    assert "--sidebar: #ffffff" in tokens
+    assert "--shadow-sm:" in tokens
+    assert "--line: rgba(15, 23, 42, 0.09)" in tokens
+    for name in ("--bg-1:", "--bg-2:", "--ink:", "--cyan:", "--panel:"):
+        assert name not in styles
+
+    assert "background: var(--bg-1);" in base
+    assert "background: #ffffff;" not in base
     assert ".app-shell {" in base
-    assert "background: #ffffff;" in base
-    assert "background: #ffffff;" in workspace
-    assert "background: #ffffff;" in sidebar
+    assert "background: var(--bg-1);" in workspace
+    assert "background: #ffffff;" not in workspace
+    assert "background: var(--sidebar);" in sidebar
+    assert "background: var(--bg-1);" in chat
+
+    for name in (
+        "wordmark-flow",
+        "organic-morph",
+        "ring-living-shell",
+        "ring-orbit",
+        "ring-shine-drift",
+        "sidebar-ring-float",
+    ):
+        assert name not in base
+        assert name not in sidebar
+    assert "conic-gradient" in base
+    assert "conic-gradient" in sidebar
+    assert "background: var(--cyan);" in base
+    assert "conic-gradient" not in composer
+    assert "background: var(--cyan);" in composer
+    assert "@keyframes msg-in" in base
+    assert "@keyframes dot-pulse" in base
+    assert "@keyframes cb-spin" in base
+    assert "@keyframes ring-spin" in base
 
 
 def test_sidebar_defaults_open_and_exposes_status_footer():
