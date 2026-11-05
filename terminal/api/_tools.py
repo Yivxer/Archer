@@ -443,9 +443,10 @@ def _iter_simple_chat_path(
         retrieval_receipt=memory_result.receipt,
     ), trace_id)
 
-    # 构建 system prompt（简化版：core_persona + stance + expert_block，无 task_plan）
+    # 简化路径仍走同一档案顺序：COVENANT → Soul → Expert overlay → Personality → Stance。
     try:
-        from core.context import build_desktop_core_prompt, _get_mode_prompt
+        from core.agent_profile import build_personality_injection, join_profile_layers
+        from core.context import _get_mode_prompt, build_desktop_core_prompt, covenant_layer_text
         core_persona = build_desktop_core_prompt(
             _cfg, query=query if memory_mode != "off" else "",
         )
@@ -457,10 +458,13 @@ def _iter_simple_chat_path(
             current_mode = _cfg["persona"].get("current_mode")
             if current_mode:
                 stance_prompt = _get_mode_prompt(_cfg, current_mode)
-        if stance_prompt:
-            core_persona = f"{core_persona}\n\n{stance_prompt}"
-        if _expert_block:
-            core_persona = f"{core_persona}\n\n{_expert_block}"
+        core_persona = join_profile_layers({
+            "covenant": covenant_layer_text(_cfg),
+            "soul": core_persona,
+            "expert_overlay": _expert_block,
+            "personality": build_personality_injection(_expert),
+            "stance": stance_prompt,
+        }) or core_persona
     except Exception:
         core_persona = "Archer 的核心身份是长期陪伴型 AI 灵魂伴生体。"
 

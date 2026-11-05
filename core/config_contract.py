@@ -14,7 +14,7 @@ CURRENT_CONFIG_VERSION = 2
 KNOWN_TOP_LEVEL_FIELDS = frozenset({
     "config_version", "api", "model_profiles", "persona", "memory", "paths",
     "context", "ui", "obsidian", "critique", "security", "mcp",
-    "runtime",
+    "runtime", "experts",
 })
 
 
@@ -194,6 +194,12 @@ def validate_config(raw: object) -> dict:
     runtime = cfg.get("runtime", {})
     if isinstance(runtime, dict):
         _validate_runtime_config(runtime)
+
+    experts = cfg.get("experts")
+    if experts is not None:
+        from core.agent_profile import validate_experts_table
+
+        validate_experts_table(experts)
 
     cfg["config_version"] = CURRENT_CONFIG_VERSION
     return cfg

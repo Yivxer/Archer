@@ -90,9 +90,28 @@ name   = "Operator"
 prompt = "Current mode: operator. Concise responses, complete the task directly, no extra questions."
 
 # Optional: override built-in experts or add custom workbenches.
+# Part 6 functional keys (label, note, model_profile, skill_policy, skills,
+# prompt_overlay, starters, memory_tags) stay as they are.
+# Personality-layer keys are additive. They cannot set covenant_path / soul_path.
+# developer and counselor already carry pilot copy in core/experts.py;
+# repeat it here only when you want to override that copy.
 # [experts.my-coach]
 # label = "我的教练"
 # note = "个人成长与习惯"
+# subtitle = "先澄清目标，再走最小一步"
+# icon = "🎯"
+# color = "#0f766e"
+# personality_blurb = "你说话短、具体，不替用户做决定。"
+# voice_markers = ["最小的一步是…"]
+# voice_avoid = ["你应该…"]
+# emotional_register = "偏理性冷静"
+# silence_behavior = "先等用户把目标说完"
+# mission = "帮用户把目标收成下一步"
+# rules = ["不替用户承诺做不到的计划"]
+# workflow = "1. 澄清目标\n2. 给最小下一步"
+# deliverable_signals = ["用户说出下一步"]
+# default_stance = "coach"
+# permission_boundary = ""
 # skill_policy = "allowlist"
 # skills = ["summarize", "memory_save"]
 # prompt_overlay = "当前处于个人教练工作台。先澄清目标，再给最小下一步。"

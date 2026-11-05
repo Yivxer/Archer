@@ -82,6 +82,8 @@ Archer 不会每轮都注入三个层次——对简单问题来说那会浪费 
 
 COVENANT 和 PRESENCE 摘要每轮都会注入（它们很短）。运行时安全规则始终优先注入，位于所有内容之前。
 
+专家档案的相对顺序是固定的，不能由人格字段重排：`COVENANT → Soul → Expert overlay → Personality injection → Stance → Skill context`。常量在 `core/agent_profile.py` 的 `PROFILE_PROMPT_ORDER`；`build_system_prompt()` 把 COVENANT 和 Soul 留在原锚点，并把后四层按同一元组接到提示词尾部。人格注入只从专家的人格字段来，不能改写 `covenant_path`。
+
 如果配置了 `persona.soul_profile_path`，Archer 会额外读取 SOUL_PROFILE.json，并按意图注入少量结构化摘要；它不会替代 SOUL.md，也不会把完整档案每轮塞进上下文。
 
 ---

@@ -131,6 +131,26 @@ def _format_project_context(project: dict, events: list | None, *, event_limit: 
     return "\n".join(lines)
 
 
+def covenant_layer_text(cfg: dict | None) -> str:
+    """COVENANT summary for the profile prompt. Never read from expert fields."""
+    persona = cfg.get("persona", {}) if isinstance(cfg, dict) else {}
+    if not isinstance(persona, dict):
+        return ""
+    path = persona.get("covenant_path", "")
+    if not isinstance(path, str) or not path.strip():
+        return ""
+    try:
+        covenant_text = load_layered_file(path)
+    except Exception:
+        return ""
+    if not covenant_text:
+        return ""
+    summary = _extract_covenant_summary(covenant_text)
+    if not summary.strip():
+        return ""
+    return f"[根契约摘要]\n{summary}"
+
+
 def _extract_covenant_summary(covenant_text: str) -> str:
     """提取 COVENANT 摘要（我不会做 + 我会做的事，控制长度）。"""
     if not covenant_text:
@@ -280,11 +300,16 @@ def build_system_prompt(
     Layer 0: Runtime Safety Rules（每轮）
     Layer 1: COVENANT 摘要（每轮）
     Layer 2: PRESENCE 摘要（每轮）
-    Layer 3: 核心人格 + mode prompt（每轮）
+    Layer 3: 核心人格（每轮）
     Layer 4: SOUL（仅 decision/emotional/reflection 时）
     Layer 5: MEMORY.md（仅 heavy 时）
     Layer 6: 活跃项目（project/task 时）
     Layer 7: Retrieved Memories（外部传入时）
+
+    专家档案层的相对顺序写死在 ``core.agent_profile.PROFILE_PROMPT_ORDER``：
+    COVENANT → Soul → Expert overlay → Personality injection → Stance → Skill context。
+    COVENANT 与 Soul 仍从这里的原锚点插入；后四层在档案尾部按同一元组发出。
+    人格字段不能写入 covenant 槽。
     """
     with trace_span("context.build_system_prompt", heavy=heavy, intent=intent or "") as span:
         mode_prompt = _get_mode_prompt(cfg, mode_override)
@@ -294,7 +319,7 @@ def build_system_prompt(
         )
 
         # 加载灵魂三层文件（含 *.local.md 覆盖）
-        covenant_text = load_layered_file(cfg["persona"].get("covenant_path", ""))
+        covenant_layer = covenant_layer_text(cfg)
         presence_text = load_layered_file(cfg["persona"].get("presence_path", ""))
         project_archer = load_project_archer_layers(cfg=cfg)
 
@@ -321,10 +346,35 @@ def build_system_prompt(
         parts.append(_RUNTIME_SAFETY)
         parts.append(runtime_info)
 
-        # Layer 1: COVENANT 摘要
-        if covenant_text:
-            covenant_summary = _extract_covenant_summary(covenant_text)
-            parts.append(f"[根契约摘要]\n{covenant_summary}")
+        from core.agent_profile import (
+            TAIL_PROFILE_LAYERS,
+            build_personality_injection,
+            iter_profile_layers,
+        )
+        from core.experts import active_expert, format_expert_block
+
+        try:
+            expert = active_expert(cfg)
+        except Exception:
+            expert = {}
+        overlay = str(expert_block or "").strip() or format_expert_block(expert)
+        stance_body = "\n\n".join(
+            part.strip()
+            for part in (mode_prompt, mode_constraint_block)
+            if str(part or "").strip()
+        )
+        profile_layers = dict(iter_profile_layers({
+            "covenant": covenant_layer,
+            "soul": "\n\n".join((build_core_persona(cfg=cfg), _ARCHER_CORE)),
+            "expert_overlay": tag_context_block("expert", overlay),
+            "personality": build_personality_injection(expert),
+            "stance": f"[姿态]\n{stance_body}" if stance_body else "",
+            "skill_context": tag_context_block("orchestration.skills", matched_skills_block),
+        }))
+
+        # Layer 1: COVENANT 摘要（档案顺序的第一槽，不能由人格字段替换）
+        if "covenant" in profile_layers:
+            parts.append(profile_layers["covenant"])
 
         # Layer 2: PRESENCE 摘要
         if presence_text:
@@ -337,11 +387,9 @@ def build_system_prompt(
                 f"[项目约定（ARCHER.md）]\n{project_archer}",
             ))
 
-        # Layer 3: 核心人格 + mode
-        parts.append(build_core_persona(cfg=cfg))
-        parts.append(_ARCHER_CORE)
-        if mode_prompt:
-            parts.append(mode_prompt)
+        # Layer 3: 核心人格（Soul 槽）。姿态改到档案尾部，排在人格注入之后。
+        if "soul" in profile_layers:
+            parts.append(profile_layers["soul"])
 
         try:
             from core.writing import load_writing_prompt_blocks, resolve_writing_profile
@@ -457,17 +505,14 @@ def build_system_prompt(
         if db_memories:
             parts.append(tag_context_block("memory.retrieve", db_memories))
 
-        if mode_constraint_block:
-            parts.append(tag_context_block("orchestration.mode", mode_constraint_block))
-
-        if expert_block:
-            parts.append(tag_context_block("expert", expert_block))
-
         if task_plan_block:
             parts.append(tag_context_block("orchestration.plan", task_plan_block))
 
-        if matched_skills_block:
-            parts.append(tag_context_block("orchestration.skills", matched_skills_block))
+        # Expert overlay → Personality → Stance → Skill context
+        for layer_name in TAIL_PROFILE_LAYERS:
+            layer_text = profile_layers.get(layer_name, "")
+            if layer_text:
+                parts.append(layer_text)
 
         parts.append(
             "[能力边界]\n"
