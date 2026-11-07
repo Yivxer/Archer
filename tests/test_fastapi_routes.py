@@ -554,18 +554,49 @@ def test_chat_stream_generator_error_then_second_request_succeeds(tmp_path, monk
     assert _slot_is_free(app)
 
 
-def test_chat_stream_testclient_early_close_then_second_request_succeeds(client, monkeypatch):
-    def endless(*args, **kwargs):
-        yield {"type": "token", "text": "first"}
-        while True:
-            time.sleep(0.01)
-            yield {"type": "statusEvent", "statusEvent": {"id": "still-running"}}
+def _read_one_sse_event(response) -> str:
+    """Read one SSE chunk, then close that iterator before it is discarded.
 
-    monkeypatch.setattr("terminal.api.fastapi_app._iter_chat_chunks", endless)
+    ``next(response.iter_text())`` drops the iterator as soon as ``next``
+    returns. httpx closes the byte stream in ``iter_raw``'s ``finally``, and
+    Starlette TestClient then waits for the ASGI task. A sync ``/chat/stream``
+    generator blocked inside its next chunk never lets that task finish, so
+    the pytest process hangs. Hold the iterator, take one event, and close it.
+    """
+    events = response.iter_text()
+    try:
+        return next(events)
+    finally:
+        events.close()
+
+
+def test_chat_stream_testclient_early_close_then_second_request_succeeds(client, monkeypatch):
+    """Closing a TestClient SSE stream must cancel the generator and free the slot.
+
+    The fake stream is capped. If close/cancel does not run, it ends on its
+    own and this test fails instead of blocking the suite on ``while True``.
+    """
+    cap = 8
+    outcome = {"how": None, "extra": 0}
+
+    def capped(*args, **kwargs):
+        try:
+            yield {"type": "token", "text": "first"}
+            for _ in range(cap):
+                outcome["extra"] += 1
+                yield {"type": "statusEvent", "statusEvent": {"id": "still-running"}}
+            outcome["how"] = "exhausted"
+        except GeneratorExit:
+            outcome["how"] = "cancelled"
+            raise
+
+    monkeypatch.setattr("terminal.api.fastapi_app._iter_chat_chunks", capped)
     monkeypatch.setattr("terminal.api.fastapi_app._bg_extract_api", lambda *args, **kwargs: None)
     monkeypatch.setattr("terminal.api.fastapi_app.check_rate_limit", lambda *args, **kwargs: True)
 
     for _ in range(2):
+        outcome["how"] = None
+        outcome["extra"] = 0
         with client.stream(
             "POST",
             "/chat/stream",
@@ -573,8 +604,10 @@ def test_chat_stream_testclient_early_close_then_second_request_succeeds(client,
             json=_CHAT_JSON,
         ) as response:
             assert response.status_code == 200
-            chunk = next(response.iter_text())
+            chunk = _read_one_sse_event(response)
             assert "first" in chunk
+        assert outcome["how"] == "cancelled"
+        assert outcome["extra"] < cap
 
     assert _slot_is_free(client.app)
 
