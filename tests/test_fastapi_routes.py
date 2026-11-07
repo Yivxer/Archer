@@ -189,12 +189,11 @@ def test_chat_stream_returns_busy_when_concurrency_slot_is_full(client, monkeypa
 def test_chat_stream_events_release_slot_when_client_closes(monkeypatch):
     from terminal.api.fastapi_app import _chat_stream_events
 
-    def endless_chunks(*args, **kwargs):
-        yield {"type": "token", "text": "first"}
-        while True:
-            yield {"type": "statusEvent", "statusEvent": {"id": "still-running"}}
-
-    monkeypatch.setattr("terminal.api.fastapi_app._iter_chat_chunks", endless_chunks)
+    records: list[dict] = []
+    monkeypatch.setattr(
+        "terminal.api.fastapi_app._iter_chat_chunks",
+        _tracked_chunks(records, token="first", pause=0),
+    )
     monkeypatch.setattr("terminal.api.fastapi_app._bg_extract_api", lambda history, **kwargs: None)
 
     semaphore = threading.BoundedSemaphore(1)
@@ -205,6 +204,7 @@ def test_chat_stream_events_release_slot_when_client_closes(monkeypatch):
     )
     assert "first" in next(stream)
     stream.close()
+    _assert_stream_cancelled(records[0], _STREAM_CAP)
 
     assert semaphore.acquire(blocking=False) is True
     semaphore.release()
@@ -338,6 +338,57 @@ async def _wait_until(predicate, timeout: float = 2.0) -> None:
         await asyncio.sleep(0.01)
 
 
+_STREAM_CAP = 8
+
+
+def _assert_stream_cancelled(record: dict, cap: int) -> None:
+    assert record["how"] == "cancelled", (
+        f"chat stream ended {record['how']!r} after {record['extra']} extra events; "
+        f"expected GeneratorExit before the cap of {cap}"
+    )
+    assert record["extra"] < cap
+
+
+def _tracked_chunks(
+    records: list[dict],
+    *,
+    cap: int = _STREAM_CAP,
+    pause: float = 0.02,
+    token: str | None = None,
+):
+    """Fake chat chunks that stop after ``cap`` extra events.
+
+    The first call pauses between those events so a disconnect can land.
+    If nothing cancels the generator, it sets ``how`` to ``exhausted`` and
+    returns. Callers assert ``how == "cancelled"`` so a missed cancel fails
+    instead of leaving ``while True`` on an anyio worker.
+    """
+    lock = threading.Lock()
+
+    def chunks(*args, **kwargs):
+        record = {"how": None, "extra": 0}
+        with lock:
+            records.append(record)
+            turn = len(records)
+        try:
+            yield {"type": "token", "text": token if token is not None else f"turn{turn}"}
+            if turn == 1:
+                for _ in range(cap):
+                    record["extra"] += 1
+                    if pause:
+                        time.sleep(pause)
+                    yield {"type": "statusEvent", "statusEvent": {"id": "still-running"}}
+                record["how"] = "exhausted"
+            else:
+                yield {"type": "done", "done": True}
+                record["how"] = "completed"
+        except GeneratorExit:
+            record["how"] = "cancelled"
+            raise
+
+    return chunks
+
+
 def test_chat_stream_normal_completion_then_second_request_succeeds(tmp_path, monkeypatch):
     monkeypatch.setattr(
         "terminal.api.fastapi_app._iter_chat_chunks",
@@ -365,19 +416,8 @@ def test_chat_stream_normal_completion_then_second_request_succeeds(tmp_path, mo
 
 def test_chat_stream_client_disconnect_frees_slot_for_next_request(tmp_path, monkeypatch):
     """uvicorn HTTP (ASGI 2.3) drops a sync generator on disconnect without close()."""
-    calls = {"n": 0}
-
-    def chunks(*args, **kwargs):
-        calls["n"] += 1
-        turn = calls["n"]
-        yield {"type": "token", "text": f"turn{turn}"}
-        if turn == 1:
-            while True:
-                time.sleep(0.01)
-                yield {"type": "statusEvent", "statusEvent": {"id": "still-running"}}
-        yield {"type": "done", "done": True}
-
-    monkeypatch.setattr("terminal.api.fastapi_app._iter_chat_chunks", chunks)
+    records: list[dict] = []
+    monkeypatch.setattr("terminal.api.fastapi_app._iter_chat_chunks", _tracked_chunks(records))
     monkeypatch.setattr("terminal.api.fastapi_app._bg_extract_api", lambda *args, **kwargs: None)
     monkeypatch.setattr("terminal.api.fastapi_app.check_rate_limit", lambda *args, **kwargs: True)
     app = _streaming_app(tmp_path)
@@ -391,6 +431,7 @@ def test_chat_stream_client_disconnect_frees_slot_for_next_request(tmp_path, mon
         await asyncio.wait_for(saw_body.wait(), timeout=2)
         disconnect.set()
         first_status, first_body = await asyncio.wait_for(first, timeout=2)
+        await _wait_until(lambda: records and records[0]["how"] is not None)
         await _wait_until(lambda: _slot_is_free(app))
         second_status, second_body = await _drive_chat_stream(app, spec="2.3")
         return first_status, first_body, second_status, second_body
@@ -399,27 +440,18 @@ def test_chat_stream_client_disconnect_frees_slot_for_next_request(tmp_path, mon
 
     assert first_status == 200
     assert b"turn1" in first_body
+    _assert_stream_cancelled(records[0], _STREAM_CAP)
     assert second_status == 200
     assert b"turn2" in second_body
     assert b"chat_busy" not in second_body
+    assert records[1]["how"] == "completed"
     assert _slot_is_free(app)
 
 
 def test_chat_stream_send_error_disconnect_frees_slot(tmp_path, monkeypatch):
     """ASGI spec >= 2.4 reports client disconnect as OSError from send()."""
-    calls = {"n": 0}
-
-    def chunks(*args, **kwargs):
-        calls["n"] += 1
-        turn = calls["n"]
-        yield {"type": "token", "text": f"turn{turn}"}
-        if turn == 1:
-            while True:
-                time.sleep(0.01)
-                yield {"type": "statusEvent", "statusEvent": {"id": "still-running"}}
-        yield {"type": "done", "done": True}
-
-    monkeypatch.setattr("terminal.api.fastapi_app._iter_chat_chunks", chunks)
+    records: list[dict] = []
+    monkeypatch.setattr("terminal.api.fastapi_app._iter_chat_chunks", _tracked_chunks(records))
     monkeypatch.setattr("terminal.api.fastapi_app._bg_extract_api", lambda *args, **kwargs: None)
     monkeypatch.setattr("terminal.api.fastapi_app.check_rate_limit", lambda *args, **kwargs: True)
     app = _streaming_app(tmp_path)
@@ -427,13 +459,16 @@ def test_chat_stream_send_error_disconnect_frees_slot(tmp_path, monkeypatch):
     async def scenario():
         with pytest.raises(OSError, match="client gone"):
             await _drive_chat_stream(app, spec="2.4", fail_send_after_body=True)
+        await _wait_until(lambda: records and records[0]["how"] is not None)
         await _wait_until(lambda: _slot_is_free(app))
         return await _drive_chat_stream(app, spec="2.4")
 
     second_status, second_body = asyncio.run(scenario())
 
+    _assert_stream_cancelled(records[0], _STREAM_CAP)
     assert second_status == 200
     assert b"turn2" in second_body
+    assert records[1]["how"] == "completed"
     assert _slot_is_free(app)
 
 
@@ -606,8 +641,7 @@ def test_chat_stream_testclient_early_close_then_second_request_succeeds(client,
             assert response.status_code == 200
             chunk = _read_one_sse_event(response)
             assert "first" in chunk
-        assert outcome["how"] == "cancelled"
-        assert outcome["extra"] < cap
+        _assert_stream_cancelled(outcome, cap)
 
     assert _slot_is_free(client.app)
 
@@ -616,18 +650,33 @@ def test_chat_stream_uvicorn_disconnect_during_blocked_call_allows_next_request(
     """Live uvicorn (ASGI spec 2.3) must accept a new chat after the client drops mid-call."""
     release = threading.Event()
     started = threading.Event()
-    calls = {"n": 0}
+    records: list[dict] = []
     lock = threading.Lock()
+    hold_seconds = 2.0
 
     def chunks(*args, **kwargs):
+        record = {"how": None, "extra": 0, "finished": False}
         with lock:
-            index = calls["n"]
-            calls["n"] += 1
-        yield {"type": "token", "text": f"n{index}"}
-        if index == 0:
-            started.set()
-            assert release.wait(5)
-        yield {"type": "done", "done": True}
+            records.append(record)
+            index = len(records) - 1
+        try:
+            yield {"type": "token", "text": f"n{index}"}
+            if index == 0:
+                started.set()
+                # Bounded stand-in for an in-flight model call. close() cannot
+                # land until this returns; the timeout ends the worker if the
+                # test never releases it.
+                if not release.wait(hold_seconds):
+                    record["how"] = "expired"
+                    return
+            yield {"type": "done", "done": True}
+            if record["how"] is None:
+                record["how"] = "completed"
+        except GeneratorExit:
+            record["how"] = "cancelled"
+            raise
+        finally:
+            record["finished"] = True
 
     monkeypatch.setattr("terminal.api.fastapi_app._iter_chat_chunks", chunks)
     monkeypatch.setattr("terminal.api.fastapi_app._bg_extract_api", lambda *args, **kwargs: None)
@@ -644,32 +693,36 @@ def test_chat_stream_uvicorn_disconnect_during_blocked_call_allows_next_request(
     url = f"http://127.0.0.1:{port}/chat/stream"
     headers = {"Authorization": "Bearer test-token"}
     try:
-        deadline = time.monotonic() + 5
-        while True:
+        ready = False
+        for _ in range(40):
             try:
                 health = httpx.get(f"http://127.0.0.1:{port}/health", timeout=0.2)
             except httpx.HTTPError:
                 health = None
             if health is not None and health.status_code == 200:
+                ready = True
                 break
-            if time.monotonic() >= deadline:
-                raise AssertionError("uvicorn did not start")
             time.sleep(0.05)
+        assert ready, "uvicorn did not start"
 
         with httpx.stream("POST", url, headers=headers, json=_CHAT_JSON, timeout=5) as response:
             assert response.status_code == 200
-            assert "n0" in next(response.iter_text())
+            assert "n0" in _read_one_sse_event(response)
             assert started.wait(2)
-        # Connection is closed while the first generator is still blocked in the model call.
+        # Connection is closed while the first generator is still blocked.
+        assert not release.is_set()
         second = httpx.post(url, headers=headers, json=_CHAT_JSON, timeout=5)
     finally:
         release.set()
         server.should_exit = True
-        thread.join(5)
+        thread.join(hold_seconds + 3)
 
     assert second.status_code == 200
     assert "n1" in second.text
     assert "chat_busy" not in second.text
+    assert records[0]["finished"] is True
+    assert records[0]["how"] in {"cancelled", "completed"}
+    assert records[1]["how"] == "completed"
     assert not thread.is_alive()
 
 
