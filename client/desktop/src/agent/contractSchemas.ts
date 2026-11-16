@@ -9,7 +9,7 @@ const base = z.object({
 })
 
 const riskLevelSchema = z.enum(['low', 'medium', 'high', 'critical'])
-const permissionLevelSchema = z.enum(['read-only', 'write-local', 'write-vault', 'deploy-remote'])
+const permissionLevelSchema = z.enum(['read-only', 'write-local', 'write-vault', 'deploy-remote', 'unknown'])
 const toolStatusSchema = z.enum(['running', 'waiting_approval', 'complete', 'blocked', 'denied'])
 const jobStatusSchema = z.enum(['queued', 'running', 'waiting_approval', 'complete', 'failed', 'cancelled'])
 const planStatusSchema = z.enum(['proposed', 'accepted', 'dismissed'])

@@ -1,5 +1,5 @@
 export type RiskLevel = 'low' | 'medium' | 'high' | 'critical'
-export type PermissionLevel = 'read-only' | 'write-local' | 'write-vault' | 'deploy-remote'
+export type PermissionLevel = 'read-only' | 'write-local' | 'write-vault' | 'deploy-remote' | 'unknown'
 export type ToolStatus = 'running' | 'waiting_approval' | 'complete' | 'blocked' | 'denied'
 export type ApprovalDecision = 'approved' | 'denied'
 export type JobStatus = 'queued' | 'running' | 'waiting_approval' | 'complete' | 'failed' | 'cancelled'

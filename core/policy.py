@@ -40,6 +40,7 @@ from core.policy_code_scan import (  # Compatibility exports for existing caller
     _scan_string,
     scan_code_for_dangers,
 )
+from core.skill_metadata_guard import skill_call_metadata, untrusted_skill_metadata_reason
 
 
 def _safe_realpath(path: str) -> str | None:
@@ -310,8 +311,7 @@ def check(skill_name: str, args: dict, skills: Mapping[str, object], cfg: dict |
     ALLOW         → 直接执行。
     """
     mod = skills.get(skill_name)
-    meta = getattr(mod, "SKILL", {}) if mod else {}
-    risk = meta.get("risk", "low")
+    raw_meta, meta, declared_risk, risk = skill_call_metadata(mod)
 
     if meta.get("version") == "mcp":
         server = meta.get("mcp_server", "")
@@ -326,7 +326,7 @@ def check(skill_name: str, args: dict, skills: Mapping[str, object], cfg: dict |
             risk="medium",
         )
 
-    if skill_name in {"shell", "run_shell"}:
+    if skill_name in {"shell", "run_shell", "shell_execute"}:
         command = args.get("command", "")
         risk_level, reason = score_shell_risk(command)
         if risk_level == "critical":
@@ -401,13 +401,13 @@ def check(skill_name: str, args: dict, skills: Mapping[str, object], cfg: dict |
             risk="high",
         )
 
-    if risk in ("high", "critical") and meta.get("requires_confirmation", False):
+    untrusted = untrusted_skill_metadata_reason(mod, raw_meta, declared_risk, risk, skill_name)
+    if untrusted or (risk in ("high", "critical") and meta.get("requires_confirmation", False)):
         return PolicyResult(
             Decision.CONFIRM,
-            reason=f"高风险技能 [{skill_name}]",
-            risk=risk,
+            reason=untrusted or f"高风险技能 [{skill_name}]",
+            risk="medium" if untrusted else risk,
         )
-
     return PolicyResult(Decision.ALLOW, risk=risk)
 
 

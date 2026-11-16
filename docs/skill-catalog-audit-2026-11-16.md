@@ -101,3 +101,43 @@ PR #7（TestClient / SSE 防挂死）保持不合，本分支没有复制它的�
 4. 工程可修，需单独决定：`permission_level_for_tool` 对未分类技能仍回落 `read-only`。改它会改变已有审计语义。
 5. 工程可修，但是产品决定：`code_edit`、`memory_save`、`npm_run`、`installer`、`browser_automation` 等有副作用，当前 policy 仍不要求审批。本轮只把这句话显示出来。
 6. 明确暂停：PR #6 人格不合、不继续；PR #7 测试防挂死保留不合；Part 8 真投递保持关闭。
+
+## 2026-11-16 第二批：调用期权限不再把未知收成只读
+
+### Before
+
+`permission_level_for_tool` 在名字没有命中专门分支时返回 `read-only`。审批回写也只传名字和参数，不传 SKILL。因此 `code_edit`、`memory_save`、`npm_run`、`installer` 这类已注册技能，以及根本没有元数据的名字，在真实请求和审计里都会记成只读。`policy.check` 对缺少模块的名字直接 `ALLOW`（旧测试写明交给 runtime 的 SkillNotFound）。非法的 `SKILL` 对象会在读 `version` 时抛异常。
+
+### After
+
+- 已有分支保持不变：`shell` / `run_shell` / `shell_execute` 按命令分级；`github_ops` 的读操作、建 issue、任意 `gh` 仍分开。`shell_execute` 没有注册；如果调用方用这个名字，策略走 shell 的命令分级，不再掉进通用放行。
+- 其余已分类名字使用目录契约。`code_edit`、`memory_save`、`npm_run`、`installer` 的调用标签是 `write-local`，`browser_automation` 是 `unknown`。这五者的审批决定没有改：前四个和 browser 仍按原来的 `ALLOW`。
+- 未分类名字、MCP 权限不是明确的 read/write、以及 `SKILL` 不是对象时，权限是 `unknown`。调用方拿到字符串，不会因为新值抛异常。Desktop 契约解析接受 `unknown`。
+- 没有模块、`SKILL` 不是对象、或风险值不在 low/medium/high/critical 时，`policy.check` 返回 `CONFIRM`，工具循环不会直接执行。已注册且风险字段省略的技能（例如 `site_check`、`soul_evolution`）仍走原来的放行，避免把已知策略一刀切改掉。
+- `run_shell` 注册后执行的是 `shell.run`，命令分级和子任务拒绝名单与 shell 相同，没有单独放宽。
+
+`core/policy.py` 仍是 730 行，没有超过行数闸门。新增判断放在 `core/skill_metadata_guard.py`。
+
+### 这一批的验证
+
+通过：
+
+- `python3 -m pytest tests/test_permission_call.py tests/test_skill_catalog.py tests/test_policy.py tests/test_api_tool_service.py tests/test_smoke.py::test_skills_load tests/test_architecture_boundaries.py::test_god_files_cannot_grow_beyond_part10_gate0_baseline --override-ini addopts= -q --tb=line`：126 passed。同一次里的行数闸门失败只剩预先存在的 `terminal/api/_routes.py` 633 行，基线 629；该文件在 `4673f9a` 上已是 633 行，本批没改它。
+- `tests/test_smoke.py::test_skills_load` 和 `test_skills_tools_format` 已执行到断言并通过。云端安装了 `requirements.txt`，以及技能源码会导入、但 requirements 没有写明的 `pytesseract`、`pymupdf`、`feedparser`。没有改 lock，也没有把这些包写回仓库。
+- 直接调用 `payload_get("/skills")`：HTTP 200，返回行与 `register_all_skills()` 一致。`code_edit` 为 `write-local`，`browser_automation` 为 `unknown`，`web_search` 为 `read-only`。个数以这次注册结果为准，不在这里写成新的基线。
+- Node v24.22.3：`npx vitest run` 上述三个 Desktop 测试文件 20 passed；`npx tsc --noEmit` 通过；`npm run build` 通过。
+
+有上限的全量，不是全绿：
+
+- `python3 -m pytest -m "not journey" --timeout=20 --timeout-method=signal --override-ini addopts= -q --tb=line`
+- 57.29s 结束。2102 passed，17 failed，2 skipped。没有测试被 20 秒上限杀掉，这次没有复现 PR #7 的挂起。失败项是环境或原有闸门：缺 `archer.toml`、`python`、`mcp`、拼音库，Hugo 直发两条在撤掉本批 policy 改动后同样失败，以及上面的 `_routes.py` 行数。不把这些记成通过。
+
+### 下一批可工程修，本批不做
+
+1. `terminal/api/_routes.py` 行数闸门（633 > 629）。文件在本机未推送的 21 个路径里，本批不改。
+2. `site_check` 与 `soul_evolution` 省略了 risk，调用策略仍是历史放行。
+3. `file_ops` 的读动作在单次调用里是 `read-only`，目录里的最高权限仍是 `deploy-remote`。这是参数分级，不是未知回落。
+4. `pytesseract`、`pymupdf`、`feedparser`、拼音转换没有写进 `requirements.txt`，干净环境会在导入或 slug 测试处失败。
+5. MCP 在 `cfg=None` 的旧入口里，黑名单之后仍可能 `ALLOW`。生产入口会传配置。
+6. 安装版和真实 `/skills` 仍未验收。五个已有明确放行策略的技能没有改审批。
+

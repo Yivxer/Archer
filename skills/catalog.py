@@ -3,8 +3,8 @@
 The loader registration is the name source. Permission and approval labels are
 explicit classifications of that registry. A skill with no classification is
 reported as unknown; it is never presented as read-only or as not requiring
-approval. Per-call ``permission_level_for_tool`` still has its own fallback and
-is not reused here.
+approval. Per-call classification reuses this table only after the
+argument-specific branches in ``permission_level_for_tool``.
 """
 from __future__ import annotations
 

@@ -1915,7 +1915,7 @@ class TestToolApproval:
         assert records[0]["risk"] == "medium"
         assert records[0]["executed"] is True
         assert records[0]["message"] == "safe_tool 完成"
-        assert records[0]["permissionLevel"] == "read-only"
+        assert records[0]["permissionLevel"] == "unknown"
 
     def test_tool_request_approval_audit_records_deploy_remote_permission(self, tmp_path, monkeypatch):
         import json

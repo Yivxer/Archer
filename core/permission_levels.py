@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from typing import Literal
 
-PermissionLevel = Literal["read-only", "write-local", "write-vault", "deploy-remote"]
+PermissionLevel = Literal["read-only", "write-local", "write-vault", "deploy-remote", "unknown"]
+_KNOWN_LEVELS = {"read-only", "write-local", "write-vault", "deploy-remote"}
 
 
 def permission_level_for_tool(
@@ -11,12 +12,20 @@ def permission_level_for_tool(
     skill_meta: dict | None = None,
 ) -> PermissionLevel:
     name = str(skill_name or "").strip()
-    payload = args or {}
+    payload = args if isinstance(args, dict) else {}
     action = str(payload.get("action", "")).strip().lower()
     path = str(payload.get("path", "") or payload.get("filename", "")).strip()
+    if skill_meta is not None and not isinstance(skill_meta, dict):
+        return "unknown"
+    meta = skill_meta or {}
 
-    if (skill_meta or {}).get("version") == "mcp":
-        return "write-local" if (skill_meta or {}).get("mcp_permission") == "write" else "read-only"
+    if meta.get("version") == "mcp":
+        mcp_permission = str(meta.get("mcp_permission") or "").strip().lower()
+        if mcp_permission == "write":
+            return "write-local"
+        if mcp_permission == "read":
+            return "read-only"
+        return "unknown"
 
     if name == "obsidian_write":
         return "write-vault"
@@ -51,9 +60,14 @@ def permission_level_for_tool(
         "status",
     }:
         return "read-only"
-    # Names that never matched a branch keep this historical per-call label.
-    # The public catalog in skills.catalog does not reuse it.
-    return "read-only"
+    # Residual names use the explicit registry contract. A name that was never
+    # classified stays unknown so a missing rule cannot look like a read grant.
+    from skills.catalog import contract_for_skill_name
+
+    level = contract_for_skill_name(name)["permissionLevel"]
+    if level in _KNOWN_LEVELS:
+        return level  # type: ignore[return-value]
+    return "unknown"
 
 
 # B3.1: P0 critical skills —— 副作用大、失败影响高的 skill，需更严的执行包装 + 失败提示

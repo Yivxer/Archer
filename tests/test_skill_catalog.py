@@ -45,7 +45,7 @@ def test_unclassified_name_is_not_presented_as_safe():
         "permissionBasis": "unknown",
         "approval": "unknown",
     }
-    assert permission_level_for_tool("safe_tool", {}) == "read-only"
+    assert permission_level_for_tool("safe_tool", {}) == "unknown"
 
 
 def test_registered_side_effects_are_not_labeled_read_only():
