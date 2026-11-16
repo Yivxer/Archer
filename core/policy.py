@@ -326,7 +326,7 @@ def check(skill_name: str, args: dict, skills: Mapping[str, object], cfg: dict |
             risk="medium",
         )
 
-    if skill_name == "shell":
+    if skill_name in {"shell", "run_shell"}:
         command = args.get("command", "")
         risk_level, reason = score_shell_risk(command)
         if risk_level == "critical":

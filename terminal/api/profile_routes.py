@@ -63,18 +63,9 @@ def _toggle_skill(name: str, enabled: bool) -> dict:
 
 
 def _skills() -> list[dict]:
-    from skills.loader import register_all_skills
-    disabled = _load_disabled_skills()
-    registry = register_all_skills()
-    result = []
-    for name, meta in sorted(registry.metas().items()):
-        result.append({
-            "name": name,
-            "description": meta.description,
-            "risk": meta.risk,
-            "enabled": name not in disabled,
-        })
-    return result
+    from skills.catalog import build_skill_catalog
+
+    return build_skill_catalog(disabled=_load_disabled_skills())
 
 
 # ---------------------------------------------------------------------------

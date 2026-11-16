@@ -22,13 +22,21 @@ def permission_level_for_tool(
         return "write-vault"
     if name == "hugo_blog":
         return "deploy-remote" if action == "deploy" else "write-local"
-    if name in {"github", "git", "git_ops"}:
-        return "deploy-remote" if action in {"push", "publish", "deploy"} else "write-local"
+    if name in {"github", "git", "git_ops", "github_ops"}:
+        # github_ops is the registered skill. Read actions stay read-only;
+        # creating issues or running arbitrary gh is a remote side effect.
+        # Any other github_ops action stays at the remote ceiling so an
+        # unrecognized action is not labeled read-only.
+        if name == "github_ops" and action in {"list_repos", "list_issues", "list_prs", "view_repo"}:
+            return "read-only"
+        if action in {"push", "publish", "deploy", "create_issue", "run"} or name == "github_ops":
+            return "deploy-remote"
+        return "write-local"
     if name == "file_ops":
         if "/yivxer-blog/content/posts/" in path and action == "write":
             return "deploy-remote"
         return "write-local" if action in {"write", "append", "edit", "delete"} else "read-only"
-    if name in {"shell", "shell_execute"}:
+    if name in {"shell", "shell_execute", "run_shell"}:
         command = str(payload.get("command", "")).lower()
         if "git push" in command or "rsync" in command or "deploy" in command:
             return "deploy-remote"
@@ -43,6 +51,8 @@ def permission_level_for_tool(
         "status",
     }:
         return "read-only"
+    # Names that never matched a branch keep this historical per-call label.
+    # The public catalog in skills.catalog does not reuse it.
     return "read-only"
 
 

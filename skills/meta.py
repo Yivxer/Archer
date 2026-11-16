@@ -46,9 +46,12 @@ def parse_skill_meta(mod: Any) -> SkillMeta | None:
         or name
     ).strip()
 
-    risk = str(meta.get("risk") or skill.get("risk") or "low").strip().lower()
+    raw_risk = meta.get("risk") if isinstance(meta, dict) else None
+    if raw_risk is None or (isinstance(raw_risk, str) and not raw_risk.strip()):
+        raw_risk = skill.get("risk") if isinstance(skill, dict) else None
+    risk = str(raw_risk).strip().lower() if raw_risk is not None else ""
     if risk not in {"low", "medium", "high", "critical"}:
-        risk = "low"
+        risk = "unknown"
 
     auto_trigger = meta.get("auto_trigger", True)
     if isinstance(auto_trigger, str):
