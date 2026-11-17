@@ -15,8 +15,9 @@ sys.path.insert(0, str(ROOT))
 
 def test_config_loads_on_first_call():
     import core.llm as llm_mod
-    old_cfg, old_mtime = llm_mod._cfg, llm_mod._config_mtime
+    old_cfg, old_mtime, old_path = llm_mod._cfg, llm_mod._config_mtime, llm_mod._CONFIG_PATH
     try:
+        llm_mod._CONFIG_PATH = ROOT / "archer.toml.example"
         llm_mod._cfg = None
         llm_mod._config_mtime = 0.0
         cfg = llm_mod._load_config()
@@ -25,6 +26,7 @@ def test_config_loads_on_first_call():
     finally:
         llm_mod._cfg = old_cfg
         llm_mod._config_mtime = old_mtime
+        llm_mod._CONFIG_PATH = old_path
 
 
 def test_config_applies_env_overrides():
@@ -65,9 +67,11 @@ def test_config_applies_env_overrides():
 def test_config_no_reload_when_unchanged():
     """文件未改动时，_load_config 返回同一个对象（无重载）。"""
     import core.llm as llm_mod
-    old_cfg, old_mtime, old_flag = llm_mod._cfg, llm_mod._config_mtime, llm_mod._config_reloaded
+    old_cfg, old_mtime, old_flag, old_path = (
+        llm_mod._cfg, llm_mod._config_mtime, llm_mod._config_reloaded, llm_mod._CONFIG_PATH,
+    )
     try:
-        # 先加载一次确保缓存
+        llm_mod._CONFIG_PATH = ROOT / "archer.toml.example"
         llm_mod._cfg = None
         llm_mod._config_mtime = 0.0
         first = llm_mod._load_config()
@@ -78,6 +82,7 @@ def test_config_no_reload_when_unchanged():
         llm_mod._cfg = old_cfg
         llm_mod._config_mtime = old_mtime
         llm_mod._config_reloaded = old_flag
+        llm_mod._CONFIG_PATH = old_path
 
 
 def test_config_reloads_when_file_changes():

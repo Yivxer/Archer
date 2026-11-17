@@ -1,4 +1,3 @@
-import fitz  # pymupdf
 from pathlib import Path
 
 SKILL = {
@@ -56,6 +55,11 @@ def run(args: dict) -> str:
     start  = max(1, int(args.get("start_page", 1))) - 1  # 转 0-index
     end    = int(args.get("end_page", 20))
     maxch  = int(args.get("max_chars", 6000))
+
+    try:
+        import fitz  # pymupdf，可选依赖
+    except ImportError:
+        return "错误：pdf_reader 需要可选依赖 pymupdf。未安装时技能仍会注册，但不能读取 PDF。"
 
     try:
         doc   = fitz.open(str(p))

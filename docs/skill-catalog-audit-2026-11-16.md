@@ -141,3 +141,57 @@ PR #7（TestClient / SSE 防挂死）保持不合，本分支没有复制它的�
 5. MCP 在 `cfg=None` 的旧入口里，黑名单之后仍可能 `ALLOW`。生产入口会传配置。
 6. 安装版和真实 `/skills` 仍未验收。五个已有明确放行策略的技能没有改审批。
 
+## 2026-11-17 第三批：依赖可复现，并归因上一轮 17 个失败
+
+### Before
+
+`requirements.txt` 没有声明 OCR、PDF、RSS 和拼音。这三个技能在模块顶层导入第三方库，`test_skills_load` 会逐个导入模块，缺一个包就让整次加载失败。上一轮是在当前环境里额外安装后才跑过，换一台按声明安装的机器不能复现。
+
+上一轮有上限全量是 2102 passed / 17 failed / 2 skipped。没有测试被 20 秒上限杀掉。
+
+### 声明
+
+- `requirements.txt`：运行和注册技能所需。不加入这四个库。
+- `requirements-dev.txt`：测试运行器、`httpx`、Hugo 拼音用的 `pypinyin`、MCP SDK。CI 的 Python 步骤改为安装这个文件。
+- `requirements-skills.txt`：`pymupdf`、`feedparser`、`pytesseract`。可选。缺它们时技能仍注册；`run()` 返回缺依赖说明，不换成假实现。
+- `pypinyin` 放在 dev 声明里，因为中文 slug 的成功路径测试依赖它；生产代码原本就有导入失败后的回退，没有改成强制依赖。
+
+`image_ocr`、`pdf_reader`、`rss_reader` 改为在 `run()` 里导入对应库。
+
+### 上一轮 17 项
+
+| 测试 | 原因 | 与基线 | 本批 |
+| --- | --- | --- | --- |
+| `test_architecture_boundaries.py::test_god_files_cannot_grow_beyond_part10_gate0_baseline` | `terminal/api/_routes.py` 633 行，基线 629 | `4673f9a` 上已是 633，不是本 PR 引入 | 不改闸门，不拆文件 |
+| `TestApiSkillRouting::test_direct_hugo_publish_reads_explicit_path_with_spaces_and_heartbeats` | 聊天迭代没有发出名为 `hugo_blog` 的工具事件 | 上一轮撤掉 policy 改动后同样失败；装上拼音后仍失败 | 不放宽 Hugo 授权或策略 |
+| `TestApiSkillRouting::test_hugo_upload_path_routes_even_when_needs_tools_is_false` | 同上 | 同上 | 同上 |
+| `test_fastapi_routes.py::test_ready_is_public` | `/ready` 读到的人格路径不可读，`persona.ready` 为 false | 仓库不提交私人 `archer.toml` | 测试自建可读夹具，断言仍要求 ready 且 missing 为空 |
+| `test_hooks.py::test_command_hook_reads_json_stdout` | 命令写成 `python`，环境只有 `python3` | 环境差异，不是本 PR 引入 | 测试改用当前解释器 |
+| `test_hugo_blog_publish.py` 的 6 个中文 slug / 新建文章用例 | 未安装 `pypinyin`，回退成 `untitled` | 缺声明的依赖 | `requirements-dev.txt` 声明 `pypinyin` 后通过 |
+| `test_mcp_remote.py::test_connect_streamable_http_uses_client` | `import mcp` 失败 | 缺声明的依赖，不是 `cfg=None` 放行 | 声明 `mcp` 后通过。没有改 MCP 权限 |
+| `test_p2_listen_hotreload.py` 的首次加载和未变更缓存 | `_load_config()` 读 gitignore 的 `archer.toml` 后抛 FileNotFoundError | 仓库不提交私人配置 | 这两则改读 `archer.toml.example` |
+| `test_smoke.py::test_config_loads` | 断言私人 `archer.toml` 存在 | 同上 | 改为解析样例，段断言保留 |
+| `test_vault_sensor.py` 的窗口内焦点和缓存 | 两篇笔记同一秒时，排序不稳定，焦点落到 `Obsidian.md` | 原有夹具，不是本 PR 引入 | 把 Archer 的 mtime 明确设得更新但仍在窗口内 |
+
+### After 的实测
+
+隔离前缀只安装 `requirements.txt` 和 pytest，`PYTHONNOUSERSITE=1`，确认导不进 `pytesseract`：
+
+- `test_skills_load`、`test_skills_tools_format`、`test_config_loads`、`test_optional_skill_imports.py`：5 passed。
+- `payload_get("/skills")`：200。`image_ocr`、`pdf_reader`、`rss_reader` 仍在注册结果里。
+
+同一前缀再安装 `requirements-dev.txt` 后，上一轮 17 项重跑：14 passed，剩下上面 3 项。
+
+有上限全量，仍不是全绿：
+
+`PYTHONNOUSERSITE=1 PYTHONPATH=/tmp/archer-repro-pkgs python3 -m pytest -m "not journey" --timeout=20 --timeout-method=signal --override-ini addopts= -q --tb=line`
+
+46.53s 结束。2118 passed，3 failed，2 skipped。没有测试被 20 秒上限杀掉。3 个失败就是行数闸门和两条 Hugo 直发。没有安装 `requirements-skills.txt`。
+
+### 仍要人工决定
+
+1. Hugo 直发两条测试和当前动作中介路径不一致。要不要改测试去断言确认卡，还是恢复直发，需要单独看授权，不能在这一批放宽。
+2. `_routes.py` 行数闸门。文件在本机未推送的 21 个路径里。
+3. 可选技能后端要不要装进日常环境。声明已分开，不代表本机已经安装。
+4. 没有和 `6c0f907` 做合并验证，没有安装或发版。
+

@@ -1,3 +1,6 @@
+# Required to import and run Archer, including skill registration.
+# Optional skill backends (OCR / PDF / RSS) are requirements-skills.txt.
+# Tests, HTTP client, Hugo pinyin, and the MCP SDK are requirements-dev.txt.
 openai>=1.0.0
 prompt_toolkit>=3.0.0
 rich>=13.0.0

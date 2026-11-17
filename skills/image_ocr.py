@@ -1,5 +1,3 @@
-import pytesseract
-from PIL import Image
 from pathlib import Path
 
 SKILL = {
@@ -50,6 +48,15 @@ def run(args: dict) -> str:
         return f"不支持的图片格式：{p.suffix}。支持：{', '.join(sorted(IMAGE_EXTS))}"
 
     lang = args.get("lang", "chi_sim").strip() or "chi_sim"
+
+    try:
+        import pytesseract
+        from PIL import Image
+    except ImportError:
+        return (
+            "错误：image_ocr 需要可选依赖 pillow 与 pytesseract，以及系统里的 tesseract。"
+            "未安装时技能仍会注册，但不能识别图片。"
+        )
 
     try:
         img  = Image.open(str(p))

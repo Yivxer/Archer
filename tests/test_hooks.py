@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import sys
 import types
 
 import pytest
@@ -148,7 +149,7 @@ def test_command_hook_reads_json_stdout(monkeypatch):
         HookDefinition(
             event="SessionStart",
             hook_type="command",
-            command="python -c \"import sys,json; print(json.dumps({'continue': True, 'metadata': {'ok': True}}))\"",
+            command=f"{sys.executable} -c \"import json; print(json.dumps({{'continue': True, 'metadata': {{'ok': True}}}}))\"",
         )
     )
     result = run_hooks(

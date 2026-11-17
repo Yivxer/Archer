@@ -1,4 +1,3 @@
-import feedparser
 import re
 from datetime import datetime
 
@@ -71,6 +70,11 @@ def run(args: dict) -> str:
     action = args.get("action", "list")
     limit  = int(args.get("limit", 10))
     index  = int(args.get("index", 1))
+
+    try:
+        import feedparser
+    except ImportError:
+        return "错误：rss_reader 需要可选依赖 feedparser。未安装时技能仍会注册，但不能读取订阅源。"
 
     try:
         feed = feedparser.parse(url)

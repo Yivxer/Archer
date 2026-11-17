@@ -15,10 +15,10 @@ sys.path.insert(0, str(ROOT))
 # ─── 1. Config ────────────────────────────────────────────────────────────────
 
 def test_config_loads():
-    """archer.toml 可正常解析。"""
+    """提交进仓库的配置样例可解析。私人 archer.toml 不在仓库里。"""
     import tomllib
-    cfg_path = ROOT / "archer.toml"
-    assert cfg_path.exists(), "archer.toml 不存在"
+    cfg_path = ROOT / "archer.toml.example"
+    assert cfg_path.exists(), "archer.toml.example 不存在"
     with open(cfg_path, "rb") as f:
         cfg = tomllib.load(f)
     assert "api" in cfg, "缺少 [api] 段"

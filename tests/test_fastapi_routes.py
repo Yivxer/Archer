@@ -35,8 +35,21 @@ def test_health_is_public(client):
     assert response.json()["contractVersion"] == 1
 
 
-def test_ready_is_public(client):
-    response = client.get("/ready")
+def test_ready_is_public(tmp_path, monkeypatch):
+    from core.persona_sources import PERSONA_SOURCE_FIELDS
+
+    persona = {}
+    for field in PERSONA_SOURCE_FIELDS:
+        path = tmp_path / f"{field}.md"
+        path.write_text("fixture\n", encoding="utf-8")
+        persona[field] = str(path)
+    monkeypatch.setattr("terminal.api._config._load_config", lambda: {"persona": persona})
+    app = create_app(
+        "test-token",
+        runtime_context=create_runtime_context(db_path=tmp_path / "archer.db"),
+    )
+    with TestClient(app) as test_client:
+        response = test_client.get("/ready")
     assert response.status_code == 200
     payload = response.json()
     assert payload["contractVersion"] == 1
