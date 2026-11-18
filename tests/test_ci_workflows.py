@@ -81,6 +81,26 @@ def test_pr_ci_subset_files_are_not_marked_integration_at_file_level():
 
 
 @pytest.mark.unit
+def test_pr_ci_runs_for_foundation_base_without_head_name_gate():
+    """pull_request.branches 匹配 PR base。foundation 必须在该列表里。
+
+    push.branches 匹配被推送的 ref，沿用 main/master 的写法，不能改成只认
+    某个 head 分支名。权限保持 contents 只读，不用 pull_request_target。
+    """
+    source = PR_WORKFLOW.read_text(encoding="utf-8")
+    assert "pull_request_target" not in source
+    assert "permissions:" in source
+    assert "contents: read" in source
+
+    pull_request = source.split("pull_request:", 1)[1].split("push:", 1)[0]
+    push = source.split("push:", 1)[1].split("permissions:", 1)[0]
+    assert "codex/foundation-20261001" in pull_request
+    assert "codex/foundation-20261001" in push
+    assert "cursor/" not in pull_request
+    assert "cursor/" not in push
+
+
+@pytest.mark.unit
 def test_pr_ci_has_mypy_non_blocking_job():
     """P5 阶段 1：PR CI 必须有 mypy 非阻塞 job（continue-on-error: true）。
     mypy 错误数稳定下降即视为进展；改为阻塞门禁前需先降到 0。"""

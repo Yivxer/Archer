@@ -223,3 +223,49 @@ PR #7（TestClient / SSE 防挂死）保持不合，本分支没有复制它的�
 2. `_routes.py` 行数闸门。
 3. 没有和本机 `6c0f907` 做合并验证。
 
+## 2026-11-18 第五批：附件重新部署确认，以及 foundation PR 的 CI 触发
+
+用户 17:14 要求继续。推送前核对：本分支与 `origin/cursor/skill-catalog-contract-783b` 都在 `b7dd431`，foundation 仍是 `4673f9af665cc1057d690380253a44f613dfedd6`。这两条远端没有未取回的新提交。工作区在改动前是干净的。没有覆盖本机未推送的 `6c0f907` 和那 21 个路径，也没有改 `terminal/api/_routes.py`。
+
+### 附件入口覆盖边界
+
+查过的确定性入口：
+
+- `_try_direct_hugo_redeploy_with_attachment`：这是本批要收的捷径。匹配到已有文章后，以前会 `write_text` 再 `runtime_invoke` deploy。现在只返回现有 `_hugo_confirmation_result`。草稿保留 `action=edit`、`filename`、`title`、`body`、`sourcePath`，并带 `deployAfter: true`。确认前不写目标文件，也不调用发布 runtime。
+- `_try_direct_hugo_publish`：上一批已经是确认卡。附件 Markdown 进草稿参数，确认前不写 posts。
+- `_try_direct_hugo_deploy_existing`：只生成 deploy 确认卡，不改文章正文。
+- `_try_direct_hugo_delete`：只生成 delete_and_deploy 确认卡，确认前不移动文件。
+- `iter_hugo_turn_events` 在 deploy/redeploy 授权下的顺序仍是：附件重新部署、已有文章 deploy、发布确认，三条都空才进 agent。附件重新部署一旦匹配，就不会掉进 agent。
+
+agent 兜底 `_run_hugo_agent_turn` 没有改。redeploy 授权下它只允许 list/read/deploy。`hugo_blog` 除 list/read/doctor 以外，策略仍是 CONFIRM，所以 edit 和 deploy 在 agent 里也会停在确认卡，不会直接调用 runtime。list/read 仍是 ALLOW，它们不写 posts、也不部署。没有改 Action Mediator 的动作分类，明确的当前轮发布仍可能被标成 `AUTO_EXECUTE`，但那条工作流现在停在确认卡。没有改 code_edit、memory_save、npm_run、installer、browser_automation 的策略。
+
+同意之后走现有 `_tool_approval`。`hugo_blog` edit 写入正文并保留 frontmatter，然后 `apply_approval_followup` 看到 `deployAfter` 才调用一次 `_run_hugo_deploy_followup`。同一个 `eventId` 再同意会复用缓存。已执行参数的同一指纹再同意也不会再执行。拒绝、不存在的卡片不执行。`decision` 不是 approved/denied 时在执行前抛出 ValueError。目标文件缺失时 `executed` 为 false，输出以「文件不存在」开头，并且不调用 deploy。
+
+共享 follow-up 的异常分支没有改：部署函数若抛异常，输出会追加「部署失败」，但 `executed` 仍为 true。这是新建文章后自动部署共用的行为。本批不改它，避免把那条成功语义一起改掉。写入失败本身已经是 `executed: false`。
+
+技能加载器用文件路径另建模块，和 `import skills.hugo_blog` 不是同一个模块对象。测试同时替换这两处的博客目录和命令。夹具是临时目录。`_run_command` 和 `_verify_url` 是假的，不访问网络，不读博客凭证。本仓库没有私人 `archer.toml`。
+
+### CI 触发
+
+`.github/workflows/pr.yml` 的 `pull_request.branches` 和 `push.branches` 都加上 `codex/foundation-20261001`，原来的 `main` / `master` 保留。
+
+`pull_request.branches` 匹配的是 PR 的 base，不是 head。因此 base 为 foundation 的 PR 会触发，不要求 head 分支名叫 foundation，也没有把 `cursor/` 写进过滤条件。`push.branches` 匹配的是被推送的 ref。推送到 `cursor/skill-catalog-contract-783b` 本身不会因为 head 名字命中 push 过滤；这个 PR 靠 pull_request 的 base 过滤。
+
+workflow 级权限是 `contents: read`。没有使用 `pull_request_target`，没有新增 secrets，没有加部署或发布 job。Python 仍安装 `requirements-dev.txt`。Desktop 仍是 Node 24。架构行数测试和安全相关测试仍在 python-tests 列表里。ruff 和 mypy 原来的 `continue-on-error` 没有扩大。`nightly.yml` 使用 secrets 和 macos runner，本批没有改它。
+
+`pull_request` 使用 PR 合并提交上的 workflow 文件。本文件在默认分支 `main` 上的旧副本仍只列了 main/master。推送后要读实际 Checks，不能把「过滤条件已改」说成 CI 已经跑绿。
+
+### 实测
+
+隔离环境：`PYTHONNOUSERSITE=1`，`PYTHONPATH=/tmp/archer-repro-pkgs`，依赖来自已声明的 `requirements-dev.txt`。没有私人 `archer.toml`。
+
+针对性：`tests/test_hugo_blog_publish.py`、`tests/test_hugo_publish_interaction.py`、`tests/test_tool_stage.py`、`tests/test_desktop_api.py`、`tests/test_architecture_boundaries.py`，加 `--timeout=20 --timeout-method=signal`。3.84s。227 passed，1 failed。失败只有 `_routes.py` 行数闸门。
+
+非 journey 全量：`python3 -m pytest -m "not journey" --timeout=20 --timeout-method=signal --override-ini addopts=`。49.67s。2121 passed，1 failed，2 skipped。没有测试被 20 秒上限杀掉。唯一失败仍是 `test_god_files_cannot_grow_beyond_part10_gate0_baseline`：`terminal/api/_routes.py` 633 行，基线 629。`core/policy.py` 仍是 730。没有提高阈值，没有删除闸门，没有按文件豁免。这是既有基线债。本批没有改 Desktop 的 TypeScript，所以没有另跑 types/build。
+
+### 基线与未做的事
+
+没有合并，没有安装，没有发版。没有改 Runtime gate、Part 8、真人审批。没有制造反馈或 J8。没有上传私人数据。没有和本机 `6c0f907` 做合并验证，不能说本机兼容已经验证。PR #7 保持不合并且没有复制它的补丁。PR #6 人格暂停，没有继续。
+
+推送后的 Checks 状态补在本节末尾。
+
