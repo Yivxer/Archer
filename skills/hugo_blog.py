@@ -952,6 +952,7 @@ def run_structured(args: dict) -> dict:
             _FAIL_PREFIXES = (
                 "错误：",
                 "未知 action：",
+                "文件不存在",
                 "构建失败",
                 "部署失败",
                 "部署完成但单页验证失败",

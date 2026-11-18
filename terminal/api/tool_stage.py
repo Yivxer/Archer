@@ -202,6 +202,13 @@ def apply_approval_followup(
         if "filename" not in deploy_args and args.get("slug"):
             deploy_args["slug"] = args["slug"]
         title = str(args.get("title") or title)
+    elif (
+        skill_name == "hugo_blog"
+        and args.get("deployAfter") is True
+        and str(args.get("filename") or "").strip()
+    ):
+        deploy_args = {"action": "deploy", "filename": Path(str(args["filename"])).name}
+        title = str(args.get("title") or Path(str(args["filename"])).stem or title)
     elif skill_name == "file_ops":
         target = str(args.get("path") or "")
         if "/yivxer-blog/content/posts/" in target and args.get("action") == "write":
