@@ -267,5 +267,17 @@ workflow 级权限是 `contents: read`。没有使用 `pull_request_target`，�
 
 没有合并，没有安装，没有发版。没有改 Runtime gate、Part 8、真人审批。没有制造反馈或 J8。没有上传私人数据。没有和本机 `6c0f907` 做合并验证，不能说本机兼容已经验证。PR #7 保持不合并且没有复制它的补丁。PR #6 人格暂停，没有继续。
 
-推送后的 Checks 状态补在本节末尾。
+### CI 状态
+
+推送 `a1bd23762d77a2eac8045345a6c545c3707139fe` 后，Checks API 有 5 个 run，不是 0。`pull_request` 已触发，head 是 `cursor/skill-catalog-contract-783b`，base 是 `codex/foundation-20261001`。这不是「只有 head 名字匹配才跑」。
+
+总 run：https://github.com/Yivxer/Archer/actions/runs/44276246848
+
+- Python 架构测试子集：failure。日志里唯一失败是 `test_god_files_cannot_grow_beyond_part10_gate0_baseline`，`terminal/api/_routes.py` 633 行，基线 629。这是既有基线债，本批没有改这个文件。https://github.com/Yivxer/Archer/actions/runs/44276246848/job/134705017206
+- Ruff Lint：failure。这个 job 本来就是 `continue-on-error`，本批没有把它改成吞掉失败，也没有把它当成通过。https://github.com/Yivxer/Archer/actions/runs/44276246848/job/134705017310
+- Mypy：success。job 仍是非阻塞。https://github.com/Yivxer/Archer/actions/runs/44276246848/job/134705016715
+- TypeScript 单元测试：success。https://github.com/Yivxer/Archer/actions/runs/44276246848/job/134705017175
+- TypeScript 类型检查 + 构建：success。https://github.com/Yivxer/Archer/actions/runs/44276246848/job/134705017269
+
+不能说 CI 全绿。必需的 Python job 是红的，原因是上述行数闸门。`permissions: contents: read` 没有让 checkout、Python 安装或 Node 24 安装失败。
 
