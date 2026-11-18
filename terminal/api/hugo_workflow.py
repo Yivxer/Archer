@@ -15,13 +15,16 @@ from terminal.api.api_tool_helpers import (
 )
 from terminal.api.turn_pipeline import plain_chat_message as _plain_chat_message
 
+_MARKDOWN_PATH = re.compile(r"(~?/[^\n\r`'\"]+?\.md)")
+
+
 def _extract_md_path_from_query(query: str) -> str:
-    match = re.search(r"(/Users/[^\n\r`'\"]+?\.md)", query)
+    match = _MARKDOWN_PATH.search(query)
     return match.group(1) if match else ""
 
 
 def _extract_md_paths_from_text(text: str) -> list[str]:
-    return list(dict.fromkeys(re.findall(r"(/Users/[^\n\r`'\"]+?\.md)", text)))
+    return list(dict.fromkeys(_MARKDOWN_PATH.findall(text)))
 
 
 def _read_md_source(path_value: str) -> tuple[str, str] | None:
@@ -419,14 +422,6 @@ def _hugo_confirmation_result(
     verify_plan: str,
     rollback_plan: str,
 ) -> tuple[list[dict], str]:
-    # “发布 / 重新部署”已经由用户的明确指令授权，直接执行一次即可。
-    # 删除仍保留确认卡，避免不可逆操作被误触发。
-    if action in {"publish", "deploy"}:
-        return _run_hugo_publish_workflow(
-            title=title,
-            actions=[("deploy", args)],
-        )
-
     event_id = f"hugo-blog-{action}-{uuid4().hex[:8]}"
     work_intent = {
         "workflowName": "枫弋札记",

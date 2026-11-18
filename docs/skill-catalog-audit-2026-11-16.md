@@ -195,3 +195,31 @@ PR #7（TestClient / SSE 防挂死）保持不合，本分支没有复制它的�
 3. 可选技能后端要不要装进日常环境。声明已分开，不代表本机已经安装。
 4. 没有和 `6c0f907` 做合并验证，没有安装或发版。
 
+## 2026-11-18 第四批：Hugo 发布确认
+
+远端 foundation 仍是 `4673f9a`。PR #8 仍打开，head 在本批之前是 `8d185a6`，没有别人的新提交。该 PR 的 Checks API 记录为 0：现有 workflow 只在 `main` / `master` 的 pull request 上触发，foundation 基线不会跑这套 CI。
+
+### 根因
+
+两条失败不是策略回落。聊天路径已经走到 Action Mediator，并把明确的「部署/上传到枫弋札记」判成 `AUTO_EXECUTE`。动作若被标成 `deploy`，而 posts 目录里没有对应旧文，重新部署和已有文章捷径都返回空，接着掉进会调用模型的 agent。这里没有模型，于是只有 `failureHint` / `error`，没有 `hugo_blog` 事件。测试还把 `_run_hugo_publish_workflow` 换成直接成功，但这条路径根本没调用它。路径提取也只认 `/Users/...md`，隔离环境里的绝对路径被丢掉。
+
+### 改动
+
+发布和重新部署进入 `_hugo_confirmation_result` 时不再直接执行，改为现有的确认卡：`requiresApproval`，草稿写入审批队列。`deploy` 没有旧文可接时，改走同一条发布确认，不再掉进 agent。Markdown 路径匹配放宽到一般绝对路径，仍不读用户真实博客目录。确认前若调用发布函数，测试会失败。
+
+确认后的执行走现有 `_tool_approval`。测试把 `execute_tool_request` 换成不访问网络的夹具。同一 `eventId` 再确认会复用，不会第二次执行。拒绝，或确认一个不存在的卡片，都是 `executed: false`。
+
+没有改明确发布在 mediator 里的 `AUTO_EXECUTE` 分类，也没有改「带附件说重新部署」那条已有捷径：它仍会在夹具博客目录里写文件并调用被替换的 runtime。那是另一条产品路径，本批不放宽，也不把它改成新渠道。
+
+### 实测
+
+`python3 -m pytest -m "not journey" --timeout=20 --timeout-method=signal --override-ini addopts=`，环境是已声明的 `requirements-dev.txt` 隔离前缀。
+
+51.74s。2120 passed，1 failed，2 skipped。没有测试被 20 秒上限杀掉。唯一失败仍是 `test_god_files_cannot_grow_beyond_part10_gate0_baseline`：`terminal/api/_routes.py` 633 行，基线 629。没有改这个文件，也没有提高阈值。
+
+### 仍要单独决定
+
+1. 带附件的「重新部署」捷径仍会在确认前写入夹具中的 posts 文件并执行 deploy。要不要也收成确认卡，是产品决定。
+2. `_routes.py` 行数闸门。
+3. 没有和本机 `6c0f907` 做合并验证。
+

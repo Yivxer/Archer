@@ -249,9 +249,7 @@ def summarize_api_tool_events(
             tool_notes.append(f"已直接写入 Obsidian；目标路径：{target_path}。")
         elif name == "hugo_blog" and tool_event.get("status") in ("waiting", "ready"):
             tool_notes.append(
-                "hugo_blog 工具可用——可以在回复中自然撰写 Markdown 格式的博客文章。"
-                "客户端会在你回复完成后自动创建文章并直接部署到枫弋札记（无需确认卡片）。"
-                "如需新建文章请给出标题（## 开头）、分类和正文；如需部署已有文章请说明文件名。"
+                "hugo_blog 已生成确认卡。不要声称已经发布或部署；用户确认后才会执行一次。"
             )
         elif tool_event.get("requiresApproval") and "obsidian" in name:
             _raw_nested = draft.get("args")

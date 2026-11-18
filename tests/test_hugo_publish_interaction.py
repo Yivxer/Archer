@@ -15,31 +15,19 @@ def _action_kwargs(action: str) -> dict:
     }
 
 
-def test_explicit_hugo_publish_and_redeploy_execute_without_confirmation(monkeypatch):
-    calls = []
+def test_explicit_hugo_publish_and_redeploy_wait_for_confirmation(monkeypatch):
+    def reject_unconfirmed(*_args, **_kwargs):
+        raise AssertionError("发布和重新部署必须先确认，不能直接执行")
 
-    def fake_run(*, title, actions, summary_prefix=None):
-        calls.append((title, actions, summary_prefix))
-        return ([{"type": "tool_event", "toolEvent": {
-            "id": "hugo-complete",
-            "name": "hugo_blog",
-            "status": "complete",
-            "risk": "low",
-            "summary": "部署枫弋札记",
-            "detail": "HTTP 200",
-            "requiresApproval": False,
-        }}], "《测试文章》已发布。")
-
-    monkeypatch.setattr(hugo_workflow, "_run_hugo_publish_workflow", fake_run)
+    monkeypatch.setattr(hugo_workflow, "_run_hugo_publish_workflow", reject_unconfirmed)
 
     for action in ("publish", "deploy"):
         events, summary = hugo_workflow._hugo_confirmation_result(**_action_kwargs(action))
         event = events[0]["toolEvent"]
-        assert event["status"] == "complete"
-        assert event["requiresApproval"] is False
-        assert "确认卡" not in summary
-
-    assert [call[1][0][1]["action"] for call in calls] == ["publish", "deploy"]
+        assert event["status"] == "waiting"
+        assert event["requiresApproval"] is True
+        assert event["draft"]["args"]["action"] == action
+        assert "确认卡" in summary
 
 
 def test_hugo_delete_keeps_confirmation_card():
