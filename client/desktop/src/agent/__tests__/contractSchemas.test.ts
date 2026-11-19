@@ -25,6 +25,29 @@ describe('contract schemas', () => {
     }
   })
 
+  it('accepts an unknown permission without dropping the event', () => {
+    const parsed = parseAgentEvent({
+      type: 'tool.request',
+      id: 'tool-unknown',
+      sessionId: 'session-1',
+      createdAt: '2026-11-16T10:00:00.000Z',
+      toolName: 'ghost_skill',
+      displayName: 'ghost_skill',
+      risk: 'medium',
+      permissionLevel: 'unknown',
+      status: 'waiting_approval',
+      args: {},
+      summary: '缺少元数据，等待确认',
+      detail: 'permission unknown',
+      requiresApproval: true,
+      blocked: false,
+    })
+    expect(parsed.type).toBe('tool.request')
+    if (parsed.type === 'tool.request') {
+      expect(parsed.permissionLevel).toBe('unknown')
+    }
+  })
+
   it('rejects unknown event types', () => {
     const result = agentEventSchema.safeParse({
       type: 'tool_event',

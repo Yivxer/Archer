@@ -1186,12 +1186,12 @@ class TestApiSkillRouting:
 
         hugo_events = [event["toolEvent"] for event in events if event.get("toolEvent", {}).get("name") == "hugo_blog"]
         assert len(hugo_events) == 1
-        assert hugo_events[0]["status"] == "complete"
-        assert hugo_events[0]["requiresApproval"] is False
-        args = calls[0]["actions"][0][1]
+        assert hugo_events[0]["status"] == "waiting"
+        assert hugo_events[0]["requiresApproval"] is True
+        args = hugo_events[0]["draft"]["args"]
         assert args["action"] == "publish"
         assert args["title"] == "测试发布"
-        assert not any("确认卡" in event.get("text", "") for event in events)
+        assert calls == []
 
     def test_direct_hugo_delete_removes_post_and_deploys(self, monkeypatch, tmp_path):
         from terminal.api import _tools as tools
@@ -1225,8 +1225,24 @@ class TestApiSkillRouting:
         from pathlib import Path
         from terminal.api import _tools as tools
 
+        executions = []
+
+        def reject_unconfirmed_publish(*_args, **_kwargs):
+            raise AssertionError("发布必须先形成确认卡，不能在确认前执行")
+
+        def fake_execute(request, skills, cfg=None, cancellation_token=None):
+            if request.get("skillName") != "hugo_blog":
+                return {"ok": True, "executed": False, "summary": "not hugo", "output": ""}
+            executions.append(dict(request.get("args") or {}))
+            return {
+                "ok": True, "executed": True, "skillName": "hugo_blog",
+                "summary": "fixture publish", "output": "fixture-output",
+            }
+
         monkeypatch.setattr(tools, "_select_api_skills", lambda _query: {"hugo_blog": object()})
-        calls = _stub_direct_hugo_execution(monkeypatch)
+        monkeypatch.setattr("terminal.api.hugo_workflow._run_hugo_publish_workflow", reject_unconfirmed_publish)
+        _stub_hugo_decision(monkeypatch)
+        monkeypatch.setattr("core.api_tool_service.execute_tool_request", fake_execute)
 
         with tempfile.TemporaryDirectory(prefix=".tmp-hugo-heartbeat-", dir=Path.cwd()) as root:
             note_dir = Path(root) / "Mobile Documents" / "iCloud~md~obsidian"
@@ -1242,12 +1258,23 @@ class TestApiSkillRouting:
 
         hugo_events = [event["toolEvent"] for event in events if event.get("toolEvent", {}).get("name") == "hugo_blog"]
         assert len(hugo_events) == 1
-        args = calls[0]["actions"][0][1]
-        assert hugo_events[0]["status"] == "complete"
+        assert hugo_events[0]["status"] == "waiting"
+        assert hugo_events[0]["requiresApproval"] is True
+        args = hugo_events[0]["draft"]["args"]
         assert args["action"] == "publish"
         assert args["title"] == "Archer 初衍的诞生日记·第一篇"
         assert args["sourcePath"].endswith("Archer 初衍的诞生日记·第一篇.md")
-        assert events[-1] == {"type": "done", "done": True}
+        assert executions == []
+
+        event_id = hugo_events[0]["draft"]["eventId"]
+        approved = _tool_approval({"eventId": event_id, "decision": "approved"})
+        assert approved["executed"] is True
+        assert len(executions) == 1
+        assert executions[0]["sourcePath"].endswith("Archer 初衍的诞生日记·第一篇.md")
+        repeated = _tool_approval({"eventId": event_id, "decision": "approved"})
+        assert repeated.get("reused") is True
+        assert repeated["executed"] is True
+        assert len(executions) == 1
 
     def test_hugo_upload_path_routes_even_when_needs_tools_is_false(self, monkeypatch, tmp_path):
         import tempfile
@@ -1277,7 +1304,18 @@ class TestApiSkillRouting:
                 memory_scope=[],
             ),
         )
-        calls = _stub_direct_hugo_execution(monkeypatch)
+        executions = []
+
+        def reject_unconfirmed_publish(*_args, **_kwargs):
+            raise AssertionError("发布必须先形成确认卡，不能在确认前执行")
+
+        def fake_execute(request, skills, cfg=None, cancellation_token=None):
+            executions.append(dict(request.get("args") or {}))
+            return {"ok": True, "executed": True, "summary": "fixture", "output": "fixture"}
+
+        monkeypatch.setattr("terminal.api.hugo_workflow._run_hugo_publish_workflow", reject_unconfirmed_publish)
+        _stub_hugo_decision(monkeypatch)
+        monkeypatch.setattr("core.api_tool_service.execute_tool_request", fake_execute)
 
         with tempfile.TemporaryDirectory(prefix=".tmp-hugo-upload-", dir=Path.cwd()) as root:
             note_dir = Path(root) / "Mobile Documents" / "iCloud~md~obsidian"
@@ -1293,11 +1331,19 @@ class TestApiSkillRouting:
 
         hugo_events = [event["toolEvent"] for event in events if event.get("toolEvent", {}).get("name") == "hugo_blog"]
         assert len(hugo_events) == 1
-        assert hugo_events[0]["status"] == "complete"
-        args = calls[0]["actions"][0][1]
-        assert args["action"] == "publish"
-        assert args["sourcePath"] == str(note)
+        assert hugo_events[0]["status"] == "waiting"
+        assert hugo_events[0]["requiresApproval"] is True
+        assert hugo_events[0]["draft"]["args"]["action"] == "publish"
+        assert hugo_events[0]["draft"]["args"]["sourcePath"] == str(note)
         assert not any(event.get("toolEvent", {}).get("name") == "obsidian_write" for event in events)
+        event_id = hugo_events[0]["draft"]["eventId"]
+        missing = _tool_approval({"eventId": "not-this-card", "decision": "approved"})
+        assert missing["executed"] is False
+        assert "未找到待执行草稿" in missing["message"]
+        denied = _tool_approval({"eventId": event_id, "decision": "denied"})
+        assert denied["executed"] is False
+        assert denied["decision"] == "denied"
+        assert executions == []
 
     def test_desktop_tool_loop_normalizes_sdk_messages(self, monkeypatch):
         from types import SimpleNamespace
@@ -1416,9 +1462,13 @@ class TestApiSkillRouting:
 
         hugo_events = [event["toolEvent"] for event in events if event.get("toolEvent", {}).get("name") == "hugo_blog"]
         assert len(hugo_events) == 1
-        assert hugo_events[0]["status"] == "blocked"
-        assert [event["failureHintEvent"] for event in events if event.get("type") == "failureHintEvent"]
-        assert events[-1] == {"type": "done", "done": True}
+        assert hugo_events[0]["status"] == "waiting"
+        assert hugo_events[0]["requiresApproval"] is True
+        failed = _tool_approval({"eventId": hugo_events[0]["draft"]["eventId"], "decision": "approved"})
+        assert failed["executed"] is False
+        observed = f"{failed.get('message', '')} {failed.get('output', '')}"
+        assert observed.strip()
+        assert "已发布" not in observed
 
     def test_hugo_followup_deploy_uses_conversation_frontmatter(self, monkeypatch, tmp_path):
         from terminal.api import _tools as tools
@@ -1452,9 +1502,11 @@ class TestApiSkillRouting:
 
         hugo_events = [event["toolEvent"] for event in events if event.get("toolEvent", {}).get("name") == "hugo_blog"]
         assert len(hugo_events) == 1
-        assert hugo_events[0]["status"] == "complete"
-        assert calls[0]["actions"][0][1] == {"action": "deploy", "filename": f"{slug}.md"}
-        assert not any("确认卡" in event.get("text", "") for event in events)
+        assert hugo_events[0]["status"] == "waiting"
+        assert hugo_events[0]["requiresApproval"] is True
+        assert calls == []
+        assert hugo_events[0]["draft"]["args"]["action"] == "deploy"
+        assert hugo_events[0]["draft"]["args"].get("filename") == f"{slug}.md"
 
     def test_hugo_new_approval_runs_deploy_after_create(self, monkeypatch):
         PENDING_TOOL_DRAFTS.clear()
@@ -1505,6 +1557,132 @@ class TestApiSkillRouting:
         assert "部署成功" in result["output"]
         assert "已部署《Test》到枫弋札记" in result["output"]
         assert "hugo deploy 已自动执行并验证单页可访问" in result["message"]
+        assert result["followup"] == {"articleSaved": True, "deployed": True, "phase": "saved_and_deployed"}
+
+    def test_hugo_deploy_failure_keeps_saved_article_and_does_not_rewrite(self, monkeypatch):
+        PENDING_TOOL_DRAFTS.clear()
+        writes = []
+        deploys = []
+
+        def fake_execute(request, skills, cfg=None):
+            action = request["args"]["action"]
+            if action == "new":
+                writes.append(dict(request["args"]))
+                return {
+                    "ok": True,
+                    "executed": True,
+                    "summary": "文章已创建",
+                    "output": "created ok",
+                    "metadata": {"filename": "test.md", "createdFile": "/tmp/posts/test.md"},
+                    "policy": {"decision": "allow", "risk": "low", "reason": ""},
+                }
+            deploys.append(dict(request["args"]))
+            return {
+                "ok": False,
+                "executed": False,
+                "summary": "部署失败",
+                "output": "部署失败：连接被拒绝",
+                "policy": {"decision": "allow", "risk": "medium", "reason": ""},
+            }
+
+        def fake_hugo_run(args):
+            deploys.append(dict(args))
+            return "部署失败：连接被拒绝"
+
+        monkeypatch.setattr("core.api_tool_service.execute_tool_request", fake_execute)
+        monkeypatch.setattr("skills.loader.load_skills", lambda: {})
+        monkeypatch.setattr("skills.hugo_blog.run", fake_hugo_run)
+
+        new_args = {
+            "action": "new",
+            "title": "Deploy Fail Fixture",
+            "category": "写作",
+            "description": "desc",
+            "body": "body that must not be published twice",
+        }
+        denied_id = "hugo-deny-before-write"
+        PENDING_TOOL_DRAFTS[denied_id] = {
+            "kind": "tool_request", "eventId": denied_id, "skillName": "hugo_blog", "args": dict(new_args),
+        }
+        denied = _tool_approval({"eventId": denied_id, "decision": "denied"})
+        assert denied["executed"] is False
+        assert writes == []
+        assert deploys == []
+
+        missing = _tool_approval({"eventId": "not-a-card", "decision": "approved"})
+        assert missing["executed"] is False
+        assert writes == []
+
+        event_id = "hugo-save-deploy-fail"
+        PENDING_TOOL_DRAFTS[event_id] = {
+            "kind": "tool_request", "eventId": event_id, "skillName": "hugo_blog", "args": dict(new_args),
+        }
+        failed = _tool_approval({"eventId": event_id, "decision": "approved"})
+        assert failed["executed"] is True
+        assert failed["followup"]["articleSaved"] is True
+        assert failed["followup"]["deployed"] is False
+        assert "文章已保存，部署失败" in failed["output"]
+        assert "文章已保存，部署失败" in failed["message"]
+        assert writes == [new_args]
+        assert deploys == [{"action": "deploy", "filename": "test.md"}]
+
+        repeated = _tool_approval({"eventId": event_id, "decision": "approved"})
+        assert repeated.get("reused") is True
+        assert repeated["executed"] is True
+        assert writes == [new_args]
+        assert len(deploys) == 1
+
+        duplicate_id = "hugo-save-deploy-fail-again"
+        PENDING_TOOL_DRAFTS[duplicate_id] = {
+            "kind": "tool_request", "eventId": duplicate_id, "skillName": "hugo_blog", "args": dict(new_args),
+        }
+        duplicate = _tool_approval({"eventId": duplicate_id, "decision": "approved"})
+        assert duplicate.get("reused") is True
+        assert writes == [new_args]
+        assert len(deploys) == 1
+
+        retry_id = "hugo-deploy-retry"
+        PENDING_TOOL_DRAFTS[retry_id] = {
+            "kind": "tool_request",
+            "eventId": retry_id,
+            "skillName": "hugo_blog",
+            "args": {"action": "deploy", "filename": "test.md"},
+        }
+        retried = _tool_approval({"eventId": retry_id, "decision": "approved"})
+        assert retried["executed"] is False
+        assert "部署失败" in retried["output"]
+        assert writes == [new_args]
+        assert {"action": "deploy", "filename": "test.md"} in deploys
+
+    def test_hugo_write_failure_does_not_deploy(self, monkeypatch):
+        PENDING_TOOL_DRAFTS.clear()
+        deploys = []
+
+        def fake_execute(request, skills, cfg=None):
+            return {
+                "ok": False,
+                "executed": False,
+                "summary": "hugo_blog new 失败",
+                "output": "文件不存在：test.md",
+                "policy": {"decision": "allow", "risk": "low", "reason": ""},
+            }
+
+        monkeypatch.setattr("core.api_tool_service.execute_tool_request", fake_execute)
+        monkeypatch.setattr("skills.loader.load_skills", lambda: {})
+        monkeypatch.setattr("skills.hugo_blog.run", lambda args: deploys.append(args) or "")
+
+        event_id = "hugo-write-fail"
+        PENDING_TOOL_DRAFTS[event_id] = {
+            "kind": "tool_request",
+            "eventId": event_id,
+            "skillName": "hugo_blog",
+            "args": {"action": "new", "title": "Test", "body": "body"},
+        }
+        failed = _tool_approval({"eventId": event_id, "decision": "approved"})
+        assert failed["executed"] is False
+        assert "文件不存在" in failed["output"]
+        assert "followup" not in failed
+        assert deploys == []
 
     def test_tool_approval_denied_uses_cancelled_message(self):
         PENDING_TOOL_DRAFTS.clear()
@@ -1915,7 +2093,7 @@ class TestToolApproval:
         assert records[0]["risk"] == "medium"
         assert records[0]["executed"] is True
         assert records[0]["message"] == "safe_tool 完成"
-        assert records[0]["permissionLevel"] == "read-only"
+        assert records[0]["permissionLevel"] == "unknown"
 
     def test_tool_request_approval_audit_records_deploy_remote_permission(self, tmp_path, monkeypatch):
         import json

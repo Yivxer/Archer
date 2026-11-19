@@ -335,6 +335,7 @@ def _tool_approval(payload: dict, runtime_context: Any = None) -> dict:
                 message,
                 work_receipt,
                 execution.raw_result,
+                execution.followup,
             ),
             request_fingerprint,
             verification_receipt,
@@ -577,7 +578,7 @@ def _retry_tool_outbox(item_id: str, runtime_context) -> dict:
         event_id, "approved", draft,
         ApprovalExecution(
             execution.executed, execution.output, execution.message,
-            execution.work_receipt, execution.raw_result,
+            execution.work_receipt, execution.raw_result, execution.followup,
         ),
         fingerprint,
         verification_receipt,

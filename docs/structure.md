@@ -603,7 +603,7 @@ client/desktop/resources/
 
 ## 数字 Baseline（2026-07-18 codex Part 8 thread / initiative feedback / memory companion 补充后更新）
 
-> Source-of-truth 口径：以本节为准，其他文档引用时需对齐此处。
+> Source-of-truth 口径：以本节为准，其他文档引用时需对齐此处。技能注册个数不在此写死。
 
 | 维度 | 数值 | 统计方式 |
 |---|---|---|
@@ -611,7 +611,7 @@ client/desktop/resources/
 | Python 测试用例 | 1703 | `pytest --collect-only` 全量 |
 | TS 测试文件 | 39 | 29 `.test.ts` + 10 `.test.tsx` |
 | TS 测试用例 | 541 | `npm test -- --run` |
-| 技能数 | 43 | `ls skills/*.py \| wc -l`（Python-only，无 TS skill） |
+| 技能数 | 不以本文写死 | 生产注册以 `skills.loader.register_all_skills()` 与 `GET /skills` 为准。2026-07-18 的 43 是当时 `ls skills/*.py` 的文件数，含 loader/meta，不是技能个数 |
 | 对话模式 | 12 | `ls modes/*.md \| wc -l` |
 | Memory SQLite | 1 | `memory/archer.db` |
 

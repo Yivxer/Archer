@@ -26,6 +26,7 @@ class ApprovalExecution:
     message: str
     work_receipt: dict | None = None
     raw_result: dict | None = None
+    followup: dict | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -157,6 +158,8 @@ def build_approval_response(
     trace_id = str(draft.get("traceId") or "").strip()
     if trace_id:
         response["traceId"] = trace_id
+    if execution.followup:
+        response["followup"] = execution.followup
     return response
 
 
@@ -170,6 +173,46 @@ def persist_approval_response(
     if fingerprint and decision == "approved" and response.get("executed"):
         set_fingerprint_result(fingerprint, response)
     return response
+
+
+_DEPLOY_FAILURE_MARKERS = (
+    "部署失败",
+    "工作流失败",
+    "构建失败",
+    "部署超时",
+    "单页验证失败",
+    "发布失败",
+)
+
+
+def _deploy_text_failed(deploy_result: object, workflow_summary: str) -> bool:
+    text = f"{deploy_result}\n{workflow_summary}"
+    return any(marker in text for marker in _DEPLOY_FAILURE_MARKERS)
+
+
+def _saved_but_deploy_failed(
+    execution: ApprovalExecution,
+    detail: str,
+) -> ApprovalExecution:
+    """Keep executed true: it means the approved write finished.
+
+    Fingerprint reuse and same-card reuse both key off executed. Clearing it
+    would let a later approval of the same article args write again. The
+    deploy outcome is followup.deployed, and the visible text says the
+    article was saved.
+    """
+    notice = "文章已保存，部署失败"
+    output = execution.output + "\n\n" + notice
+    if detail.strip():
+        output += "\n" + detail.strip()
+    return ApprovalExecution(
+        True,
+        output,
+        execution.message + " | " + notice,
+        execution.work_receipt,
+        execution.raw_result,
+        {"articleSaved": True, "deployed": False, "phase": "saved_deploy_failed"},
+    )
 
 
 def apply_approval_followup(
@@ -202,6 +245,13 @@ def apply_approval_followup(
         if "filename" not in deploy_args and args.get("slug"):
             deploy_args["slug"] = args["slug"]
         title = str(args.get("title") or title)
+    elif (
+        skill_name == "hugo_blog"
+        and args.get("deployAfter") is True
+        and str(args.get("filename") or "").strip()
+    ):
+        deploy_args = {"action": "deploy", "filename": Path(str(args["filename"])).name}
+        title = str(args.get("title") or Path(str(args["filename"])).stem or title)
     elif skill_name == "file_ops":
         target = str(args.get("path") or "")
         if "/yivxer-blog/content/posts/" in target and args.get("action") == "write":
@@ -211,14 +261,26 @@ def apply_approval_followup(
         return execution
     try:
         deploy_result, workflow_summary = deploy(title=title, deploy_args=deploy_args)
-        output = execution.output + "\n\n" + str(deploy_result)
-        if workflow_summary and workflow_summary not in output:
-            output += "\n\n" + workflow_summary
-        verified = "单页验证成功" in str(deploy_result) or "验证：" in workflow_summary
-        message = execution.message + (" | hugo deploy 已自动执行并验证单页可访问" if verified else " | hugo deploy 已自动执行")
-        return ApprovalExecution(True, output, message, execution.work_receipt, execution.raw_result)
     except Exception as exc:
-        return ApprovalExecution(True, execution.output + f"\n\n部署失败：{exc}", execution.message + " | 部署失败", execution.work_receipt, execution.raw_result)
+        return _saved_but_deploy_failed(execution, f"部署失败：{exc}")
+    if _deploy_text_failed(deploy_result, workflow_summary):
+        detail = "\n\n".join(
+            part for part in (str(deploy_result).strip(), str(workflow_summary).strip()) if part
+        )
+        return _saved_but_deploy_failed(execution, detail)
+    output = execution.output + "\n\n" + str(deploy_result)
+    if workflow_summary and workflow_summary not in output:
+        output += "\n\n" + workflow_summary
+    verified = "单页验证成功" in str(deploy_result) or "验证：" in workflow_summary
+    message = execution.message + (" | hugo deploy 已自动执行并验证单页可访问" if verified else " | hugo deploy 已自动执行")
+    return ApprovalExecution(
+        True,
+        output,
+        message,
+        execution.work_receipt,
+        execution.raw_result,
+        {"articleSaved": True, "deployed": True, "phase": "saved_and_deployed"},
+    )
 
 
 def summarize_api_tool_events(
@@ -249,9 +311,7 @@ def summarize_api_tool_events(
             tool_notes.append(f"已直接写入 Obsidian；目标路径：{target_path}。")
         elif name == "hugo_blog" and tool_event.get("status") in ("waiting", "ready"):
             tool_notes.append(
-                "hugo_blog 工具可用——可以在回复中自然撰写 Markdown 格式的博客文章。"
-                "客户端会在你回复完成后自动创建文章并直接部署到枫弋札记（无需确认卡片）。"
-                "如需新建文章请给出标题（## 开头）、分类和正文；如需部署已有文章请说明文件名。"
+                "hugo_blog 已生成确认卡。不要声称已经发布或部署；用户确认后才会执行一次。"
             )
         elif tool_event.get("requiresApproval") and "obsidian" in name:
             _raw_nested = draft.get("args")

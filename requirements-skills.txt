@@ -1,0 +1,5 @@
+# Optional skill backends. Skills stay registered when these are absent;
+# run() reports the missing package instead of failing registration.
+pymupdf>=1.24.0
+feedparser>=6.0.0
+pytesseract>=0.3.10

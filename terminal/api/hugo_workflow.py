@@ -15,13 +15,16 @@ from terminal.api.api_tool_helpers import (
 )
 from terminal.api.turn_pipeline import plain_chat_message as _plain_chat_message
 
+_MARKDOWN_PATH = re.compile(r"(~?/[^\n\r`'\"]+?\.md)")
+
+
 def _extract_md_path_from_query(query: str) -> str:
-    match = re.search(r"(/Users/[^\n\r`'\"]+?\.md)", query)
+    match = _MARKDOWN_PATH.search(query)
     return match.group(1) if match else ""
 
 
 def _extract_md_paths_from_text(text: str) -> list[str]:
-    return list(dict.fromkeys(re.findall(r"(/Users/[^\n\r`'\"]+?\.md)", text)))
+    return list(dict.fromkeys(_MARKDOWN_PATH.findall(text)))
 
 
 def _read_md_source(path_value: str) -> tuple[str, str] | None:
@@ -419,14 +422,6 @@ def _hugo_confirmation_result(
     verify_plan: str,
     rollback_plan: str,
 ) -> tuple[list[dict], str]:
-    # “发布 / 重新部署”已经由用户的明确指令授权，直接执行一次即可。
-    # 删除仍保留确认卡，避免不可逆操作被误触发。
-    if action in {"publish", "deploy"}:
-        return _run_hugo_publish_workflow(
-            title=title,
-            actions=[("deploy", args)],
-        )
-
     event_id = f"hugo-blog-{action}-{uuid4().hex[:8]}"
     work_intent = {
         "workflowName": "枫弋札记",
@@ -539,7 +534,10 @@ def _try_direct_hugo_redeploy_with_attachment(
     *,
     messages: list[dict] | None = None,
 ) -> tuple[list[dict], str] | None:
-    """用户带附件说「重新部署/再部署/更新」已有文章 → 直接读附件正文写入 posts 文件 + deploy，不弹确认卡。
+    """用户带附件说「重新部署/再部署/更新」已有文章 → 生成确认卡。
+
+    确认前不改 posts、不调用发布 runtime。同意后由 hugo_blog edit 写入正文，
+    再按 deployAfter 部署一次。
 
     这是确定性路径，绕过 LLM agent 循环，避免幻觉。触发条件：
     1. 用户带附件（file_refs 非空）
@@ -617,71 +615,25 @@ def _try_direct_hugo_redeploy_with_attachment(
     if len(body) < 40:
         return None  # 正文仍然太短，不触发此捷径
 
-    # 重建文件：保留原 frontmatter + 新正文
-    if existing_content.strip().endswith("---"):
-        new_content = existing_content.strip() + "\n\n" + body + "\n"
-    else:
-        # 已有正文，替换：找第二个 --- 后面的内容
-        parts = existing_content.split("---\n", 2)
-        if len(parts) >= 3:
-            new_content = parts[0] + "---\n" + parts[1] + "---\n\n" + body + "\n"
-        else:
-            new_content = existing_content  # 格式异常，不动文件
-
-    target.write_text(new_content, encoding="utf-8")
-
-    # 直接调用 deploy（不弹确认卡，直接执行）
-    from core.tool_runtime import invoke as runtime_invoke
-    from skills import hugo_blog as hugo_blog_module
-
-    workflow_id = f"hugo-redeploy-{uuid4().hex[:8]}"
-    event_id = f"{workflow_id}-deploy"
+    # 确认前只保留计划：不写 posts，不调用发布 runtime。
     target_url = f"https://iver.yivxer.com/posts/{final_slug}/"
-
-    tr = runtime_invoke(
-        "hugo_blog",
-        {"action": "deploy", "filename": target.name},
-        {"hugo_blog": hugo_blog_module},
-    )
-
-    if tr.ok:
-        result_text = tr.content_preview or tr.summary
-    else:
-        err = tr.error or {}
-        result_text = (
-            f"枫弋札记重新部署失败："
-            f"{err.get('type', 'Error')}: {err.get('message') or tr.summary}"
-        )
-
-    # 生成 tool_event（complete 或 blocked）
-    status = "complete" if tr.ok else "blocked"
-    tool_event = {
-        "type": "tool_event",
-        "toolEvent": {
-            "id": event_id,
-            "name": "hugo_blog",
-            "status": status,
-            "risk": "low",
-            "summary": f"重新部署《{final_title}》",
-            "detail": result_text,
-            "requiresApproval": False,
-            "draft": {
-                "path": str(target),
-                "title": final_title,
-                "url": target_url,
-                "action": "redeploy",
-            },
+    return _hugo_confirmation_result(
+        action="edit",
+        title=final_title,
+        args={
+            "action": "edit",
+            "filename": target.name,
+            "body": body,
+            "title": final_title,
+            "sourcePath": label,
+            "deployAfter": True,
         },
-    }
-
-    summary = _format_hugo_chat_summary(
-        final_title,
-        result_text,
-        deploy_ok=tr.ok,
-        prefix=f"已重新部署《{final_title}》到枫弋札记。" if tr.ok else f"重新部署《{final_title}》失败。",
+        source=label,
+        target_url=target_url,
+        steps=["保留原 frontmatter", "确认后用附件正文替换", "确认后部署一次"],
+        verify_plan="确认后才写入文章并部署",
+        rollback_plan="拒绝或取消则不改 posts 文件、不部署",
     )
-
-    return [tool_event], summary
 
 
 _HUGO_AGENT_SYSTEM_PROMPT = """你是 Archer 的枫弋札记（博客）工作流执行器。

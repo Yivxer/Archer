@@ -41,6 +41,8 @@ def iter_hugo_turn_events(
                     direct = dependencies.deploy_existing(messages, query)
             elif authorized_action == "publish":
                 direct = dependencies.publish(query, file_refs or [], messages)
+            if not direct and authorized_action in {"deploy", "redeploy"}:
+                direct = dependencies.publish(query, file_refs or [], messages)
             if direct:
                 output.put(("result", direct))
                 return

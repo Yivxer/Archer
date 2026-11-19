@@ -155,9 +155,16 @@ def test_detect_focus_within_window(tmp_path, monkeypatch):
     # 把索引中第一篇笔记的 mtime 改到「现在」
     import sqlite3
     import memory.store as store_mod
-    now_str = datetime.now().isoformat(timespec="seconds")
+    now = datetime.now()
     conn = sqlite3.connect(store_mod.DB_PATH)
-    conn.execute("UPDATE vault_notes SET mtime=? WHERE path LIKE '%Archer%'", (now_str,))
+    conn.execute(
+        "UPDATE vault_notes SET mtime=? WHERE path LIKE '%Obsidian%'",
+        ((now - timedelta(minutes=5)).isoformat(timespec="seconds"),),
+    )
+    conn.execute(
+        "UPDATE vault_notes SET mtime=? WHERE path LIKE '%Archer%'",
+        ((now - timedelta(seconds=5)).isoformat(timespec="seconds"),),
+    )
     conn.commit()
     conn.close()
 
@@ -247,9 +254,16 @@ def test_get_current_focus_reads_cache(tmp_path, monkeypatch):
 
     import sqlite3
     import memory.store as store_mod
-    now_str = datetime.now().isoformat(timespec="seconds")
+    now = datetime.now()
     conn = sqlite3.connect(store_mod.DB_PATH)
-    conn.execute("UPDATE vault_notes SET mtime=? WHERE path LIKE '%Archer%'", (now_str,))
+    conn.execute(
+        "UPDATE vault_notes SET mtime=? WHERE path LIKE '%Obsidian%'",
+        ((now - timedelta(minutes=5)).isoformat(timespec="seconds"),),
+    )
+    conn.execute(
+        "UPDATE vault_notes SET mtime=? WHERE path LIKE '%Archer%'",
+        ((now - timedelta(seconds=5)).isoformat(timespec="seconds"),),
+    )
     conn.commit()
     conn.close()
 

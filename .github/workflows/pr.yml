@@ -1,10 +1,16 @@
 name: PR Check
 
 on:
+  # pull_request.branches 过滤的是 PR 的 base，不是 head。
+  # 因此目标分支为 foundation 的 PR 会跑，不要求 head 名叫 foundation。
+  # push.branches 过滤的是被推送的 ref 本身，与 pull_request 不是同一条规则。
   pull_request:
-    branches: [main, master]
+    branches: [main, master, codex/foundation-20261001]
   push:
-    branches: [main, master]
+    branches: [main, master, codex/foundation-20261001]
+
+permissions:
+  contents: read
 
 # 同一 PR 新 push 取消旧 run，省 CI 配额
 concurrency:
@@ -28,8 +34,8 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install pytest ruff
+          pip install -r requirements-dev.txt
+          pip install ruff
 
       - name: Run focused tests
         env:

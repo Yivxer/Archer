@@ -208,10 +208,11 @@ def test_low_risk_skill_allow():
     result = check("weather", {"city": "北京"}, skills)
     assert result.decision == Decision.ALLOW
 
-def test_unknown_skill_allow():
-    """未注册技能 → ALLOW（由 runtime 返回 SkillNotFound）。"""
+def test_unknown_skill_is_not_silently_allowed():
+    """缺少元数据的技能不能按只读直接放行。"""
     result = check("ghost_skill", {}, {})
-    assert result.decision == Decision.ALLOW
+    assert result.decision == Decision.CONFIRM
+    assert result.risk == "medium"
 
 
 # ── 代码扫描 ───────────────────────────────────────────────────────────────────

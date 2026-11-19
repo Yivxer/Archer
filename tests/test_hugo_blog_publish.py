@@ -366,7 +366,7 @@ def test_hugo_blog_verify_url_empty_returns_false():
 
 
 def test_try_direct_hugo_redeploy_with_attachment_updates_and_deploys(monkeypatch):
-    """带附件重新部署已有文章：确定性路径，不弹确认卡，直接执行 deploy"""
+    """带附件重新部署已有文章：确认前不写 posts、不部署；同意后写一次并部署一次。"""
     import sys
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     from terminal.api import _tools
@@ -388,29 +388,14 @@ def test_try_direct_hugo_redeploy_with_attachment_updates_and_deploys(monkeypatc
         monkeypatch.setattr(hugo_blog, "BLOG_DIR", blog)
         monkeypatch.setattr(hugo_blog, "POSTS_DIR", posts)
 
-        # Mock _run_command 让 deploy 成功
+        deploy_calls = []
+
         def fake_run_command(cmd, timeout):
+            deploy_calls.append(list(cmd))
             return subprocess.CompletedProcess(cmd, 0, stdout="ok", stderr="")
+
         monkeypatch.setattr(hugo_blog, "_run_command", fake_run_command)
-
-        # Mock _verify_url 返回成功
         monkeypatch.setattr(hugo_blog, "_verify_url", lambda url, timeout=5: (True, f"HTTP 200 {url}"))
-
-        # Mock runtime_invoke 避免真发 deploy
-        class FakeToolResult:
-            def __init__(self, ok, content_preview, summary):
-                self.ok = ok
-                self.content_preview = content_preview
-                self.summary = summary
-                self.error = None
-
-        def fake_runtime_invoke(name, args, skills):
-            assert name == "hugo_blog"
-            assert args["action"] == "deploy"
-            assert args["filename"] == "liu-yue-fu-pan.md"
-            return FakeToolResult(True, "部署成功：https://iver.yivxer.com/posts/liu-yue-fu-pan/ HTTP 200", "hugo_blog deploy 完成")
-
-        monkeypatch.setattr("core.tool_runtime.invoke", fake_runtime_invoke)
 
         # 构造附件内容（含 frontmatter + 正文）
         attachment_content = (
@@ -431,23 +416,86 @@ def test_try_direct_hugo_redeploy_with_attachment_updates_and_deploys(monkeypatc
             messages=[{"role": "user", "content": "请重新部署这篇六月复盘文章"}],
         )
 
-        # 应返回非 None
         assert result is not None
         events, summary = result
-
-        # 应有 1 个 tool_event，status=complete
         assert len(events) == 1
-        assert events[0]["type"] == "tool_event"
-        assert events[0]["toolEvent"]["status"] == "complete"
-        assert events[0]["toolEvent"]["requiresApproval"] is False  # 不弹确认卡
+        tool_event = events[0]["toolEvent"]
+        assert tool_event["status"] == "waiting"
+        assert tool_event["requiresApproval"] is True
+        args = tool_event["draft"]["args"]
+        assert args["action"] == "edit"
+        assert args["filename"] == "liu-yue-fu-pan.md"
+        assert args["title"] == "六月：复盘"
+        assert args["sourcePath"] == str(att_path)
+        assert "这是六月复盘的正文内容" in args["body"]
+        assert args["deployAfter"] is True
+        assert "确认卡" in summary
+        assert existing_post.read_text(encoding="utf-8").count("这是六月复盘的正文内容") == 0
+        assert deploy_calls == []
 
-        # 文件应被更新（正文写入）
+        from tests.test_desktop_api import _tool_approval
+
+        event_id = tool_event["draft"]["eventId"]
+        missing = _tool_approval({"eventId": "not-this-card", "decision": "approved"})
+        assert missing["executed"] is False
+        assert "未找到待执行草稿" in missing["message"]
+        assert existing_post.read_text(encoding="utf-8").count("这是六月复盘的正文内容") == 0
+
+        from skills.loader import load_skill_full
+        loaded = load_skill_full("hugo_blog")
+        loaded.BLOG_DIR = blog
+        loaded.POSTS_DIR = posts
+        loaded._run_command = fake_run_command
+        loaded._verify_url = lambda url, timeout=5: (True, f"HTTP 200 {url}")
+
+        import pytest
+        with pytest.raises(ValueError, match="decision must be approved or denied"):
+            _tool_approval({"eventId": event_id, "decision": "maybe"})
+        assert existing_post.read_text(encoding="utf-8").count("这是六月复盘的正文内容") == 0
+        assert deploy_calls == []
+
+        approved = _tool_approval({"eventId": event_id, "decision": "approved"})
+        assert approved["executed"] is True
         updated = existing_post.read_text(encoding="utf-8")
         assert "这是六月复盘的正文内容" in updated
-        assert "slug: \"liu-yue-fu-pan\"" in updated  # 保留原 frontmatter
+        assert 'slug: "liu-yue-fu-pan"' in updated
+        assert deploy_calls
+        writes_after_approve = updated.count("这是六月复盘的正文内容")
 
-        # summary 应包含「已重新部署」
-        assert "已重新部署" in summary
+        repeated = _tool_approval({"eventId": event_id, "decision": "approved"})
+        assert repeated.get("reused") is True
+        assert existing_post.read_text(encoding="utf-8").count("这是六月复盘的正文内容") == writes_after_approve
+
+        denied_result = _tools._try_direct_hugo_redeploy_with_attachment(
+            "请重新部署这篇六月复盘文章",
+            file_refs,
+            messages=[{"role": "user", "content": "请重新部署这篇六月复盘文章"}],
+        )
+        denied_id = denied_result[0][0]["toolEvent"]["draft"]["eventId"]
+        before_deny = existing_post.read_text(encoding="utf-8")
+        denied = _tool_approval({"eventId": denied_id, "decision": "denied"})
+        assert denied["executed"] is False
+        assert existing_post.read_text(encoding="utf-8") == before_deny
+
+        unique_path = Path(root) / "june-review-missing.md"
+        unique_path.write_text(
+            attachment_content + "\n\n失败观察专用段落，确认后目标文件已不存在。",
+            encoding="utf-8",
+        )
+        failed_result = _tools._try_direct_hugo_redeploy_with_attachment(
+            "请重新部署这篇六月复盘文章",
+            [{"path": str(unique_path), "name": "june-review-missing.md"}],
+            messages=[{"role": "user", "content": "请重新部署这篇六月复盘文章"}],
+        )
+        failed_args = failed_result[0][0]["toolEvent"]["draft"]["args"]
+        assert "失败观察专用段落" in failed_args["body"]
+        failed_id = failed_result[0][0]["toolEvent"]["draft"]["eventId"]
+        existing_post.unlink()
+        deploys_before_failure = len(deploy_calls)
+        failed = _tool_approval({"eventId": failed_id, "decision": "approved"})
+        assert failed["executed"] is False
+        assert "文件不存在" in failed["output"]
+        assert len(deploy_calls) == deploys_before_failure
 
 
 def test_try_direct_hugo_redeploy_with_attachment_no_attachment_returns_none():

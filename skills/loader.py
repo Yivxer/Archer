@@ -73,6 +73,17 @@ def _skill_file_has_defs(path: Path) -> bool:
     return "schema" in fn_names and "run" in fn_names
 
 
+def _iter_named_assignments(tree: ast.AST):
+    """Yield module-level names from plain and annotated assignments."""
+    for node in getattr(tree, "body", []):
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    yield target.id, node.value
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and node.value is not None:
+            yield node.target.id, node.value
+
+
 def _meta_from_ast(path: Path) -> SkillMeta | None:
     try:
         tree = ast.parse(path.read_text(encoding="utf-8"))
@@ -81,20 +92,15 @@ def _meta_from_ast(path: Path) -> SkillMeta | None:
 
     skill_dict: dict[str, Any] = {}
     meta_dict: dict[str, Any] = {}
-    for node in tree.body:
-        if not isinstance(node, ast.Assign):
-            continue
-        for target in node.targets:
-            if not isinstance(target, ast.Name):
-                continue
-            if target.id == "SKILL" and isinstance(node.value, ast.Dict):
-                parsed = _ast_literal_to_py(node.value)
-                if isinstance(parsed, dict):
-                    skill_dict = parsed
-            elif target.id == "__meta__" and isinstance(node.value, ast.Dict):
-                parsed = _ast_literal_to_py(node.value)
-                if isinstance(parsed, dict):
-                    meta_dict = parsed
+    for name, value in _iter_named_assignments(tree):
+        if name == "SKILL" and isinstance(value, ast.Dict):
+            parsed = _ast_literal_to_py(value)
+            if isinstance(parsed, dict):
+                skill_dict = parsed
+        elif name == "__meta__" and isinstance(value, ast.Dict):
+            parsed = _ast_literal_to_py(value)
+            if isinstance(parsed, dict):
+                meta_dict = parsed
 
     merged = {**skill_dict, **meta_dict}
     name = str(merged.get("name") or path.stem).strip()
