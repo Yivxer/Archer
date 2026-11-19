@@ -1557,6 +1557,132 @@ class TestApiSkillRouting:
         assert "部署成功" in result["output"]
         assert "已部署《Test》到枫弋札记" in result["output"]
         assert "hugo deploy 已自动执行并验证单页可访问" in result["message"]
+        assert result["followup"] == {"articleSaved": True, "deployed": True, "phase": "saved_and_deployed"}
+
+    def test_hugo_deploy_failure_keeps_saved_article_and_does_not_rewrite(self, monkeypatch):
+        PENDING_TOOL_DRAFTS.clear()
+        writes = []
+        deploys = []
+
+        def fake_execute(request, skills, cfg=None):
+            action = request["args"]["action"]
+            if action == "new":
+                writes.append(dict(request["args"]))
+                return {
+                    "ok": True,
+                    "executed": True,
+                    "summary": "文章已创建",
+                    "output": "created ok",
+                    "metadata": {"filename": "test.md", "createdFile": "/tmp/posts/test.md"},
+                    "policy": {"decision": "allow", "risk": "low", "reason": ""},
+                }
+            deploys.append(dict(request["args"]))
+            return {
+                "ok": False,
+                "executed": False,
+                "summary": "部署失败",
+                "output": "部署失败：连接被拒绝",
+                "policy": {"decision": "allow", "risk": "medium", "reason": ""},
+            }
+
+        def fake_hugo_run(args):
+            deploys.append(dict(args))
+            return "部署失败：连接被拒绝"
+
+        monkeypatch.setattr("core.api_tool_service.execute_tool_request", fake_execute)
+        monkeypatch.setattr("skills.loader.load_skills", lambda: {})
+        monkeypatch.setattr("skills.hugo_blog.run", fake_hugo_run)
+
+        new_args = {
+            "action": "new",
+            "title": "Deploy Fail Fixture",
+            "category": "写作",
+            "description": "desc",
+            "body": "body that must not be published twice",
+        }
+        denied_id = "hugo-deny-before-write"
+        PENDING_TOOL_DRAFTS[denied_id] = {
+            "kind": "tool_request", "eventId": denied_id, "skillName": "hugo_blog", "args": dict(new_args),
+        }
+        denied = _tool_approval({"eventId": denied_id, "decision": "denied"})
+        assert denied["executed"] is False
+        assert writes == []
+        assert deploys == []
+
+        missing = _tool_approval({"eventId": "not-a-card", "decision": "approved"})
+        assert missing["executed"] is False
+        assert writes == []
+
+        event_id = "hugo-save-deploy-fail"
+        PENDING_TOOL_DRAFTS[event_id] = {
+            "kind": "tool_request", "eventId": event_id, "skillName": "hugo_blog", "args": dict(new_args),
+        }
+        failed = _tool_approval({"eventId": event_id, "decision": "approved"})
+        assert failed["executed"] is True
+        assert failed["followup"]["articleSaved"] is True
+        assert failed["followup"]["deployed"] is False
+        assert "文章已保存，部署失败" in failed["output"]
+        assert "文章已保存，部署失败" in failed["message"]
+        assert writes == [new_args]
+        assert deploys == [{"action": "deploy", "filename": "test.md"}]
+
+        repeated = _tool_approval({"eventId": event_id, "decision": "approved"})
+        assert repeated.get("reused") is True
+        assert repeated["executed"] is True
+        assert writes == [new_args]
+        assert len(deploys) == 1
+
+        duplicate_id = "hugo-save-deploy-fail-again"
+        PENDING_TOOL_DRAFTS[duplicate_id] = {
+            "kind": "tool_request", "eventId": duplicate_id, "skillName": "hugo_blog", "args": dict(new_args),
+        }
+        duplicate = _tool_approval({"eventId": duplicate_id, "decision": "approved"})
+        assert duplicate.get("reused") is True
+        assert writes == [new_args]
+        assert len(deploys) == 1
+
+        retry_id = "hugo-deploy-retry"
+        PENDING_TOOL_DRAFTS[retry_id] = {
+            "kind": "tool_request",
+            "eventId": retry_id,
+            "skillName": "hugo_blog",
+            "args": {"action": "deploy", "filename": "test.md"},
+        }
+        retried = _tool_approval({"eventId": retry_id, "decision": "approved"})
+        assert retried["executed"] is False
+        assert "部署失败" in retried["output"]
+        assert writes == [new_args]
+        assert {"action": "deploy", "filename": "test.md"} in deploys
+
+    def test_hugo_write_failure_does_not_deploy(self, monkeypatch):
+        PENDING_TOOL_DRAFTS.clear()
+        deploys = []
+
+        def fake_execute(request, skills, cfg=None):
+            return {
+                "ok": False,
+                "executed": False,
+                "summary": "hugo_blog new 失败",
+                "output": "文件不存在：test.md",
+                "policy": {"decision": "allow", "risk": "low", "reason": ""},
+            }
+
+        monkeypatch.setattr("core.api_tool_service.execute_tool_request", fake_execute)
+        monkeypatch.setattr("skills.loader.load_skills", lambda: {})
+        monkeypatch.setattr("skills.hugo_blog.run", lambda args: deploys.append(args) or "")
+
+        event_id = "hugo-write-fail"
+        PENDING_TOOL_DRAFTS[event_id] = {
+            "kind": "tool_request",
+            "eventId": event_id,
+            "skillName": "hugo_blog",
+            "args": {"action": "new", "title": "Test", "body": "body"},
+        }
+        failed = _tool_approval({"eventId": event_id, "decision": "approved"})
+        assert failed["executed"] is False
+        assert "文件不存在" in failed["output"]
+        assert "followup" not in failed
+        assert deploys == []
 
     def test_tool_approval_denied_uses_cancelled_message(self):
         PENDING_TOOL_DRAFTS.clear()

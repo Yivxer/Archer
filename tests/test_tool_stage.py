@@ -56,6 +56,48 @@ def test_hugo_followup_uses_created_filename():
     )
     assert calls == [{"title": "Post", "deploy_args": {"action": "deploy", "filename": "post.md"}}]
     assert "验证单页可访问" in result.message
+    assert result.executed is True
+    assert result.followup == {"articleSaved": True, "deployed": True, "phase": "saved_and_deployed"}
+
+
+def test_hugo_followup_keeps_saved_article_when_deploy_raises():
+    def explode(**_kwargs):
+        raise RuntimeError("连接被拒绝")
+
+    result = apply_approval_followup(
+        {"kind": "tool_request", "skillName": "hugo_blog", "args": {"action": "new", "title": "Post"}},
+        ApprovalExecution(True, "created", "done", raw_result={"metadata": {"filename": "post.md"}}),
+        deploy=explode,
+    )
+    assert result.executed is True
+    assert result.followup == {"articleSaved": True, "deployed": False, "phase": "saved_deploy_failed"}
+    assert "文章已保存，部署失败" in result.output
+    assert "文章已保存，部署失败" in result.message
+    assert "连接被拒绝" in result.output
+
+
+def test_hugo_followup_keeps_saved_article_when_deploy_text_fails():
+    result = apply_approval_followup(
+        {"kind": "tool_request", "skillName": "hugo_blog", "args": {"action": "edit", "filename": "post.md", "deployAfter": True, "title": "Post"}},
+        ApprovalExecution(True, "updated", "done"),
+        deploy=lambda **_kwargs: ("部署失败：远程拒绝", "枫弋札记工作流失败（deploy）"),
+    )
+    assert result.executed is True
+    assert result.followup["deployed"] is False
+    assert "文章已保存，部署失败" in result.output
+    assert "已自动执行" not in result.message
+
+
+def test_hugo_followup_does_not_deploy_when_write_failed():
+    calls = []
+    result = apply_approval_followup(
+        {"kind": "tool_request", "skillName": "hugo_blog", "args": {"action": "new", "title": "Post"}},
+        ApprovalExecution(False, "文件不存在：post.md", "hugo_blog new 失败"),
+        deploy=lambda **kwargs: (calls.append(kwargs) or "", ""),
+    )
+    assert calls == []
+    assert result.executed is False
+    assert result.followup is None
 
 
 def test_prepare_approval_reuses_idempotent_fingerprint():

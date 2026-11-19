@@ -281,3 +281,56 @@ workflow 级权限是 `contents: read`。没有使用 `pull_request_target`，�
 
 不能说 CI 全绿。必需的 Python job 是红的，原因是上述行数闸门。`permissions: contents: read` 没有让 checkout、Python 安装或 Node 24 安装失败。
 
+文档提交 `ed176f3` 的 PR Check 随后也结束，结论相同：Python 和 Ruff 失败，其余三个 success。https://github.com/Yivxer/Archer/actions/runs/44276506722
+
+## 2026-11-19 第六批：部署失败仍表示文章已保存
+
+推送前核对：本分支与远端都在 `ed176f3`，foundation 仍是 `4673f9af665cc1057d690380253a44f613dfedd6`。没有未取回的外部提交。本机 `a6276479-6e96-49ce-a35c-9fb289ba241e` 报告 connected:false，没有执行 git，不能刷新 HEAD、dirty 或 `_routes.py` 重叠行段。
+
+### executed 的含义
+
+`executed` 来自已批准工具调用的 `ok`。对 hugo 的 new/edit，它表示这篇文章的写入已经完成，不是「写入加部署整体成功」。
+
+两处复用都看它：
+
+- 同一张确认卡再同意，直接返回已缓存的结果，不再执行。
+- 指纹只在 `executed` 为 true 时写入。之后一张参数相同的新卡会复用，不会再写一遍。
+
+所以部署失败时不能把 `executed` 改成 false。那样指纹不会留下，前端再用相同参数重试时会把已保存的文章再写一次。
+
+### 最小实现
+
+`apply_approval_followup` 在写入成功后才部署。部署函数抛异常，或返回文本里有「部署失败 / 工作流失败 / 构建失败 / 部署超时 / 单页验证失败 / 发布失败」时：
+
+- `executed` 仍为 true
+- `followup` 为 `{articleSaved: true, deployed: false, phase: saved_deploy_failed}`
+- `output` 和 `message` 都包含「文章已保存，部署失败」
+
+写入失败时 `executed` 为 false，不调用部署，也没有 `followup`。部署成功时 `followup.deployed` 为 true，原有成功文案保留。拒绝仍是 `executed: false`，不写、不部署。
+
+同一张卡再同意，或相同写入参数的新卡，都复用，写入次数和失败部署次数不变。失败后的重试是另一张 `action=deploy` 的卡，指纹不同，只再尝试部署，不重写文章。
+
+Desktop 现有 Hugo 确认结果在 `executed` 为 true 时展示 `output`。这句话因此出现在对话里，没有改 `types.ts`。设置页审计表仍只显示「已执行」，因为该列就是 `executed`；审计记录的 `message` 带有失败句。
+
+### Ruff
+
+`ed176f3` 的 Ruff job 跑的是 `ruff check . --statistics`，ruff 0.17.5。537 个错误：I001 293、F401 197、F541 20、UP017 13、E401 5、UP024 5、UP012 2、invalid-syntax 1、UP042 1。job 仍是 `continue-on-error`，没有删规则，没有加 noqa，没有全仓 `--fix`。
+
+本 PR 相对 foundation 改过的 Python 文件，当前 76 个（I001 63、F401 11、F541 1、E401 1），这些路径在 foundation 上是 87 个。没有新增违规。`skills/hugo_blog.py` 的 F541 和 `tool_stage.py` 的 I001 在 foundation 的同一位置已经存在。本批不整理这些既有导入顺序。
+
+### `_routes.py` 方案，未改文件
+
+文件仍是 633 行，基线 629。`core/policy.py` 仍是 730。没有调阈值，没有豁免，没有压空白。
+
+有意义的收口候选是把 `payload_get` 里 `/memory/stats` 和 `/memory/groups` 这两段内联查询挪到已有的 memory 路由模块。那是一整块查询职责，大约 46 行，不是为了凑 4 行。旁边的 initiative-shadow 和 job cutover 观察更像本机未推送改动会碰到的区域，不能靠历史 diff 判断。
+
+机器离线，重叠行段未知。因此本批没有改 `terminal/api/_routes.py`，也不能说和本机 `6c0f907` 兼容。
+
+### 实测
+
+同一套隔离前缀，没有私人 `archer.toml`，没有访问网络或博客。
+
+非 journey 全量 47.80s。2126 passed，1 failed，2 skipped。没有测试被 20 秒上限杀掉。唯一失败仍是 `_routes.py` 行数闸门。本批没有改 TypeScript，没有另跑 Desktop types/build。
+
+本批推送后的 Checks 写在 PR 说明里。不再为了把 URL 补进这个文件而多推一次，避免把正在跑的检查冲掉。
+
